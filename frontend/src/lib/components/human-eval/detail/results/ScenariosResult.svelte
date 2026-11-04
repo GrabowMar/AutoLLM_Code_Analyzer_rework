@@ -7,7 +7,7 @@
 	 *
 	 * Props: `result` (ScenariosBlockResult), `section`, `ctx`.
 	 */
-	import StudyFigure from '$lib/components/experiments/study/StudyFigure.svelte';
+	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import type { ScenariosBlockResult } from '$lib/api/human-eval';
 	import { formatScore, formatSeconds, formatShare, plural } from '../../format';
 	import DotCiPlot from './DotCiPlot.svelte';

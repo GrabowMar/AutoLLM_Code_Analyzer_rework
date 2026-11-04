@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   RulePrevalence,
   RunFinding,
-  RunSetup,
+  RunTarget,
   RunToolResult,
 } from "$lib/api/runs";
 import type { SseEvent } from "$lib/api/sse";
@@ -24,8 +24,8 @@ import {
   rulePrevalenceLines,
   runScopeCounts,
   runToolCounts,
-  setupItems,
   sortLevels,
+  targetLines,
   toCsv,
   toolsMeasuredNote,
   truncationNote,
@@ -81,7 +81,7 @@ function finding(
 }
 
 describe("resultState", () => {
-  it("counts a not-applicable skip as measured, other skips and failures as not", () => {
+  it("counts only a completed tool as measured: a not-applicable skip, other skips and failures are not", () => {
     expect(
       resultState(
         result({
@@ -89,7 +89,7 @@ describe("resultState", () => {
           summary: { skip_reason: "not_applicable" },
         }),
       ).measured,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       resultState(
         result({
@@ -199,7 +199,7 @@ describe("run tool counts", () => {
     summary,
   });
 
-  it("counts not-applicable tools as measured, skips without a reading apart", () => {
+  it("never counts not-applicable tools as measured", () => {
     expect(
       runToolCounts(
         run({
@@ -212,7 +212,7 @@ describe("run tool counts", () => {
       ),
     ).toEqual({
       total: 4,
-      measured: 2,
+      measured: 1,
       notApplicable: 1,
       failed: 1,
       unmeasured: 1,
@@ -235,6 +235,15 @@ describe("run tool counts", () => {
     expect(RUN_STATUS_HELP.completed).toMatch(/measured nothing/);
   });
 
+  it("flags a run whose only skips were not applicable as having measured nothing", () => {
+    const counts = runToolCounts(
+      run({ tools_run: 4, tools_completed: 0, tools_not_applicable: 4 }),
+    )!;
+    expect(counts.measured).toBe(0);
+    expect(counts.unmeasured).toBe(0);
+    expect(counts.nothingMeasured).toBe(true);
+  });
+
   it("derives the unmeasured count for older summaries and skips active runs", () => {
     expect(
       runToolCounts(run({ tools_run: 4, tools_completed: 2, tools_failed: 1 }))
@@ -255,8 +264,8 @@ describe("run tool counts", () => {
       }),
     ).toBe("13 not measured");
     expect(
-      toolsMeasuredNote({ total: 4, measured: 2, failed: 1, notApplicable: 1 }),
-    ).toBe("1 failed · 1 not measured · 1 had nothing to read");
+      toolsMeasuredNote({ total: 4, measured: 1, failed: 1, notApplicable: 1 }),
+    ).toBe("1 failed · 1 not measured · 1 had nothing to read (not measured)");
     expect(
       toolsMeasuredNote({ total: 3, measured: 3, failed: 0, notApplicable: 0 }),
     ).toBe("all measured");
@@ -523,69 +532,29 @@ describe("RunWatcher", () => {
 });
 
 describe("run context", () => {
-  const setup: RunSetup = {
-    id: "job-1",
-    mode: "agent",
-    status: "completed",
-    model_pk: 7,
-    model_id: "vendor/model-x",
-    model_name: "Model X",
-    model_slug: "vendor_model-x",
-    app_id: 3,
-    app_slug: "todo",
-    app_name: "Todo",
-    stack_slug: "flask-react",
-    batch_id: null,
-    experiment_id: "exp-1",
-    experiment_name: "Exp one",
-    condition_id: 5,
-    condition_label: "X · opencode",
-    repeat_index: 1,
-    planned_repeats: 2,
-    harness: "opencode",
-    bundle_key: "agent:opencode@1.0",
-    config_fingerprint: "abc",
+  const target: RunTarget = {
+    kind: "run",
+    label: "Todo",
+    job_id: "run-1",
+    model_name: "vendor/model-x",
+    task_title: "Todo list",
+    task_slug: "todo",
+    task_ref: "todo@1",
+    stack_ref: "flask-react@2",
   };
 
-  it("builds the setup line: cell, then method, linking experiment, model and app", () => {
-    const { cell, method } = setupItems(setup);
-    expect(cell.map((i) => i.label)).toEqual([
-      "Exp one",
-      "X · opencode",
-      "repeat 2/2",
-    ]);
-    expect(cell[0].href).toBe("/experiments/exp-1");
-    expect(method.map((i) => i.label)).toEqual(["Model X", "opencode", "Todo"]);
-    expect(method[0].href).toBe("/models/vendor_model-x");
-    expect(method[2].href).toBe("/applications/job-1");
-  });
-
-  it("leaves out what a job does not have and flags repeats beyond the plan", () => {
-    const adhoc = setupItems({
-      ...setup,
-      experiment_id: null,
-      experiment_name: "",
-      condition_label: "",
-      repeat_index: null,
-      planned_repeats: null,
-      harness: null,
-      model_slug: "",
-      mode: "scaffolding",
-      bundle_key: "flask-react@2",
-    });
-    expect(adhoc.cell).toEqual([]);
-    expect(adhoc.method.map((i) => i.label)).toEqual([
-      "Model X",
+  it("titles a generated run by its task, with model and stack below", () => {
+    const t = targetLines(target);
+    expect(t.title).toBe("Todo list");
+    expect(t.sub).toContain("flask-react@2");
+    expect(targetLines({ ...target, task_title: undefined }).title).toBe(
       "flask-react@2",
-      "Todo",
-    ]);
-    expect(adhoc.method[0].href).toBe("/models/vendor_model-x");
-    expect(setupItems({ ...setup, repeat_index: 2 }).cell[2].label).toBe(
-      "repeat 3 (beyond the 2 planned)",
     );
-    expect(setupItems({ ...setup, planned_repeats: null }).cell[2].label).toBe(
-      "repeat 2",
-    );
+    expect(targetLines({ kind: "code", label: "pasted.py" })).toEqual({
+      title: "pasted.py",
+      sub: "",
+    });
+    expect(targetLines(null).title).toBe("—");
   });
 
   const row = (over: Partial<RulePrevalence> = {}): RulePrevalence => ({

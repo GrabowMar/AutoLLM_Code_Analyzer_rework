@@ -1,0 +1,1 @@
+Authentication: POST /api/auth/register {username, password} returns 201; POST /api/auth/login returns 200 {token}; authenticated requests send "Authorization: Bearer <token>". The admin account is "admin" with the password from the environment variable ADMIN_PASSWORD; when it is unset, admin login is disabled.

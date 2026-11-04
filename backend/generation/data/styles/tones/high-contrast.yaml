@@ -1,0 +1,3 @@
+# Tone catalogue entry (not a library entity). A style with this tone copies `tone` (the slug) and `tone_text`.
+{name: High contrast, description: 'Visual tone preset: high contrast.', tone_text: 'High contrast: black and white
+    with one strong accent, large text, thick focus outlines and visible link underlines.'}

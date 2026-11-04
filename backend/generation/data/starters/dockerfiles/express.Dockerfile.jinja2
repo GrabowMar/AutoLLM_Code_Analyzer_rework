@@ -1,0 +1,24 @@
+{# Express (TypeScript, run by Node.js 24 directly): backend/ + the optional frontend build. #}
+{% include "dockerfiles/_frontend_stage.Dockerfile.jinja2" %}
+FROM {{ base.node }}
+ENV NODE_ENV=production \
+    PORT={{ run.port }}
+WORKDIR /app
+{% if level == "bare" %}
+COPY . .
+RUN if [ -f backend/package.json ]; then \
+      cd backend \
+      && if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi; \
+    fi
+{% else %}
+COPY backend/package.json backend/package-lock.json* backend/
+RUN cd backend \
+    && if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+COPY backend/ backend/
+{% endif %}
+{% if has_frontend %}
+COPY --from=frontend /app/frontend/dist frontend/dist
+{% endif %}
+RUN mkdir -p data
+EXPOSE {{ run.port }}
+CMD ["node", "backend/src/server.ts"]

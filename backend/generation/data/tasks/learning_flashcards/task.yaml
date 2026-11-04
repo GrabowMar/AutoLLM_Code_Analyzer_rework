@@ -1,0 +1,259 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Flashcards
+summary: Write flashcards in shared decks and study them with per-user spaced-repetition progress.
+category: education
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Flashcard
+  fields:
+  - {name: question, type: string, required: true, max_length: 500}
+  - {name: answer, type: string, required: true, max_length: 2000}
+  - {name: deck, type: string, max_length: 100}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+- name: CardProgress
+  fields:
+  - {name: box, type: int, min: 1, max: 5, default: 1}
+  - {name: correct_count, type: int, default: 0}
+  - {name: incorrect_count, type: int, default: 0}
+  - {name: last_studied_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: cards.list
+  method: GET
+  path: /api/flashcards
+  auth: public
+  query:
+  - {name: q, type: string, semantics: search}
+  - {name: deck, type: string, semantics: filter}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, question, answer, author]
+          properties:
+            id:
+              type: [integer, string]
+            question: {type: string, maxLength: 500, minLength: 1}
+            answer: {type: string, maxLength: 2000, minLength: 1}
+            deck:
+              type: [string, 'null']
+              maxLength: 100
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            author: {type: string}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: cards.create
+  method: POST
+  path: /api/flashcards
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      question: {type: string, maxLength: 500, minLength: 1}
+      answer: {type: string, maxLength: 2000, minLength: 1}
+      deck:
+        type: [string, 'null']
+        maxLength: 100
+    required: [question, answer]
+  response_schema:
+    type: object
+    required: [id, question, answer, author]
+    properties:
+      id:
+        type: [integer, string]
+      question: {type: string, maxLength: 500, minLength: 1}
+      answer: {type: string, maxLength: 2000, minLength: 1}
+      deck:
+        type: [string, 'null']
+        maxLength: 100
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      author: {type: string}
+  errors: [400]
+- id: cards.get
+  method: GET
+  path: /api/flashcards/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, question, answer, author]
+    properties:
+      id:
+        type: [integer, string]
+      question: {type: string, maxLength: 500, minLength: 1}
+      answer: {type: string, maxLength: 2000, minLength: 1}
+      deck:
+        type: [string, 'null']
+        maxLength: 100
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      author: {type: string}
+  errors: [404]
+- id: cards.replace
+  method: PUT
+  path: /api/flashcards/{id}
+  auth: owner
+  owner_entity: Flashcard
+  request_schema:
+    type: object
+    properties:
+      question: {type: string, maxLength: 500, minLength: 1}
+      answer: {type: string, maxLength: 2000, minLength: 1}
+      deck:
+        type: [string, 'null']
+        maxLength: 100
+    required: [question, answer]
+  response_schema:
+    type: object
+    required: [id, question, answer, author]
+    properties:
+      id:
+        type: [integer, string]
+      question: {type: string, maxLength: 500, minLength: 1}
+      answer: {type: string, maxLength: 2000, minLength: 1}
+      deck:
+        type: [string, 'null']
+        maxLength: 100
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      author: {type: string}
+  errors: [400, 403, 404]
+- id: cards.delete
+  method: DELETE
+  path: /api/flashcards/{id}
+  auth: owner
+  owner_entity: Flashcard
+  success_status: 204
+  errors: [403, 404]
+- id: cards.answer
+  method: POST
+  path: /api/flashcards/{id}/answers
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      correct: {type: boolean}
+    required: [correct]
+  response_schema:
+    type: object
+    required: [id, flashcard_id]
+    properties:
+      id:
+        type: [integer, string]
+      box:
+        type: [integer, 'null']
+        minimum: 1
+        maximum: 5
+      correct_count:
+        type: [integer, 'null']
+      incorrect_count:
+        type: [integer, 'null']
+      last_studied_at:
+        type: [string, 'null']
+        format: date-time
+      flashcard_id: [integer, string]
+  errors: [400, 404]
+- id: decks.list
+  method: GET
+  path: /api/decks
+  auth: public
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            card_count: {type: integer}
+          required: [name, card_count]
+- id: study.queue
+  method: GET
+  path: /api/study
+  auth: user
+  query:
+  - {name: deck, type: string, semantics: filter}
+  - {name: limit, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            card: {type: object}
+            progress: {type: object}
+          required: [card, progress]
+      total: {type: integer}
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.browse
+  text: A card list with a search box, a deck filter and paging; decks with their card counts.
+  endpoints: [cards.list, decks.list]
+- id: ui.study
+  text: A study view that shows one card's question, reveals the answer on click, and offers 'I knew it' and 'I
+    didn't' buttons.
+  endpoints: [study.queue, cards.answer]
+- id: ui.manage
+  text: Forms to add and edit the user's own cards with the API's validation messages; delete with confirmation.
+  endpoints: [cards.create, cards.replace, cards.delete]
+features: [auth, ownership, search, filter, pagination]
+surfaces: [cwe-639, cwe-862, cwe-89, cwe-79, cwe-20]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+probes:
+- id: probe.cards.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: cards.list
+  params: {param: q}
+- id: probe.cards.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: cards.create
+  params: {field: answer, view_endpoint: cards.get}

@@ -1,11 +1,10 @@
 """Typed validation and layered merging of OpenRouter sampling parameters.
 
-One vocabulary for every place LLM behavior can be configured:
-profile ``llm_config`` → experiment ``llm_defaults`` → condition
-``param_overrides`` → per-run ``llm_params`` (later layers win). The merged
-result is frozen into the job snapshot's ``llm`` section, and every key here
-enters ``run_fingerprint`` — but never ``prompt_hash``, which groups runs
-across sampling variations on purpose.
+One vocabulary for every place LLM behavior can be configured: the
+``SamplingPreset`` content and any study-level overrides (later layers win).
+The merged result is frozen into the run manifest's ``sampling`` section, and
+every key here enters ``run_fingerprint`` — but never ``prompt_hash``, which
+groups runs across sampling variations on purpose.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from typing import Any
 
 # Every sampling/behavior key forwarded to OpenRouter. Provenance keys
 # (model_slug, pricing, context_window, ...) live alongside these in the
-# snapshot's llm section but are not user-settable.
+# manifest but are not user-settable.
 SAMPLING_KEYS = (
     "temperature",
     "top_p",

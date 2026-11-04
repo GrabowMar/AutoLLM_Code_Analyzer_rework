@@ -93,7 +93,7 @@
 	const onRestart = () =>
 		container && doAction('restart', () => restartContainer(container!.id), 'Container restarting');
 	// Remove and rebuild both discard the current container: confirm first.
-	let confirmAction = $state<'remove' | 'rebuild' | null>(null);
+	let confirmAction = $state<'remove' | 'rebuild' | 'refresh' | null>(null);
 	let confirmOpen = $state(false);
 	const onRemove = () => {
 		if (!container) return;
@@ -105,21 +105,26 @@
 		confirmAction = 'rebuild';
 		confirmOpen = true;
 	};
+	const onRefreshDependencies = () => {
+		if (!container) return;
+		confirmAction = 'refresh';
+		confirmOpen = true;
+	};
 	function runConfirmed() {
 		const action = confirmAction;
 		confirmOpen = false;
 		if (action === 'remove' && container) {
 			doAction('remove', () => removeContainer(container!.id), 'Container removed');
-		} else if (action === 'rebuild') {
-			rebuild();
+		} else if (action === 'rebuild' || action === 'refresh') {
+			rebuild(action === 'refresh');
 		}
 	}
-	async function rebuild() {
+	async function rebuild(forceRebuild = false) {
 		if (!container) return;
 		busy = 'rebuild';
 		try {
 			await removeContainer(container.id);
-			await buildContainerForJob(jobId);
+			await buildContainerForJob(jobId, forceRebuild);
 			toast.success('Rebuild started');
 			await refresh(true);
 		} catch (e) {
@@ -215,6 +220,17 @@
 			<Button
 				variant="outline"
 				size={btnSize}
+				onclick={onRefreshDependencies}
+				disabled={!!busy || !canBuild}
+				title="Rebuild with refreshed dependencies"
+				aria-label="Rebuild with refreshed dependencies"
+			>
+				<Hammer class="{iconCls} {showLabels ? 'sm:mr-1.5' : ''}" />
+				{#if showLabels}<span class="hidden sm:inline">Refresh dependencies</span>{/if}
+			</Button>
+			<Button
+				variant="outline"
+				size={btnSize}
 				onclick={onRemove}
 				disabled={!!busy}
 				class="border-destructive/30 text-destructive hover:bg-destructive/10"
@@ -230,11 +246,13 @@
 
 <ConfirmDialog
 	bind:open={confirmOpen}
-	title={confirmAction === 'rebuild' ? 'Rebuild the container?' : 'Remove this container?'}
-	description={confirmAction === 'rebuild'
+	title={confirmAction === 'refresh' ? 'Rebuild with refreshed dependencies?' : confirmAction === 'rebuild' ? 'Rebuild the container?' : 'Remove this container?'}
+	description={confirmAction === 'refresh'
+		? 'Replaces this container and refreshes its dependency installation. Data stored inside the current container is discarded.'
+		: confirmAction === 'rebuild'
 		? 'Removes the failed container and starts a fresh build.'
 		: 'Stops and removes the container. The generated code is kept.'}
-	confirmLabel={confirmAction === 'rebuild' ? 'Rebuild' : 'Remove container'}
+	confirmLabel={confirmAction === 'refresh' ? 'Refresh and rebuild' : confirmAction === 'rebuild' ? 'Rebuild' : 'Remove container'}
 	destructive
 	onConfirm={runConfirmed}
 />

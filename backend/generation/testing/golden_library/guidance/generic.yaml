@@ -1,0 +1,5 @@
+name: Generic security hint
+description: One sentence asking for secure code.
+content:
+  security_hint: generic
+  fragment: guidance-generic@1

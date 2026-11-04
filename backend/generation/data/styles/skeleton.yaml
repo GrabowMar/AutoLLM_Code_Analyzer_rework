@@ -1,0 +1,12 @@
+name: Skeleton (Svelte)
+description: The Skeleton UI toolkit for Svelte, on Tailwind CSS.
+content:
+  system: component-library
+  library:
+    name: Skeleton
+    packages: ['@skeletonlabs/skeleton', tailwindcss]
+    frameworks: [svelte]
+  fragment: style-skeleton@1
+  adherence:
+    required_markers: ['@skeletonlabs/skeleton']
+  compatible_frontends: [svelte]

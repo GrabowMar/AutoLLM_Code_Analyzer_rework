@@ -1,0 +1,8 @@
+{
+  "per_role": [
+    {
+      "role": "brief",
+      "unified": "--- a/brief\n+++ b/brief\n@@ -1,15 +1,9 @@\n # Task: Todo list\n \n-Build a todo list app with a JSON API under `/api` and a web frontend.\n+Build a todo list app. Users register and log in, then add, edit, search and delete their todos.\n \n-- `POST /api/auth/register` creates an account from a username and a password.\n-- `POST /api/auth/login` returns a token; the other endpoints require it as a bearer token.\n-- `GET /api/todos` lists the user's todos as `{\"items\": [...]}`; `q` searches the titles.\n-- `POST /api/todos` adds a todo with a title.\n-- `PATCH /api/todos/{id}` changes the title or marks the todo done.\n-- `DELETE /api/todos/{id}` removes a todo.\n-\n-Each user sees and changes only their own todos.\n+Endpoints: POST /api/auth/register, POST /api/auth/login, GET /api/todos, POST /api/todos,\n+PATCH /api/todos/{id}, DELETE /api/todos/{id}.\n \n Use Flask (Python 3.13) for the API and React built with Vite for the frontend. Store data in SQLite under ./data.\n Style the frontend with Tailwind CSS utility classes.\n"
+    }
+  ]
+}

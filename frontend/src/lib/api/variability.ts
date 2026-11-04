@@ -1,11 +1,13 @@
 /**
  * Run-to-run variability API: how much repeats of one setup differ.
  *
- * - `GET /generation/experiments/{id}/variability/` — the Results tab's
- *   "Run-to-run variation" section (same kept cells and query options as
- *   `/results/`; `?format=csv` gives one row per cell).
- * - `GET /generation/jobs/{id}/replicates/` — contract C3: every visible job
- *   sharing the job's configuration fingerprint (or an approximate legacy key).
+ * - `GET /generation/studies/{id}/variability/` — the study Results section
+ *   "Run-to-run variation", over the main-stage current runs (usable only, the
+ *   majority `config_fingerprint` per cell, common cells; intention-to-treat by
+ *   default, `sensitivity=exclude_truncated` as the sensitivity analysis);
+ *   `?format=csv` gives one row per (condition, task) cell.
+ * - `GET /generation/runs/{id}/replicates/` — every visible run sharing the
+ *   run's `config_fingerprint`.
  * - `GET /generation/models/{id}/variability/` — within-group spread over a
  *   model's same-setup groups.
  *
@@ -78,13 +80,16 @@ export interface DispersionRow {
   median_cv: number | null;
   /** Every measured run has the same value (ceiling / floor). */
   ceiling: boolean;
+  /** Set when the metric is a billing artefact (e.g. $0 on a subscription endpoint), never a floor. */
+  billing?: string | null;
 }
 
 export interface VariabilityCondition {
   condition_id: number;
   label: string;
   model: string;
-  n_apps: number;
+  /** Tasks (units) of this condition. */
+  n_units: number;
   n_cells: number;
   n_runs: number;
   cells_with_repeats: number;
@@ -93,6 +98,7 @@ export interface VariabilityCondition {
   dispersion: Record<string, DispersionRow>;
 }
 
+/** Pairwise code similarity over model-scope, non-test source files. */
 export interface PairSummary {
   n_pairs: number;
   median_shingle_jaccard: number | null;
@@ -100,12 +106,11 @@ export interface PairSummary {
   median_path_jaccard: number | null;
   median_ast_jaccard: number | null;
   median_identical_files: number | null;
-  approximate: boolean;
 }
 
 export interface SimilarityPair {
-  job_a: string;
-  job_b: string;
+  run_a: string;
+  run_b: string;
   path_jaccard: number | null;
   identical_files: number | null;
   line_jaccard: number | null;
@@ -113,7 +118,6 @@ export interface SimilarityPair {
   ast_jaccard: number | null;
   files_a: number;
   files_b: number;
-  approximate: boolean;
 }
 
 export interface CellChecks {
@@ -122,19 +126,26 @@ export interface CellChecks {
   n_checks?: number;
   disagree?: string[];
   all_agree?: boolean;
+  /** Check category per disagreeing check. */
+  categories?: Record<string, string>;
 }
 
+/** One (condition, task) cell of kept repeats. */
 export interface VariabilityCell {
   condition_id: number;
-  app_id: number;
-  app_slug: string;
-  app_name: string;
+  /** `task:<slug>@<v>`. */
+  unit_key: string;
+  /** Task slug and title. */
+  task: string;
+  task_title: string;
   n: number;
-  job_ids: string[];
+  run_ids: string[];
   repeat_indexes: number[];
-  /** Per metric, one value per repeat (aligned with `job_ids`; null = unmeasured). */
+  /** Per metric, one value per repeat (aligned with `run_ids`; null = unmeasured). */
   values: Record<string, (number | null)[]>;
   stats: Record<string, DescribeStats>;
+  /** Repeats with a known pass/fail verdict (a measured evaluation). */
+  n_pass_known: number;
   k_passed: number;
   pass_agree: boolean | null;
   deploy_agree: boolean | null;
@@ -198,6 +209,16 @@ export interface IccRow {
   interim: boolean;
 }
 
+/** Which current runs were kept, and why the others were left out (attrition, never silent). */
+export interface VariabilitySelection {
+  current_runs: number;
+  not_usable: number;
+  excluded_fingerprint: number;
+  excluded_truncated: number;
+  outside_common_cells: number;
+  kept: number;
+}
+
 export interface PassAtK {
   k: number;
   n_cells: number;
@@ -244,21 +265,27 @@ export interface PlannerMetric {
   rows: PlannerRow[];
 }
 
-export interface ExperimentVariability {
-  experiment_id: string;
+export interface StudyVariability {
+  study_id: string;
   status: string;
+  /** `exploratory` | `confirmatory`. */
+  kind: string;
+  /** The study is still running: every block is interim and the planner is withheld. */
   interim: boolean;
   generated_at: string;
   filters: {
-    exclude_invalid: boolean;
-    exclude_truncated: boolean;
-    common_cells: boolean;
-    fingerprint: string;
+    stage: "main";
+    fingerprint: VariabilityFingerprint;
+    sensitivity: VariabilitySensitivity | null;
+    /** Intention-to-treat (truncated runs kept); false under the exclude-truncated sensitivity. */
+    itt: boolean;
     planned_only: boolean;
+    common_cells: boolean;
   };
+  selection: VariabilitySelection;
   design: {
     n_conditions: number;
-    n_apps: number;
+    n_units: number;
     n_cells: number;
     n_runs: number;
     cells_with_repeats: number;
@@ -337,77 +364,93 @@ export interface ExperimentVariability {
     basis: string;
   } | null;
   planner_reason: string | null;
-  issue_coverage: {
-    apps_measured: number;
-    tools_common: string[];
-    tools_partial: string[];
-  } | null;
+  issue_coverage: IssueCoverage | null;
   ceilings: string[];
+  /** Metrics whose values are billing artefacts (subscription endpoints), with the sources. */
+  billing: {
+    sources: string[];
+    n_runs: number;
+    n_kept: number;
+    metrics: string[];
+  } | null;
   notes: string[];
 }
 
-/** The Results tab's analysis options (the kept cells match `/results/`). */
+export type VariabilityFingerprint = "all" | "majority";
+export type VariabilitySensitivity = "exclude_truncated";
+
+/**
+ * The study variability options: `fingerprint` (default `majority`: the majority config
+ * fingerprint per cell) and the optional `sensitivity` (default: intention-to-treat).
+ */
 export interface VariabilityQuery {
-  exclude_invalid?: boolean;
-  exclude_truncated?: boolean;
-  common_cells?: boolean;
-  fingerprint?: "all" | "majority";
-  planned_only?: boolean;
+  fingerprint?: VariabilityFingerprint;
+  sensitivity?: VariabilitySensitivity | null;
 }
 
-function variabilityQuery(
+/** The query string of a variability request (exported for tests). */
+export function variabilityQuery(
   q: VariabilityQuery,
   extra: Record<string, string> = {},
 ): string {
   return query({
-    exclude_invalid: q.exclude_invalid,
-    exclude_truncated: q.exclude_truncated,
-    common_cells: q.common_cells,
     fingerprint: q.fingerprint,
-    planned_only: q.planned_only,
+    sensitivity: q.sensitivity,
     ...extra,
   });
 }
 
-export async function getExperimentVariability(
-  experimentId: string,
+export async function getStudyVariability(
+  studyId: string,
   q: VariabilityQuery = {},
   options: FetchOptions = {},
-): Promise<ExperimentVariability> {
+): Promise<StudyVariability> {
   const res = await apiFetch(
-    `/generation/experiments/${experimentId}/variability/${variabilityQuery(q)}`,
+    `/generation/studies/${studyId}/variability/${variabilityQuery(q)}`,
     { signal: options.signal },
   );
   return res.json();
 }
 
-/** The per-cell CSV (one row per condition × app) as a Blob. */
-export async function downloadExperimentVariabilityCsv(
-  experimentId: string,
+/** The per-cell CSV (one row per condition × task) as a Blob. */
+export async function downloadStudyVariabilityCsv(
+  studyId: string,
   q: VariabilityQuery = {},
 ): Promise<Blob> {
   const res = await apiFetch(
-    `/generation/experiments/${experimentId}/variability/${variabilityQuery(q, { format: "csv" })}`,
+    `/generation/studies/${studyId}/variability/${variabilityQuery(q, { format: "csv" })}`,
   );
   return new Blob([await res.text()], { type: "text/csv" });
 }
 
-// ── same setup (contract C3) ──────────────────────────────────────────
+// ── same setup (one config fingerprint) ───────────────────────────────
 
-export type ReplicateRelation = "self" | "replicate" | "replay" | "rerun";
+/**
+ * `self`; `retry` (same cell); `replay` (same `run_fingerprint`); `rerun` (ad hoc, beyond plan,
+ * or not its cell's current run); `replicate`.
+ */
+export type ReplicateRelation =
+  | "self"
+  | "retry"
+  | "replicate"
+  | "replay"
+  | "rerun";
 
 export interface ReplicateMember {
-  job_id: string;
+  run_id: string;
   is_self: boolean;
   relation: ReplicateRelation;
   seed: number | null;
   repeat_index: number | null;
-  experiment_id: string | null;
-  experiment_name: string | null;
+  cell_attempt: number | null;
+  beyond_plan: boolean;
+  study_id: string | null;
+  study_name: string | null;
   condition_label: string | null;
-  batch_id: string | null;
   created_at: string;
   status: string;
+  outcome: string | null;
+  usable: boolean | null;
   pass_rate: number | null;
   source_loc: number | null;
   source_files: number | null;
@@ -416,6 +459,7 @@ export interface ReplicateMember {
   llm_calls: number | null;
   wall_seconds: number | null;
   termination: string | null;
+  truncated: boolean;
   code_issues: number | null;
   issues_per_kloc: number | null;
   findings_measured: boolean;
@@ -424,13 +468,13 @@ export interface ReplicateMember {
     shingle_jaccard: number | null;
     line_jaccard?: number | null;
     identical_files?: number | null;
-    approximate?: boolean;
   } | null;
 }
 
-/** Where a seeded replay's LLM calls first differ from this run's. */
+/** Where a replay's or retry's LLM calls first differ from this run's. */
 export interface DeterminismProbe {
-  job_id: string;
+  run_id: string;
+  relation: ReplicateRelation;
   comparable: boolean;
   first_divergent_call: number | null;
   identical_first_response: boolean | null;
@@ -443,25 +487,32 @@ export interface DeterminismProbe {
   basis: string;
 }
 
-export interface JobReplicates {
-  job_id: string;
+export interface IssueCoverage {
+  apps_measured: number;
+  tools_common: string[];
+  tools_partial: string[];
+}
+
+export interface RunReplicates {
+  run_id: string;
+  /** `key` is null for a run without a config fingerprint (it is then its own group). */
   grouping: {
-    key: "config_fingerprint" | "approximate" | null;
+    key: "config_fingerprint" | null;
     value: string | null;
-    approximate: boolean;
   };
   n: number;
   members: ReplicateMember[];
   summary: Record<string, SummaryStats>;
   notes: string[];
-  determinism?: DeterminismProbe[];
+  determinism: DeterminismProbe[];
+  issue_coverage: IssueCoverage | null;
 }
 
-export async function getJobReplicates(
-  jobId: string,
+export async function getRunReplicates(
+  runId: string,
   options: FetchOptions = {},
-): Promise<JobReplicates> {
-  const res = await apiFetch(`/generation/jobs/${jobId}/replicates/`, {
+): Promise<RunReplicates> {
+  const res = await apiFetch(`/generation/runs/${runId}/replicates/`, {
     signal: options.signal,
   });
   return res.json();
@@ -470,21 +521,27 @@ export async function getJobReplicates(
 // ── model ─────────────────────────────────────────────────────────────
 
 export interface ModelVariabilityGroup {
-  key: "config_fingerprint" | "approximate";
+  key: "config_fingerprint";
   value: string;
-  approximate: boolean;
   n: number;
-  app_slug: string | null;
-  method: string;
-  mode: string;
-  experiments: string[];
-  job_ids: string[];
+  /** Pinned task ref (`slug@v`). */
+  task: string | null;
+  unit_key: string | null;
+  /** Run kind. */
+  kind: string;
+  /** Pinned stack profile ref. */
+  stack: string | null;
+  /** `[name, version]` from the manifest. */
+  harness: [string, string] | null;
+  /** Names of the studies the runs belong to. */
+  studies: string[];
+  run_ids: string[];
   pass: { n: number; passed: number; agree: boolean | null };
   stats: Record<string, Pick<DescribeStats, "n" | "mean" | "sd" | "cv">>;
   similarity: { n_pairs: number; median_shingle_jaccard: number | null };
   replays: {
-    job_a: string;
-    job_b: string;
+    run_a: string;
+    run_b: string;
     first_divergent_call: number | null;
   }[];
 }
@@ -494,7 +551,7 @@ export interface ModelVariability {
   model_name: string;
   n_groups: number;
   n_runs: number;
-  n_completed_jobs: number;
+  n_completed_runs: number;
   overall: {
     metrics: Record<
       string,

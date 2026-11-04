@@ -1,0 +1,8 @@
+{% extends "dockerfiles/_python.Dockerfile.jinja2" %}
+{% block command %}
+{% if level == "bare" %}
+CMD ["python", "backend/app.py"]
+{% else %}
+CMD ["gunicorn", "--bind", "0.0.0.0:{{ run.port }}", "--pythonpath", "backend", "app:app"]
+{% endif %}
+{% endblock %}

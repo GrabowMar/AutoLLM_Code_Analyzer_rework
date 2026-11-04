@@ -6,13 +6,13 @@ build, start, stop or reset that container and what participants and the
 researcher are told about it. Rules (spec §5.11, R1, R3.2, R3.8):
 
 - **DB-only inside a request.** Container work goes through
-  ``transaction.on_commit``: ``container_service.build_for_job / start_instance /
+  ``transaction.on_commit``: ``container_service.build_for_job (a GenerationRun) / start_instance /
   stop_instance / remove_instance`` (each runs its Docker work in its own daemon
   thread), and the per-assignment reset runs in a ``dispatch_in_thread`` worker.
   Info functions (``participant_hosting_info``, ``researcher_hosting_info``,
   ``environment_info``) never write.
 - **Container resolution** (:func:`current_container`): the FK unless removed or
-  failed, else the newest ``llm-*`` container of the job (running ones first);
+  failed, else the newest ``llm-*`` container of the run (running ones first);
   ``ensure_running`` adopts it (``started_by_task=False`` until the task starts it).
 - **Capacity.** Slots are DISTINCT containers that are running, building, pending
   (fresh, or with an in-flight marker) or have a start in flight, plus apps with an
@@ -231,13 +231,13 @@ def _user(user_id: int | None) -> Any:
     return User.objects.filter(pk=user_id).first()
 
 
-def _has_code(job: Any) -> bool:
-    """Whether the job produced code a runtime build can use (agent ``files`` or scaffolding blobs)."""
-    data = job.result_data if job is not None and isinstance(job.result_data, dict) else {}
-    files = data.get("files")
-    if isinstance(files, dict) and any(isinstance(text, str) and text for text in files.values()):
-        return True
-    return any(isinstance(data.get(key), str) and data[key].strip() for key in ("backend_code", "frontend_code"))
+def _has_code(run: Any) -> bool:
+    """Whether the run has a collected app tree a runtime build can use (``RunView.files("app")``)."""
+    if run is None:
+        return False
+    from backend.generation.runs.view import run_view
+
+    return bool(run_view(run).files("app"))
 
 
 def _capacity_lock() -> None:
@@ -270,8 +270,8 @@ def _job_containers(job_id: Any, exclude: Iterable[Any] = ()) -> Any:
 def current_container(task_app: EvalTaskApp, *, exclude: Iterable[Any] = ()) -> ContainerInstance | None:
     """The app's current ``ContainerInstance`` (DB-only).
 
-    The FK unless it is removed or failed, else the newest ``llm-*`` container of the job in
-    running/stopped/building/pending (running ones first). A RUNNING container of the job is
+    The FK unless it is removed or failed, else the newest ``llm-*`` container of the run in
+    running/stopped/building/pending (running ones first). A RUNNING container of the run is
     preferred over a STOPPED FK, so a running copy is never started twice (a building/pending FK
     always wins: it is a rebuild in progress). ``exclude`` skips containers.
     """
@@ -615,14 +615,14 @@ def _evict_one(task: EvalTask | None, exclude_app: EvalTaskApp, now: datetime, s
 # ---------------------------------------------------------------------------
 
 
-def _build_callback(app_id: Any, job_id: Any, user_id: int | None) -> None:
-    from backend.generation.models import GenerationJob
+def _build_callback(app_id: Any, run_id: Any, user_id: int | None) -> None:
+    from backend.generation.models import GenerationRun
 
     if not EvalTaskApp.objects.filter(pk=app_id).exists():
         return  # deleted (task deleted, app removed) before its build was dispatched
     try:
-        job = GenerationJob.objects.get(pk=job_id)
-        container = container_service.build_for_job(job, _user(user_id))
+        run = GenerationRun.objects.get(pk=run_id)
+        container = container_service.build_for_job(run, _user(user_id))
     except Exception as exc:
         logger.exception("human_eval: build of app %s could not be dispatched", app_id)
         EvalTaskApp.objects.filter(pk=app_id).update(hosting_error=_error_text(exc), start_dispatched_at=None)
@@ -1051,8 +1051,8 @@ def _ensure_locked(  # noqa: PLR0911
     if container is not None and _stuck(container, task_app, now):
         container = None
     if container is not None and task_app.container_id != container.pk:
-        # Adopt the job's existing container; it only counts as task-started once this task starts it. A marker
-        # left while waiting for another task's build of this job is done with.
+        # Adopt the run's existing container; it only counts as task-started once this task starts it. A marker
+        # left while waiting for another task's build of this run is done with.
         task_app.container = container
         task_app.started_by_task = False
         task_app.start_dispatched_at = None
@@ -1097,7 +1097,7 @@ def _ensure_locked(  # noqa: PLR0911
             .exists()
         )
         if building_elsewhere:
-            # Another task is already building this job: wait for its container (adopted on the next call).
+            # Another task is already building this run: wait for its container (adopted on the next call).
             task_app.start_dispatched_at = now
             _save(task_app, "start_dispatched_at")
             return "in_flight"
@@ -1209,7 +1209,7 @@ def _stop_locked(task_app: EvalTaskApp, *, user_id: int | None, force: bool, now
     """Dispatch a stop of the app's running container; returns whether one was dispatched.
 
     Without ``force`` only the app's own FK container is stopped, and only while the task owns its run:
-    another running ``llm-*`` container of the job that :func:`current_container` prefers was never
+    another running ``llm-*`` container of the run that :func:`current_container` prefers was never
     started by this task.
     """
     if task_app.hosting_requested_at is not None:
@@ -1376,7 +1376,7 @@ def release_apps(task_apps: Iterable[EvalTaskApp]) -> int:
         for task_app in apps:
             container = task_app.container if task_app.container_id else None
             # FK-less marker: a build being dispatched (its callback finds the app gone) or a wait for
-            # another task's build of the job (not this task's container).
+            # another task's build of the run (not this task's container).
             if container is None or container.pk in seen:
                 continue
             if not (task_app.started_by_task or _marker_on(task_app, now)):
@@ -1569,7 +1569,7 @@ def app_hosting_action(task_app: EvalTaskApp, action: str, *, user: Any) -> dict
     - stop: unpin and stop even if not task-started (force);
     - rebuild: remove the current container (on_commit) and build a new one; 409 ``shared_container``
       when another open task is using it, 409 ``hosting_busy`` while a build/start/stop/reset is in
-      flight, 409 ``no_code`` when the job has no code.
+      flight, 409 ``no_code`` when the run has no code.
     """
     task = task_app.task
     if action == "start":

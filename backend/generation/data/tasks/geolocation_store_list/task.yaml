@@ -1,0 +1,213 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Store finder
+summary: Browse a directory of store locations and find the ones nearest to you.
+category: geolocation
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Store
+  fields:
+  - {name: name, type: string, required: true, max_length: 100}
+  - {name: address, type: string, required: true, max_length: 255}
+  - {name: phone, type: string, max_length: 30}
+  - {name: latitude, type: float, required: true, min: -90, max: 90}
+  - {name: longitude, type: float, required: true, min: -180, max: 180}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: stores.list
+  method: GET
+  path: /api/stores
+  auth: public
+  query:
+  - {name: q, type: string, semantics: search}
+  - {name: lat, type: float, semantics: filter}
+  - {name: lng, type: float, semantics: filter}
+  - {name: radius, type: float, semantics: filter, default: 25, max: 500}
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, name, address, latitude, longitude, distance_km]
+          properties:
+            id:
+              type: [integer, string]
+            name: {type: string, maxLength: 100, minLength: 1}
+            address: {type: string, maxLength: 255, minLength: 1}
+            phone:
+              type: [string, 'null']
+              maxLength: 30
+            latitude: {type: number, minimum: -90, maximum: 90}
+            longitude: {type: number, minimum: -180, maximum: 180}
+            distance_km: &id001 [number, 'null']
+  errors: [400]
+- id: stores.get
+  method: GET
+  path: /api/stores/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, name, address, latitude, longitude, distance_km]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      address: {type: string, maxLength: 255, minLength: 1}
+      phone:
+        type: [string, 'null']
+        maxLength: 30
+      latitude: {type: number, minimum: -90, maximum: 90}
+      longitude: {type: number, minimum: -180, maximum: 180}
+      distance_km: *id001
+  errors: [404]
+- id: admin.stores.create
+  method: POST
+  path: /api/admin/stores
+  auth: admin
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 100, minLength: 1}
+      address: {type: string, maxLength: 255, minLength: 1}
+      phone:
+        type: [string, 'null']
+        maxLength: 30
+      latitude: {type: number, minimum: -90, maximum: 90}
+      longitude: {type: number, minimum: -180, maximum: 180}
+    required: [name, address, latitude, longitude]
+  response_schema:
+    type: object
+    required: [id, name, address, latitude, longitude, distance_km]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      address: {type: string, maxLength: 255, minLength: 1}
+      phone:
+        type: [string, 'null']
+        maxLength: 30
+      latitude: {type: number, minimum: -90, maximum: 90}
+      longitude: {type: number, minimum: -180, maximum: 180}
+      distance_km: *id001
+  errors: [400]
+- id: admin.stores.replace
+  method: PUT
+  path: /api/admin/stores/{id}
+  auth: admin
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 100, minLength: 1}
+      address: {type: string, maxLength: 255, minLength: 1}
+      phone:
+        type: [string, 'null']
+        maxLength: 30
+      latitude: {type: number, minimum: -90, maximum: 90}
+      longitude: {type: number, minimum: -180, maximum: 180}
+    required: [name, address, latitude, longitude]
+  response_schema:
+    type: object
+    required: [id, name, address, latitude, longitude, distance_km]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      address: {type: string, maxLength: 255, minLength: 1}
+      phone:
+        type: [string, 'null']
+        maxLength: 30
+      latitude: {type: number, minimum: -90, maximum: 90}
+      longitude: {type: number, minimum: -180, maximum: 180}
+      distance_km: *id001
+  errors: [400, 404]
+- id: admin.stores.delete
+  method: DELETE
+  path: /api/admin/stores/{id}
+  auth: admin
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: A sign-in form for the admin.
+  endpoints: [auth.login]
+- id: ui.list
+  text: The store list with name, address and phone and a search box.
+  endpoints: [stores.list]
+- id: ui.near
+  text: A 'Use my location' button that lists nearby stores with their distance and a radius selector; if permission
+    is denied the plain list stays with a short note.
+  endpoints: [stores.list]
+- id: ui.plot
+  text: A simple plot that places the listed stores (and the visitor, when known) by latitude and longitude, drawn
+    by the page itself without external map tiles.
+  endpoints: [stores.list]
+- id: ui.admin
+  text: 'For the admin: add and edit forms that show the API''s validation messages, and delete after confirmation.'
+  endpoints: [admin.stores.create, admin.stores.replace, admin.stores.delete]
+features: [auth, admin, search, geo]
+surfaces: [cwe-89, cwe-20, cwe-862, cwe-79, cwe-798]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: stores.near.sorted
+  category: filter
+  endpoint: stores.list
+  setup:
+  - request:
+      method: POST
+      path: /api/admin/stores
+      json: {name: zz Far, address: x, latitude: 10.5, longitude: 10.5}
+    actor: admin
+    expect_status: 201
+  - request:
+      method: POST
+      path: /api/admin/stores
+      json: {name: zz Near, address: y, latitude: 10.01, longitude: 10.01}
+    actor: admin
+    expect_status: 201
+  request:
+    method: GET
+    path: /api/stores
+    query: {lat: 10, lng: 10, radius: 100}
+  expect:
+    status: 200
+    json_contains:
+      items:
+      - {name: zz Near}
+      - {name: zz Far}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.stores.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: stores.list
+  params: {param: q}
+- {id: probe.stores.default_admin, cwe: cwe-798, kind: default_credential}

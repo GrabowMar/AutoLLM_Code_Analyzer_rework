@@ -38,7 +38,7 @@ class SubscriptionOut(Schema):
     has_secret: bool
     telegram_chat_id: str
     events: list[str]
-    include_experiment_jobs: bool
+    include_study_runs: bool
     enabled: bool
     last_success_at: datetime | None
     last_error: str
@@ -61,7 +61,7 @@ class SubscriptionIn(Schema):
     )
     telegram_chat_id: str | None = None
     events: list[str] = []
-    include_experiment_jobs: bool = False
+    include_study_runs: bool = False
     enabled: bool = True
 
 
@@ -71,7 +71,7 @@ class SubscriptionPatch(Schema):
     secret: str | None = Field(None, description='"" clears the secret (not allowed for telegram).')
     telegram_chat_id: str | None = None
     events: list[str] | None = None
-    include_experiment_jobs: bool | None = None
+    include_study_runs: bool | None = None
     enabled: bool | None = None
 
 
@@ -153,7 +153,7 @@ def create_subscription(request, payload: SubscriptionIn):
         name=payload.name.strip(),
         kind=payload.kind,
         events=_validate_events(payload.events),
-        include_experiment_jobs=payload.include_experiment_jobs,
+        include_study_runs=payload.include_study_runs,
         enabled=payload.enabled,
     )
     if payload.kind == WebhookKind.TELEGRAM:
@@ -176,7 +176,7 @@ def update_subscription(request, sub_id: int, payload: SubscriptionPatch):
         sub.name = data["name"].strip()
     if data.get("events") is not None:
         sub.events = _validate_events(data["events"])
-    for flag in ("include_experiment_jobs", "enabled"):
+    for flag in ("include_study_runs", "enabled"):
         if data.get(flag) is not None:
             setattr(sub, flag, data[flag])
     if data.get("url") is not None:

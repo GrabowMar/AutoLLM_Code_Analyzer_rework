@@ -179,12 +179,12 @@
 
 		{#if f.in_tests}
 			<dt class="text-muted-foreground">Code part</dt>
-			<dd>Test file <span class="text-muted-foreground">· counted apart from the app's code, as in the study</span></dd>
+			<dd>Test file <span class="text-muted-foreground">· counted apart from the app's code, as in the experiment</span></dd>
 		{/if}
 
 		{#if cls}
 			<dt class="text-muted-foreground">Issue class</dt>
-			<dd class="break-all font-mono" title="The cross-tool class the study deduplicates on: findings of one class at one location are one issue">{cls}</dd>
+			<dd class="break-all font-mono" title="The cross-tool class the experiment deduplicates on: findings of one class at one location are one issue">{cls}</dd>
 		{/if}
 
 		{#if prevalence && f.rule_id}

@@ -514,9 +514,9 @@ class ImportReport:
 
 
 def used_model_ids() -> set[str]:
-    """Model ids with at least one generation job (any user)."""
+    """Model ids with at least one generation run (any user)."""
     return set(
-        LLMModel.objects.filter(generation_jobs__isnull=False).values_list("model_id", flat=True).distinct(),
+        LLMModel.objects.filter(generation_runs__isnull=False).values_list("model_id", flat=True).distinct(),
     )
 
 

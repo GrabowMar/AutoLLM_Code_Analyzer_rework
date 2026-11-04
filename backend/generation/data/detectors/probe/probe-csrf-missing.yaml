@@ -1,0 +1,11 @@
+name: Missing CSRF protection probe exploited
+description: Maps the evaluation's csrf_missing probes (CWE-352) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:csrf_missing'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-csrf-missing
+  polarity: insecure
+  cwe: [cwe-352]
+  description: A csrf_missing probe was exploited against the assembled app.

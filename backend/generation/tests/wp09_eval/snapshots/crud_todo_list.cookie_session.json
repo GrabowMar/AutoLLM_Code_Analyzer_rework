@@ -1,0 +1,1948 @@
+{
+ "actors": [
+  "anon",
+  "user_a",
+  "user_b",
+  "admin"
+ ],
+ "auth": {
+  "admin_username": "admin",
+  "auth_flow": null,
+  "credential": "cookie",
+  "csrf": "double_submit_cookie",
+  "csrf_cookie": "csrf_token",
+  "csrf_header": "X-CSRF-Token",
+  "login_path": "/api/auth/login",
+  "logout_path": "/api/auth/logout",
+  "mode": "cookie_session",
+  "register_path": "/api/auth/register",
+  "token_json_path": null
+ },
+ "base_url": "http://app:8000",
+ "checks": [
+  {
+   "actor": "anon",
+   "category": "infra",
+   "depends_on": [],
+   "endpoint": null,
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "health",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/health",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "infra",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": null,
+   "expect": {
+    "header_contains": {
+     "Content-Type": "text/html"
+    },
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "index_served",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "infra",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": null,
+   "expect": {
+    "header_contains": {
+     "Content-Type": "text/html"
+    },
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "spa_fallback",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/llmlab/client/route",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "auth.register",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 201
+   },
+   "id": "auth.register.ok",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "password": "Llmlab-pw-{rand}-9!",
+     "username": "llmlab{rand}"
+    },
+    "method": "POST",
+    "path": "/api/auth/register",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "auth.login",
+   "expect": {
+    "header_contains": {
+     "Set-Cookie": ""
+    },
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "auth.login.ok",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "password": "Llmlab-pw-{rand}-9!",
+     "username": "llmlab{rand}"
+    },
+    "method": "POST",
+    "path": "/api/auth/login",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "anon",
+     "capture": {},
+     "expect_status": [
+      200,
+      201
+     ],
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "password": "Llmlab-pw-{rand}-9!",
+       "username": "llmlab{rand}"
+      },
+      "method": "POST",
+      "path": "/api/auth/register",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "completed": {
+          "type": [
+           "boolean",
+           "null"
+          ]
+         },
+         "completed_at": {
+          "format": "date-time",
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "created_at": {
+          "format": "date-time",
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "description": {
+          "maxLength": 2000,
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "due_date": {
+          "format": "date",
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "id": {
+          "type": [
+           "integer",
+           "string"
+          ]
+         },
+         "priority": {
+          "enum": [
+           "low",
+           "medium",
+           "high",
+           null
+          ],
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+         }
+        },
+        "required": [
+         "id",
+         "title"
+        ],
+        "type": "object"
+       },
+       "type": "array"
+      },
+      "page": {
+       "type": "integer"
+      },
+      "page_size": {
+       "type": "integer"
+      },
+      "remaining": {
+       "type": "integer"
+      },
+      "total": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "items",
+      "total",
+      "page",
+      "page_size",
+      "remaining"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.list.ok",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "todos.list.anon_401",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "pagination",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "items": {
+       "maxItems": 2,
+       "minItems": 2,
+       "type": "array"
+      }
+     },
+     "required": [
+      "items"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.list.page_size",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos",
+    "query": {
+     "page_size": 2
+    }
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "filter",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "completed": {
+          "const": true
+         }
+        },
+        "type": "object"
+       },
+       "minItems": 1,
+       "type": "array"
+      }
+     },
+     "required": [
+      "items"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.list.filter.completed",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos",
+    "query": {
+     "completed": true
+    }
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": true,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "filter",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "priority": {
+          "const": "low"
+         }
+        },
+        "type": "object"
+       },
+       "minItems": 1,
+       "type": "array"
+      }
+     },
+     "required": [
+      "items"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.list.filter.priority",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos",
+    "query": {
+     "priority": "low"
+    }
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "medium",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "completed": {
+       "type": [
+        "boolean",
+        "null"
+       ]
+      },
+      "completed_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "created_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "description": {
+       "maxLength": 2000,
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "due_date": {
+       "format": "date",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string"
+       ]
+      },
+      "priority": {
+       "enum": [
+        "low",
+        "medium",
+        "high",
+        null
+       ],
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "title": {
+       "maxLength": 255,
+       "minLength": 1,
+       "type": "string"
+      }
+     },
+     "required": [
+      "id",
+      "title"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 201
+   },
+   "id": "todos.create.ok",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low",
+     "title": "llmlab title"
+    },
+    "method": "POST",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "todos.create.anon_401",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low",
+     "title": "llmlab title"
+    },
+    "method": "POST",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "todos.create.invalid.missing",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low"
+    },
+    "method": "POST",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "todos.create.invalid.too_long",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low",
+     "title": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    "method": "POST",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "todos.create.invalid.enum",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "llmlab-not-an-option",
+     "title": "llmlab title"
+    },
+    "method": "POST",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "completed": {
+       "type": [
+        "boolean",
+        "null"
+       ]
+      },
+      "completed_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "created_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "description": {
+       "maxLength": 2000,
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "due_date": {
+       "format": "date",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string"
+       ]
+      },
+      "priority": {
+       "enum": [
+        "low",
+        "medium",
+        "high",
+        null
+       ],
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "title": {
+       "maxLength": 255,
+       "minLength": 1,
+       "type": "string"
+      }
+     },
+     "required": [
+      "id",
+      "title"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.get.ok",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "todos.get.anon_401",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "todos.get.other_user",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.update",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "completed": {
+       "type": [
+        "boolean",
+        "null"
+       ]
+      },
+      "completed_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "created_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "description": {
+       "maxLength": 2000,
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "due_date": {
+       "format": "date",
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string"
+       ]
+      },
+      "priority": {
+       "enum": [
+        "low",
+        "medium",
+        "high",
+        null
+       ],
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "title": {
+       "maxLength": 255,
+       "minLength": 1,
+       "type": "string"
+      }
+     },
+     "required": [
+      "id",
+      "title"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.update.ok",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low",
+     "title": "llmlab title"
+    },
+    "method": "PATCH",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.update",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "todos.update.anon_401",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low",
+     "title": "llmlab title"
+    },
+    "method": "PATCH",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.update",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "todos.update.other_user",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low",
+     "title": "llmlab title"
+    },
+    "method": "PATCH",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.update",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "todos.update.invalid.too_long",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "low",
+     "title": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    "method": "PATCH",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.update",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "todos.update.invalid.enum",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "completed": false,
+     "description": "llmlab description",
+     "due_date": "2030-01-15",
+     "priority": "llmlab-not-an-option",
+     "title": "llmlab title"
+    },
+    "method": "PATCH",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 204
+   },
+   "id": "todos.delete.ok",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "todos.delete.anon_401",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "todos.delete.other_user",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "persistence",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": {
+     "title": "llmlab title"
+    },
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.get.persists",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "restart_before": true,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": false,
+       "description": "llmlab description",
+       "due_date": "2030-01-15",
+       "priority": "low",
+       "title": "llmlab title"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "todos.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": {
+     "items": [
+      {
+       "title": "open one"
+      },
+      {
+       "title": "done one"
+      }
+     ]
+    },
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "todos.list.open_first",
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": null,
+     "capture": {
+      "done_id": "$.id"
+     },
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "title": "done one"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    },
+    {
+     "actor": null,
+     "capture": {},
+     "expect_status": 200,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "completed": true
+      },
+      "method": "PATCH",
+      "path": "/api/todos/{done_id}",
+      "query": {}
+     }
+    },
+    {
+     "actor": null,
+     "capture": {},
+     "expect_status": 201,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "title": "open one"
+      },
+      "method": "POST",
+      "path": "/api/todos",
+      "query": {}
+     }
+    }
+   ],
+   "source": "acceptance",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  }
+ ],
+ "compiler_version": 1,
+ "has_frontend": true,
+ "health_path": "/api/health",
+ "mock_host": "mock.internal",
+ "mock_port": 9009,
+ "only": null,
+ "probes": [
+  {
+   "cwe": "cwe-639",
+   "endpoint": "todos.get",
+   "id": "probe.todos.idor",
+   "kind": "idor_enumeration",
+   "params": {
+    "read": {
+     "actor": "user_a",
+     "method": "GET",
+     "path": "/api/todos/{id}"
+    },
+    "setup": [
+     {
+      "actor": "user_a",
+      "capture": {
+       "id": "$.id"
+      },
+      "expect_status": 201,
+      "request": {
+       "json": {
+        "completed": false,
+        "description": "llmlab description",
+        "due_date": "2030-01-15",
+        "priority": "low",
+        "title": "llmlab title"
+       },
+       "method": "POST",
+       "path": "/api/todos"
+      }
+     }
+    ],
+    "target": {
+     "actor": "user_a",
+     "method": "GET",
+     "path": "/api/todos/{id}"
+    }
+   },
+   "positive_control": {
+    "actor": "user_a",
+    "expect_status": 200,
+    "files": null,
+    "form": null,
+    "headers": {},
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "requires_checks": [
+    "todos.get.ok"
+   ]
+  },
+  {
+   "cwe": "cwe-915",
+   "endpoint": "todos.update",
+   "id": "probe.todos.mass_assignment",
+   "kind": "mass_assignment",
+   "params": {
+    "field": "user_id",
+    "read": {
+     "actor": "user_a",
+     "method": "GET",
+     "path": "/api/todos/{id}"
+    },
+    "setup": [
+     {
+      "actor": "user_a",
+      "capture": {
+       "id": "$.id"
+      },
+      "expect_status": 201,
+      "request": {
+       "json": {
+        "completed": false,
+        "description": "llmlab description",
+        "due_date": "2030-01-15",
+        "priority": "low",
+        "title": "llmlab title"
+       },
+       "method": "POST",
+       "path": "/api/todos"
+      }
+     }
+    ],
+    "target": {
+     "actor": "user_a",
+     "json": {
+      "completed": false,
+      "description": "llmlab description",
+      "due_date": "2030-01-15",
+      "priority": "low",
+      "title": "llmlab title"
+     },
+     "method": "PATCH",
+     "path": "/api/todos/{id}"
+    }
+   },
+   "positive_control": {
+    "actor": "user_a",
+    "expect_status": 200,
+    "files": null,
+    "form": null,
+    "headers": {},
+    "json": null,
+    "method": "GET",
+    "path": "/api/todos/{id}",
+    "query": {}
+   },
+   "requires_checks": [
+    "todos.update.ok"
+   ]
+  },
+  {
+   "cwe": "cwe-256",
+   "endpoint": null,
+   "id": "probe.todos.plaintext_password",
+   "kind": "plaintext_password_db",
+   "params": {},
+   "positive_control": null,
+   "requires_checks": [
+    "auth.login.ok"
+   ]
+  }
+ ],
+ "signed_routes": []
+}

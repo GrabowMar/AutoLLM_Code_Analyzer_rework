@@ -7,7 +7,8 @@ from unittest.mock import patch
 import pytest
 from django.core.cache import cache
 
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.tests.factories import GenerationRunFactory
+from backend.generation.tests.factories import HarnessPresetFactory
 from backend.llm_models.services.enrichment import enrich_model
 from backend.llm_models.services.enrichment import fetch_provider_endpoints
 from backend.llm_models.services.enrichment import models_dev_entry
@@ -169,29 +170,42 @@ class TestModelInsightsAPI:
         client.force_login(user)
         model = LLMModelFactory(model_id="acme/coder-1", canonical_slug="acme_coder-1")
         metrics = {
-            "cost": 0.5,
+            "cost_usd": 0.5,
             "prompt_tokens": 1000,
             "cached_tokens": 500,
             "completion_tokens": 200,
-            "lines_of_code": 2000,
-            "engine": "opencode@1.0",
-            "functional": {"passed": True, "pass_rate": 1.0, "status": "passed"},
+            "loc_model": 2000,
+            "eval": {
+                "eval_suite": "suite@1",
+                "eval_level": "functional",
+                "status": "measured",
+                "measured": True,
+                "agent_pass_rate": 1.0,
+            },
         }
-        GenerationJobFactory(created_by=user, model=model, status="completed", metrics=metrics, duration_seconds=100)
-        GenerationJobFactory(created_by=user, model=model, status="failed")
-        GenerationJobFactory(model=model, status="completed", metrics=metrics)  # another user's job
+        harness = HarnessPresetFactory()
+        GenerationRunFactory(
+            created_by=user,
+            model=model,
+            tested=True,
+            metrics=metrics,
+            duration_seconds=100,
+            harness_preset=harness,
+        )
+        GenerationRunFactory(created_by=user, model=model, status="failed")
+        GenerationRunFactory(model=model, tested=True, metrics=metrics)  # another user's run
 
         resp = client.get("/api/models/detail/acme_coder-1/insights/")
 
         assert resp.status_code == HTTPStatus.OK
         data = resp.json()
         gen = data["generation"]
-        assert gen["jobs_total"] == 2
+        assert gen["runs_total"] == 2
         assert gen["success"]["rate"] == pytest.approx(0.5)
         assert gen["functional"]["successes"] == 1
         assert gen["resources"]["cache_hit_ratio"] == pytest.approx(0.5)
         assert gen["resources"]["cost_per_kloc"] == pytest.approx(0.25)
-        assert gen["engines"] == {"opencode": 1}
+        assert gen["harnesses"] == {"opencode": 1}
         assert data["ranking"]["positions"]["composite"]["rank"] >= 1
         assert data["catalog"]["catalog_size"] == 1
 

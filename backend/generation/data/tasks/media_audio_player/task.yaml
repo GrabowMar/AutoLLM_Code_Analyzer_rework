@@ -1,0 +1,209 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Audio player
+summary: Keep a shared library of audio tracks by link and play them in a browser player.
+category: media
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Track
+  fields:
+  - {name: title, type: string, required: true, max_length: 200}
+  - {name: artist, type: string, max_length: 200}
+  - {name: url, type: url, required: true, max_length: 500}
+  - {name: duration, type: int, min: 0, max: 86400}
+  - {name: play_count, type: int, default: 0}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: tracks.list
+  method: GET
+  path: /api/tracks
+  auth: public
+  query:
+  - {name: q, type: string, semantics: search}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, title, url, added_by]
+          properties:
+            id:
+              type: [integer, string]
+            title: {type: string, maxLength: 200, minLength: 1}
+            artist:
+              type: [string, 'null']
+              maxLength: 200
+            url: {type: string, maxLength: 500, format: uri}
+            duration:
+              type: [integer, 'null']
+              minimum: 0
+              maximum: 86400
+            play_count:
+              type: [integer, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            added_by: {type: string}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: tracks.create
+  method: POST
+  path: /api/tracks
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 200, minLength: 1}
+      artist:
+        type: [string, 'null']
+        maxLength: 200
+      url: {type: string, maxLength: 500, format: uri}
+      duration:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 86400
+    required: [title, url]
+  response_schema:
+    type: object
+    required: [id, title, url, added_by]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      artist:
+        type: [string, 'null']
+        maxLength: 200
+      url: {type: string, maxLength: 500, format: uri}
+      duration:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 86400
+      play_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      added_by: {type: string}
+  errors: [400]
+- id: tracks.get
+  method: GET
+  path: /api/tracks/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, title, url, added_by]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      artist:
+        type: [string, 'null']
+        maxLength: 200
+      url: {type: string, maxLength: 500, format: uri}
+      duration:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 86400
+      play_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      added_by: {type: string}
+  errors: [404]
+- id: tracks.delete
+  method: DELETE
+  path: /api/tracks/{id}
+  auth: owner
+  owner_entity: Track
+  success_status: 204
+  errors: [403, 404]
+- id: tracks.play
+  method: POST
+  path: /api/tracks/{id}/plays
+  auth: public
+  response_schema:
+    type: object
+    required: [id, title, url, added_by]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      artist:
+        type: [string, 'null']
+        maxLength: 200
+      url: {type: string, maxLength: 500, format: uri}
+      duration:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 86400
+      play_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      added_by: {type: string}
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.library
+  text: The track list with title, artist, duration and play count, a search box and paging.
+  endpoints: [tracks.list]
+- id: ui.player
+  text: A player bar with play/pause, seek, volume, the current track's title and artist, and next/previous through
+    the list.
+  endpoints: [tracks.get, tracks.play]
+- id: ui.manage
+  text: 'For signed-in users: an add-track form showing the API''s validation messages, and delete with confirmation
+    on their own tracks.'
+  endpoints: [tracks.create, tracks.delete]
+features: [auth, ownership, search, pagination]
+surfaces: [cwe-79, cwe-89, cwe-639, cwe-862, cwe-20, cwe-601]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+probes:
+- id: probe.tracks.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: tracks.list
+  params: {param: q}
+- id: probe.tracks.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: tracks.create
+  params: {field: title, view_endpoint: tracks.list}

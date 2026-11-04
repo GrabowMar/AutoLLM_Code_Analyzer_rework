@@ -16,7 +16,11 @@ from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.services.base import ADVISORY_TOOLS
 from backend.analysis.services.base import is_dependency_advisory
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models.choices import Outcome
+from backend.generation.models.choices import RunStatus
+from backend.generation.models.choices import Stage
+from backend.generation.runs.view import run_views
 from backend.llm_models.models import LLMModel
 from backend.rankings.models import BenchmarkResult
 from backend.rankings.services.constants import SEVERITY_WEIGHTS
@@ -27,14 +31,22 @@ from backend.rankings.services.scoring import compute_composite
 from backend.rankings.services.scoring import compute_cost_efficiency_score
 from backend.rankings.services.scoring import compute_empirical_quality
 from backend.rankings.services.scoring import compute_mss
-from backend.reports.services.loc import is_test_path
-from backend.reports.services.loc import loc_from_result_data
-from backend.statistics.services.study import tool_coverage
+from backend.statistics.services.runs import study_current_runs
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
+    from django.db.models import QuerySet
 
 _ZERO_ROLLUP = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+# Usable outcomes that never reached the tests: the model's failure, 0 pass (intention-to-treat).
+_MODEL_FAILURES = frozenset({Outcome.BUILD_FAIL, Outcome.START_FAIL, Outcome.OUTPUT_INVALID})
+
+
+def _is_test_path(path: str) -> bool:
+    """``reports.services.loc.is_test_path``, the one test-path rule (imported per call, like ``tool_coverage``)."""
+    from backend.reports.services.loc import is_test_path
+
+    return is_test_path(path)
 
 
 def _stdev(values: list[float]) -> float | None:
@@ -43,81 +55,152 @@ def _stdev(values: list[float]) -> float | None:
     return round(pystats.stdev(values), 4)
 
 
-def _unit(condition_id: Any, app_id: Any, job_id: str) -> tuple:
-    """The unit of analysis: an app in a condition (repeats collapse into it); a job without an app is its own unit."""
-    return (condition_id, app_id) if app_id is not None else ("job", job_id)
+def _unit(condition_id: Any, task_id: Any, run_id: str) -> tuple:
+    """The unit of analysis: a task in a condition (repeats collapse into it); a run without a task is its own unit."""
+    return (condition_id, task_id) if task_id is not None else ("run", run_id)
 
 
 def _pooling_note(conditions: int) -> str | None:
     if conditions <= 1:
         return None
     return (
-        f"Pools {conditions} experiment conditions of this model (harness, prompt-profile or experiment "
+        f"Pools {conditions} study conditions of this model (harness, prompt or other study "
         "arms); the study reports compare conditions separately."
     )
+
+
+def _pass_rate(outcome: str, usable: bool | None, raw_metrics: Any) -> float | None:
+    """A run's functional pass rate, intention-to-treat (spec 6.13).
+
+    A usable run that never reached the tests (``build_fail``, ``start_fail``,
+    ``output_invalid``) scores 0: the failure is the model's. A tested run
+    scores its latest evaluation's ``agent_pass_rate`` (``metrics["eval"]``)
+    only when that evaluation measured it; otherwise, and for runs that are
+    not usable (``infra_error``, ``excluded``), the run is ungraded (None),
+    left out of the mean rather than scored 0.
+    """
+    if usable is not True:
+        return None
+    if outcome in _MODEL_FAILURES:
+        return 0.0
+    if outcome != Outcome.TESTED:
+        return None
+    metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
+    evaluation = metrics.get("eval")
+    if not isinstance(evaluation, dict) or not evaluation.get("measured"):
+        return None
+    rate = evaluation.get("agent_pass_rate")
+    if isinstance(rate, bool) or not isinstance(rate, int | float):
+        return None
+    return float(rate)
+
+
+def _norm_path(path: str | None) -> str:
+    return (path or "").removeprefix("./")
+
+
+def _compared_runs(
+    user: AbstractBaseUser | None = None,
+    *,
+    prompt_hash: str | None = None,
+    config_fingerprint: str | None = None,
+    study_id: str | None = None,
+) -> QuerySet[GenerationRun]:
+    """The runs a ranking compares: ad hoc runs plus each main-stage study cell's current run.
+
+    A study cell contributes one run, its current attempt (``runs.view.current_runs``: the first
+    usable attempt, else the latest, so attrition stays visible as a non-usable run), never every
+    attempt. Pilot cells (and pilot-stage runs outside a cell) are not part of the sample
+    (Appendix A #11), and runs created beyond a study's plan are never counted.
+    """
+    runs = (
+        GenerationRun.objects.exclude(model__isnull=True)
+        .filter(beyond_plan=False)
+        .exclude(cell__stage=Stage.PILOT)
+        .exclude(cell__isnull=True, stage=Stage.PILOT)
+    )
+    if user is not None and getattr(user, "is_authenticated", False):
+        runs = runs.filter(created_by=user)
+    if prompt_hash:
+        runs = runs.filter(prompt_hash=prompt_hash)
+    if config_fingerprint:
+        runs = runs.filter(config_fingerprint=config_fingerprint)
+    if study_id:
+        runs = runs.filter(study_id=study_id)
+    current: set[Any] = set()
+    study_ids = runs.filter(cell__isnull=False).values_list("study_id", flat=True).distinct()
+    for sid in study_ids:
+        if sid is not None:
+            current.update(study_current_runs(sid, Stage.MAIN).values_list("pk", flat=True))
+    return runs.filter(Q(cell__isnull=True) | Q(pk__in=current))
 
 
 def _local_app_stats(
     user: AbstractBaseUser | None = None,
     *,
     prompt_hash: str | None = None,
-    bundle_key: str | None = None,
-    experiment_id: str | None = None,
+    config_fingerprint: str | None = None,
+    study_id: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Aggregate per-model apps generated and finding rollups.
 
     The ``findings`` rollup that the empirical score is computed from holds
     the compared apps' *code* issues, measured with one instrument set:
 
-    * each job's latest result per tool (a re-analysis never double-counts),
+    * each run's latest result per tool (a re-analysis never double-counts),
     * only tools that measured every analyzed app in scope
       (:func:`backend.statistics.services.study.tool_coverage`), so a model
       whose apps saw fewer tools cannot look cleaner,
     * not AI-reviewer findings (opinions; collected under ``ai_findings``),
     * not dependency advisories from the known-vulnerability scanners
-      (``dependency_findings``: packages, mostly the scaffold's pins, not
+      (``dependency_findings``: packages, mostly the starter's pins, not
       lines the model wrote; the shared rule
       :func:`~backend.analysis.services.base.is_dependency_advisory`),
     * not dynamic-tool findings (``runtime_findings``: the running app),
+    * only findings in files the model wrote (the run's model scope,
+      ``RunView.files("model")``): analysis runs on the whole app, and the
+      starter's files are the same for every model,
     * not findings in test code (``test_findings``; the source LOC excludes
       test files too).
 
     A count nothing measured is None, not 0: every count of a model with no
     measured app, ``dependency_findings`` when no advisory scanner is in the
-    instrument set, ``runtime_findings`` when no dynamic tool is.
-    ``conditions_pooled`` says how many experiment conditions a model's row
+    instrument set, ``runtime_findings`` when no dynamic tool is. A run
+    without a collected tree (no model-scope LOC) is not measured.
+    ``conditions_pooled`` says how many study conditions a model's row
     pools (a scope with several conditions per model mixes their arms).
 
-    The density uses source LOC (``reports.services.loc``). Repeats of one
-    app in one condition collapse to their mean before the per-model
-    aggregate, so an app generated five times does not weigh five times
+    The density uses the model scope's source LOC (``RunView.loc``). Repeats
+    of one task in one condition collapse to their mean before the per-model
+    aggregate, so a task generated five times does not weigh five times
     (``empirical_findings`` / ``empirical_loc``, ``variance``).
 
-    ``prompt_hash``/``bundle_key`` narrow the comparison to jobs generated
-    from the same prompt material — without this, jobs from different
-    template/bundle versions on the same app are silently pooled together.
-    ``experiment_id`` narrows to one designed experiment's jobs directly,
-    without needing to know its prompt_hash/bundle_key in advance.
+    ``prompt_hash``/``config_fingerprint`` narrow the comparison to runs
+    generated from the same prompt material / configuration; without this,
+    runs of different prompt versions on the same task are pooled together.
+    ``study_id`` narrows to one study's runs directly. The run set is
+    :func:`_compared_runs` (one current run per main-stage cell, no pilot,
+    nothing beyond plan); ``apps`` counts every compared run, so attrition
+    stays visible, but findings and LOC come only from usable runs.
     """
+    from backend.analysis.models import ToolResult
+    from backend.statistics.services.study import tool_coverage
 
-    jobs = GenerationJob.objects.exclude(model__isnull=True)
-    if user is not None and getattr(user, "is_authenticated", False):
-        jobs = jobs.filter(created_by=user)
-    if prompt_hash:
-        jobs = jobs.filter(prompt_hash=prompt_hash)
-    if bundle_key:
-        jobs = jobs.filter(bundle_key=bundle_key)
-    if experiment_id:
-        jobs = jobs.filter(experiment_id=experiment_id)
+    runs = _compared_runs(
+        user,
+        prompt_hash=prompt_hash,
+        config_fingerprint=config_fingerprint,
+        study_id=study_id,
+    )
 
-    by_model = jobs.values("model__model_id").annotate(
+    by_model = runs.values("model__model_id").annotate(
         apps=Count("id"),
-        apps_completed=Count("id", filter=Q(status="completed")),
-        apps_failed=Count("id", filter=Q(status="failed")),
+        apps_completed=Count("id", filter=Q(status=RunStatus.COMPLETED)),
+        apps_failed=Count("id", filter=Q(status=RunStatus.FAILED)),
         conditions=Count("condition_id", distinct=True),
         avg_duration=Avg(
             "duration_seconds",
-            filter=Q(status="completed"),
+            filter=Q(status=RunStatus.COMPLETED),
         ),
     )
     out: dict[str, dict[str, Any]] = {}
@@ -138,12 +221,10 @@ def _local_app_stats(
             "functional_pass_rate": None,
         }
 
-    # Each compared job's latest result per tool — otherwise re-analyzing a
-    # job double-counts its findings (and re-running a single tool would drop
-    # the others) — and the one instrument set every compared app was measured with.
-    from backend.analysis.models import ToolResult
-
-    latest_result_ids = ToolResult.latest_ids_per_job(jobs.values_list("id", flat=True))
+    # Each compared run's latest result per tool (otherwise re-analyzing a
+    # run double-counts its findings, and re-running a single tool would drop
+    # the others) and the one instrument set every compared app was measured with.
+    latest_result_ids = ToolResult.latest_ids_per_job(runs.values_list("id", flat=True))
     coverage = tool_coverage(latest_result_ids, include_ai=False)
     dynamic_slugs = set(
         AnalyzerTool.objects.filter(analysis_mode=AnalysisMode.DYNAMIC).values_list("slug", flat=True),
@@ -151,40 +232,39 @@ def _local_app_stats(
     common = set(coverage["tools_common"])
     code_tools = common - dynamic_slugs
     # An app the counted tools did not all measure has unknown counts, not zero.
-    measured_jobs = set(coverage["apps_measured"]) if common else set()
+    analysed = {str(run_id) for run_id in coverage["apps_measured"]} if common else set()
 
-    # Source LOC (result_data) + smoke results (metrics) per completed job,
-    # with the job's unit (app x condition) for collapsing repeats.
-    job_info: dict[str, dict[str, Any]] = {}
-    for job_id, model_id, raw_metrics, result_data, condition_id, app_id in jobs.filter(
-        status="completed",
-    ).values_list(
-        "id",
-        "model__model_id",
-        "metrics",
-        "result_data",
-        "condition_id",
-        "app_requirement_id",
-    ):
+    # Model-scope source LOC and pass rate per completed run, with the run's
+    # unit (task x condition) for collapsing repeats.
+    completed = list(runs.filter(status=RunStatus.COMPLETED).select_related("model"))
+    run_info: dict[str, dict[str, Any]] = {}
+    model_paths: dict[str, set[str]] = {}
+    measured_jobs: set[str] = set()
+    for run, view in zip(completed, run_views(completed), strict=True):
+        model_id = run.model.model_id
         if model_id not in out:
             continue
-        metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
-        # Jobs without stored code (legacy rows) fall back to the generation-time count.
-        loc = loc_from_result_data(result_data)["total_loc"] or int(metrics.get("lines_of_code") or 0)
-        rate = None
-        functional = metrics.get("functional")
-        # ``pass_rate`` is null when the suite never ran (infra_error): that
-        # job is ungraded, so it is left out of the mean rather than scored 0.
-        if isinstance(functional, dict) and functional.get("pass_rate") is not None:
-            try:
-                rate = float(functional["pass_rate"])
-            except (TypeError, ValueError):
-                rate = None
-        key = str(job_id)
-        job_info[key] = {"model": model_id, "unit": _unit(condition_id, app_id, key), "loc": loc, "pass_rate": rate}
-        # LOC is summed over measured jobs only: findings exist only for
-        # those, so the density's numerator and denominator describe the same apps.
-        if key in measured_jobs:
+        key = str(run.id)
+        metrics = run.metrics if isinstance(run.metrics, dict) else {}
+        loc = metrics.get("loc_model")
+        if isinstance(loc, bool) or not isinstance(loc, int):
+            # None when no tree was collected: unknown, never 0.
+            loc = view.loc("model")
+        run_info[key] = {
+            "model": model_id,
+            "unit": _unit(run.condition_id, run.task_version_id, key),
+            "loc": loc,
+            "pass_rate": _pass_rate(run.outcome, run.usable, run.metrics),
+        }
+        # A run without a collected tree cannot attribute findings to the
+        # model's files, so it is not measured (never counted as clean). A
+        # run that is not usable (infra_error, excluded) is attrition, not
+        # sample: its findings and LOC never enter the density.
+        if key in analysed and loc is not None and run.usable is True:
+            measured_jobs.add(key)
+            model_paths[key] = {_norm_path(entry.path) for entry in view.files("model")}
+            # LOC is summed over measured runs only: findings exist only for
+            # those, so the density's numerator and denominator describe the same apps.
             out[model_id]["local_loc"] += loc
 
     base = Finding.objects.filter(result_id__in=latest_result_ids)
@@ -214,7 +294,10 @@ def _local_app_stats(
             out[mid]["runtime_findings"] += count
         elif is_dependency_advisory(tool, r["category"]):
             out[mid]["dependency_findings"] += count
-        elif is_test_path(r["file_path"]):
+        elif _norm_path(r["file_path"]) not in model_paths.get(job, set()):
+            # The starter's (or a parent's) file: not the model's code.
+            continue
+        elif _is_test_path(r["file_path"]):
             out[mid]["test_findings"] += count
         elif tool in code_tools and r["severity"] in _ZERO_ROLLUP:
             out[mid]["findings"][r["severity"]] += count
@@ -222,7 +305,7 @@ def _local_app_stats(
             sev[r["severity"]] = sev.get(r["severity"], 0) + count
 
     ai_rows = (
-        base.filter(result__tool_slug__in=ai_slugs)
+        base.filter(result__tool_slug__in=ai_slugs, result__run__generation_job__usable=True)
         .values("result__run__generation_job__model__model_id", "severity")
         .annotate(c=Count("id"))
     )
@@ -233,15 +316,15 @@ def _local_app_stats(
 
     # Repeats collapse to their unit's mean first: the per-model density is
     # the sum of unit-mean weighted findings over the sum of unit-mean LOC,
-    # and the spread is over units. Jobs never measured are excluded — a
+    # and the spread is over units. Runs never measured are excluded: a
     # missing analysis is not a clean bill of health.
     density_jobs: dict[str, dict[tuple, list[str]]] = defaultdict(lambda: defaultdict(list))
     for job_id in measured_jobs:
-        info = job_info.get(job_id)
+        info = run_info.get(job_id)
         if info is not None and info["loc"] > 0:
             density_jobs[info["model"]][info["unit"]].append(job_id)
     rate_units: dict[str, dict[tuple, list[float]]] = defaultdict(lambda: defaultdict(list))
-    for info in job_info.values():
+    for info in run_info.values():
         if info["pass_rate"] is not None:
             rate_units[info["model"]][info["unit"]].append(info["pass_rate"])
 
@@ -255,11 +338,11 @@ def _local_app_stats(
             for job_id in members:
                 for sev, count in job_severities.get(job_id, {}).items():
                     empirical[sev] += count / k
-            empirical_loc += sum(job_info[j]["loc"] for j in members) / k
+            empirical_loc += sum(run_info[j]["loc"] for j in members) / k
             unit_densities.append(
                 pystats.fmean(
                     sum(SEVERITY_WEIGHTS.get(sev, 0) * c for sev, c in job_severities.get(j, {}).items())
-                    / job_info[j]["loc"]
+                    / run_info[j]["loc"]
                     * 1000
                     for j in members
                 ),
@@ -284,7 +367,7 @@ def _local_app_stats(
     # Unmeasured is never 0: a model none of whose apps the instrument set
     # measured has unknown counts, and a kind of finding no counted tool can
     # report (no advisory scanner, no dynamic tool) was not looked for.
-    measured_models = set(jobs.filter(id__in=measured_jobs).values_list("model__model_id", flat=True))
+    measured_models = {run_info[j]["model"] for j in measured_jobs}
     advisories_measured = bool(common & ADVISORY_TOOLS)
     runtime_measured = bool(common & dynamic_slugs)
     for model_id, stats in out.items():
@@ -312,20 +395,25 @@ def aggregate_rankings(
     user: AbstractBaseUser | None = None,
     *,
     prompt_hash: str | None = None,
-    bundle_key: str | None = None,
-    experiment_id: str | None = None,
+    config_fingerprint: str | None = None,
+    study_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build the ranking list from LLMModel + benchmarks + local stats.
 
     With ``user`` given, local stats (apps, findings, empirical scores) are
-    scoped to that user's generation jobs; benchmarks and metadata are global
-    either way. ``prompt_hash``/``bundle_key``/``experiment_id`` further narrow
-    local stats to jobs generated from one specific prompt version or designed
-    experiment — comparisons across models are only apples-to-apples when they
-    used the same prompt material.
+    scoped to that user's generation runs; benchmarks and metadata are global
+    either way. ``prompt_hash``/``config_fingerprint``/``study_id`` further
+    narrow local stats to runs generated from one prompt version, one
+    configuration or one study: comparisons across models are only
+    apples-to-apples when they used the same prompt material.
     """
 
-    local = _local_app_stats(user, prompt_hash=prompt_hash, bundle_key=bundle_key, experiment_id=experiment_id)
+    local = _local_app_stats(
+        user,
+        prompt_hash=prompt_hash,
+        config_fingerprint=config_fingerprint,
+        study_id=study_id,
+    )
     bench = _benchmarks_by_model()
 
     rows: list[dict[str, Any]] = []

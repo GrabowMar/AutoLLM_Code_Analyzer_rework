@@ -6,38 +6,41 @@ from heapq import nlargest
 from typing import TYPE_CHECKING
 
 from backend.analysis.models import AnalysisRun
-from backend.generation.models import Experiment
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models import Study
+from backend.generation.models.choices import RunStatus
+from backend.generation.runs.view import run_views
 from backend.reports.models import Report
 
 if TYPE_CHECKING:
+    from backend.generation.runs.view import RunView
     from backend.users.models import User
 
 RECENT_PER_KIND = 8
 
 
-def _job_title(job: GenerationJob) -> str:
-    app = job.app_requirement.name if job.app_requirement else ""
-    model = job.model.model_name if job.model else ""
-    return " · ".join(p for p in (app, model) if p) or f"{job.get_mode_display()} job"
+def _sample_title(view: RunView) -> str:
+    task = view.task.title if view.task is not None else ""
+    return " · ".join(p for p in (task, view.model_slug or "") if p) or f"{view.kind} run"
 
 
 def user_activity(user: User, limit: int = RECENT_PER_KIND) -> dict:
-    jobs = GenerationJob.objects.filter(created_by=user)
+    samples = GenerationRun.objects.filter(created_by=user)
     runs = AnalysisRun.objects.filter(created_by=user)
-    experiments = Experiment.objects.filter(created_by=user)
+    studies = Study.objects.filter(created_by=user)
     reports = Report.objects.filter(created_by=user)
 
+    recent_samples = list(samples.order_by("-created_at")[:limit])
     recent = [
         {
             "kind": "application",
-            "id": str(j.id),
-            "title": _job_title(j),
-            "status": j.status,
-            "created_at": j.created_at,
-            "href": f"/applications/{j.id}",
+            "id": view.id,
+            "title": _sample_title(view),
+            "status": view.status,
+            "created_at": sample.created_at,
+            "href": f"/samples/{view.id}",
         }
-        for j in jobs.select_related("app_requirement", "model").order_by("-created_at")[:limit]
+        for sample, view in zip(recent_samples, run_views(recent_samples), strict=True)
     ]
     recent += [
         {
@@ -52,14 +55,14 @@ def user_activity(user: User, limit: int = RECENT_PER_KIND) -> dict:
     ]
     recent += [
         {
-            "kind": "experiment",
+            "kind": "study",
             "id": str(e.id),
             "title": e.name,
             "status": e.status,
             "created_at": e.created_at,
-            "href": f"/experiments/{e.id}",
+            "href": f"/studies/{e.id}",
         }
-        for e in experiments.order_by("-created_at")[:limit]
+        for e in studies.order_by("-created_at")[:limit]
     ]
     recent += [
         {
@@ -77,10 +80,10 @@ def user_activity(user: User, limit: int = RECENT_PER_KIND) -> dict:
         "date_joined": user.date_joined,
         "last_login": user.last_login,
         "counts": {
-            "applications": jobs.count(),
-            "applications_completed": jobs.filter(status=GenerationJob.Status.COMPLETED).count(),
+            "applications": samples.count(),
+            "applications_completed": samples.filter(status=RunStatus.COMPLETED).count(),
             "analyses": runs.count(),
-            "experiments": experiments.count(),
+            "studies": studies.count(),
             "reports": reports.count(),
         },
         "recent": nlargest(limit, recent, key=lambda item: item["created_at"]),

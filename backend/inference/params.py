@@ -35,7 +35,7 @@ STATIC_PARAMS: dict[tuple[str, str], frozenset[str]] = {
 
 SOURCE_OFFSET: dict[str, int] = {
     "agent_proxy": 0,
-    "scaffolding": 0,
+    "slot_call": 0,
     "warmup": 0,
     "probe": -20,
     "analysis": -40,

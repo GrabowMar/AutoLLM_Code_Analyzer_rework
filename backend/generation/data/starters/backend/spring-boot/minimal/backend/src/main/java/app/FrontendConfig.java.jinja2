@@ -1,0 +1,45 @@
+{% if has_frontend %}
+package app;
+
+import java.io.IOException;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.web.servlet.resource.PathResourceResolver;
+
+/** Serves the Vite build from frontend/dist and falls back to index.html for client-side routes. */
+@Configuration
+public class FrontendConfig implements WebMvcConfigurer {
+
+    private static final String DIST = "frontend/dist/";
+
+    @Override
+    public void addViewControllers(ViewControllerRegistry registry) {
+        registry.addViewController("/").setViewName("forward:/index.html");
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler("/**")
+                .addResourceLocations("file:" + DIST)
+                .resourceChain(true)
+                .addResolver(new PathResourceResolver() {
+                    @Override
+                    protected Resource getResource(String resourcePath, Resource location) throws IOException {
+                        if (resourcePath.startsWith("api/")) {
+                            return null;
+                        }
+                        Resource requested = location.createRelative(resourcePath);
+                        if (requested.exists() && requested.isReadable()) {
+                            return requested;
+                        }
+                        return new FileSystemResource(DIST + "index.html");
+                    }
+                });
+    }
+}
+{% endif %}

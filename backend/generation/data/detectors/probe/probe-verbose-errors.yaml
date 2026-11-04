@@ -1,0 +1,11 @@
+name: Verbose error disclosure probe exploited
+description: Maps the evaluation's verbose_errors probes (CWE-209) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:verbose_errors'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-verbose-errors
+  polarity: insecure
+  cwe: [cwe-209]
+  description: A verbose_errors probe was exploited against the assembled app.

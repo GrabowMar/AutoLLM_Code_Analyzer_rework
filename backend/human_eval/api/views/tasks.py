@@ -1,4 +1,4 @@
-"""Researcher task endpoints (owner A): presets, validate-design, candidate-jobs, tasks CRUD, status, duplicate,
+"""Researcher task endpoints (owner A): presets, validate-design, candidate-runs, tasks CRUD, status, duplicate,
 items, preview.
 
 Every task is looked up through ``access.researcher_task`` (owner or staff; 404 for other
@@ -16,7 +16,7 @@ from ninja.responses import Status
 
 from backend.human_eval.api.schemas.common import error_responses
 from backend.human_eval.api.schemas.common import paginated
-from backend.human_eval.api.schemas.tasks import CandidateJobSchema
+from backend.human_eval.api.schemas.tasks import CandidateRunSchema
 from backend.human_eval.api.schemas.tasks import DesignValidationIn
 from backend.human_eval.api.schemas.tasks import DesignValidationSchema
 from backend.human_eval.api.schemas.tasks import ItemSchema
@@ -59,10 +59,10 @@ def validate_design(request, payload: DesignValidationIn):
     return tasks_service.validate_documents(payload.mode, payload.design, payload.settings)
 
 
-@router.get("candidate-jobs/", response=paginated(CandidateJobSchema))
-def get_candidate_jobs(
+@router.get("candidate-runs/", response=paginated(CandidateRunSchema))
+def get_candidate_runs(
     request,
-    experiment_id: str = "",
+    study_id: str = "",
     app_slug: str = "",
     model_id: str = "",
     search: str = "",
@@ -70,10 +70,10 @@ def get_candidate_jobs(
     page: int = 1,
     per_page: int = 20,
 ):
-    """The caller's completed generation jobs that can join a task's pool (TS ``Paginated<CandidateJob>``)."""
-    return pool_service.candidate_jobs(
+    """The caller's completed app runs that can join a task's pool (TS ``Paginated<CandidateRun>``)."""
+    return pool_service.candidate_runs(
         request.auth,
-        experiment_id=experiment_id or None,
+        study_id=study_id or None,
         app_slug=app_slug or None,
         model_id=model_id or None,
         search=search or None,

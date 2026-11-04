@@ -1,7 +1,11 @@
 import { redirect } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
-// Retired route: keep old links (and their query) working.
+// Retired v2 route: one app is generated on the "Generate app" page (spec 2.2); `?model=` pre-fills the model.
 export const load: PageLoad = ({ url }) => {
-  redirect(301, `/sample-generator${url.search || "?mode=agent"}`);
+  const model = url.searchParams.get("model");
+  redirect(
+    301,
+    model ? `/generate?model=${encodeURIComponent(model)}` : "/generate",
+  );
 };

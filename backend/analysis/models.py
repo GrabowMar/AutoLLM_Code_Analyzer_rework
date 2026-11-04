@@ -20,9 +20,6 @@ from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-# Top-level ``result_data`` fields of non-file-map jobs that hold code.
-_JOB_CODE_KEYS = frozenset({"backend", "backend_code", "frontend", "frontend_code", "content"})
-
 
 class ToolKind(models.TextChoices):
     CONTAINER = "container", _("Container CLI")
@@ -289,6 +286,14 @@ class InstalledTool(models.Model):
         return self.status == self.Status.INSTALLED and self.catalog_version != (self.tool.version or "")
 
 
+class CodeScope(models.TextChoices):
+    """The file set of a generation run handed to the analyzers (``RunView.code_files(scope)``)."""
+
+    APP = "app", _("App (whole non-artifact tree)")
+    MODEL = "model", _("Model-written files")
+    SLOT = "slot", _("Slot replacement")
+
+
 class AnalysisRun(models.Model):
     """A single analysis execution against some target code."""
 
@@ -315,16 +320,28 @@ class AnalysisRun(models.Model):
         related_name="runs",
     )
     generation_job = models.ForeignKey(
-        "generation.GenerationJob",
+        "generation.GenerationRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="analysis_runs",
     )
     source_code = models.JSONField(_("source code"), null=True, blank=True)
+    # Which file set of the run was analysed (spec v3 §8.8: always "app" for generation runs, so
+    # dependency scanners see manifests and lockfiles; model/slot attribution is by RunFile.origin at
+    # stats time). Blank for inline-source runs.
+    code_scope = models.CharField(
+        _("code scope"),
+        max_length=8,
+        choices=CodeScope,
+        blank=True,
+        default="",
+    )
+    # H(sorted analysed paths): which files the tools actually received.
+    code_scope_paths_sha = models.CharField(_("code scope paths sha"), max_length=64, blank=True, default="")
     tool_slugs = models.JSONField(_("tool slugs"), default=list, blank=True)
-    # Runs launched together (one per app) share a batch id.
-    batch_id = models.UUIDField(_("batch"), null=True, blank=True, db_index=True)
+    # Runs launched together (one per app) share a launch id.
+    launch_id = models.UUIDField(_("launch"), null=True, blank=True, db_index=True)
     status = models.CharField(
         _("status"),
         max_length=20,
@@ -378,25 +395,18 @@ class AnalysisRun(models.Model):
         )
 
     def get_code_for_analysis(self) -> dict[str, str]:
-        """Resolve the code map to analyze (inline source or generation job)."""
+        """The ``{path: text}`` map to analyze: inline source, or the generation run's **app** scope.
+
+        Analysis always runs on the whole app tree (``RunView.code_files("app")``; for a slot variant the
+        parent tree with the variant's files overlaid): dependency scanners need manifests and lockfiles,
+        and SAST needs the starter's context. Model/slot attribution is by file origin at stats time.
+        """
         if self.source_code:
             return self.source_code
         if self.generation_job_id:
-            data = getattr(self.generation_job, "result_data", None) or {}
-            if isinstance(data, dict):
-                # Copilot jobs carry a real per-file map ({relpath: content}) under
-                # "files"; prefer it so files keep their true paths/extensions.
-                # Empty files stay: an empty __init__.py makes a package, and the
-                # tools must see the tree the app runs with.
-                files = data.get("files")
-                if isinstance(files, dict):
-                    file_map = {k: v for k, v in files.items() if isinstance(v, str)}
-                    if any(v.strip() for v in file_map.values()):
-                        return file_map
-                # Scaffolding/custom jobs: top-level string blobs
-                # (backend_code/frontend_code/content). Other string fields are
-                # metadata (finish_reason, error_detail, …), not code to scan.
-                return {k: v for k, v in data.items() if isinstance(v, str) and k in _JOB_CODE_KEYS}
+            from backend.generation.runs.view import run_view
+
+            return run_view(self.generation_job).code_files("app")
         return {}
 
 

@@ -1,0 +1,2016 @@
+{
+  "knobs": [
+    {
+      "key": "run.max_cost_usd",
+      "class": "R",
+      "class_when_tokens": "O",
+      "where": ["GW", "LED"],
+      "ui_group": "run",
+      "key_limit": true,
+      "type": "float",
+      "unit": "usd",
+      "description": "Hard USD cap per attempt (gateway pre-call reservation)",
+      "defaults": {
+        "frugal": 0.3,
+        "standard": 2.0,
+        "generous": 10.0
+      }
+    },
+    {
+      "key": "run.max_total_tokens",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "run",
+      "key_limit": false,
+      "type": "int",
+      "unit": "tokens",
+      "description": "Sum of prompt + completion tokens",
+      "defaults": {
+        "frugal": 3000000,
+        "standard": 10000000,
+        "generous": 30000000
+      }
+    },
+    {
+      "key": "run.max_uncached_input_tokens",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "run",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "tokens",
+      "description": "Sum of prompt - cached tokens (the cost-relevant input)",
+      "defaults": {
+        "frugal": 1000000,
+        "standard": 4000000,
+        "generous": null
+      }
+    },
+    {
+      "key": "run.max_output_tokens",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "run",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "tokens",
+      "description": "Sum of completion tokens incl. reasoning",
+      "defaults": {
+        "frugal": 150000,
+        "standard": 500000,
+        "generous": null
+      }
+    },
+    {
+      "key": "run.max_llm_requests",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW", "HAR"],
+      "ui_group": "run",
+      "key_limit": false,
+      "type": "int",
+      "unit": "requests",
+      "description": "Successful calls of request class main",
+      "defaults": {
+        "frugal": 40,
+        "standard": 100,
+        "generous": 200
+      }
+    },
+    {
+      "key": "run.max_aux_requests",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "run",
+      "key_limit": false,
+      "type": "int",
+      "unit": "requests",
+      "description": "Successful calls of classes subagent, compaction, auxiliary",
+      "defaults": {
+        "frugal": 10,
+        "standard": 30,
+        "generous": 60
+      }
+    },
+    {
+      "key": "run.max_turns",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["HAR"],
+      "ui_group": "run",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "turns",
+      "description": "Harness-native turn cap where supported (else gateway caps only, recorded)",
+      "defaults": {
+        "frugal": 40,
+        "standard": 100,
+        "generous": 200
+      }
+    },
+    {
+      "key": "run.max_workspace_bytes",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["SBX"],
+      "ui_group": "run",
+      "key_limit": false,
+      "type": "int",
+      "unit": "bytes",
+      "description": "Workspace tar size limit (larger -> output_invalid:workspace_too_large)",
+      "defaults": {
+        "frugal": 209715200,
+        "standard": 524288000,
+        "generous": 1073741824
+      }
+    },
+    {
+      "key": "call.max_output_tokens",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "call",
+      "key_limit": false,
+      "type": "int",
+      "unit": "tokens",
+      "description": "Visible-output cap; upstream max_tokens = this + reasoning.max_tokens, clamped to the model limit",
+      "defaults": {
+        "frugal": 8192,
+        "standard": 16384,
+        "generous": 32000
+      }
+    },
+    {
+      "key": "call.max_input_tokens",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "call",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "tokens",
+      "description": "Refuse a call whose prompt estimate exceeds N (400 context_budget); >= 1.1 x context.max_context_tokens",
+      "defaults": {
+        "frugal": 72000,
+        "standard": 144000,
+        "generous": null
+      }
+    },
+    {
+      "key": "context.max_context_tokens",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["HAR"],
+      "ui_group": "context",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "tokens",
+      "description": "Context window advertised to the harness / compaction threshold",
+      "defaults": {
+        "frugal": 64000,
+        "standard": 128000,
+        "generous": null
+      }
+    },
+    {
+      "key": "context.compaction",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["HAR"],
+      "ui_group": "context",
+      "key_limit": false,
+      "type": "enum harness_default,auto,auto_prune,off",
+      "unit": null,
+      "description": "Harness compaction mode mapping",
+      "defaults": {
+        "frugal": "auto_prune",
+        "standard": "harness_default",
+        "generous": "harness_default"
+      }
+    },
+    {
+      "key": "reasoning",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "reasoning",
+      "key_limit": true,
+      "type": "{mode: provider_default|effort|max_tokens, effort?, max_tokens?}",
+      "unit": null,
+      "description": "Forced OpenRouter reasoning; exactly one of effort / max_tokens",
+      "defaults": {
+        "frugal": {
+          "mode": "effort",
+          "effort": "low",
+          "max_tokens": null
+        },
+        "standard": {
+          "mode": "provider_default",
+          "effort": null,
+          "max_tokens": null
+        },
+        "generous": {
+          "mode": "effort",
+          "effort": "high",
+          "max_tokens": null
+        }
+      }
+    },
+    {
+      "key": "reasoning.exclude",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "reasoning",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Ask the provider not to return reasoning text (forced false for replaying protocols)",
+      "defaults": {
+        "frugal": false,
+        "standard": false,
+        "generous": false
+      }
+    },
+    {
+      "key": "caching.prompt_cache",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "caching",
+      "key_limit": false,
+      "type": "enum auto,on,off",
+      "unit": null,
+      "description": "on: inject cache_control for explicit-cache providers; auto: provider-implicit only; off: strip",
+      "defaults": {
+        "frugal": "on",
+        "standard": "on",
+        "generous": "on"
+      }
+    },
+    {
+      "key": "caching.ttl",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "caching",
+      "key_limit": false,
+      "type": "enum 5m,1h",
+      "unit": null,
+      "description": "Anthropic cache TTL (1h costs 2x to write)",
+      "defaults": {
+        "frugal": "5m",
+        "standard": "5m",
+        "generous": "1h"
+      }
+    },
+    {
+      "key": "caching.sticky_session",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "caching",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "session_id = run uuid on every forwarded call",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": true
+      }
+    },
+    {
+      "key": "routing.provider_sort",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "enum none,price,throughput,latency",
+      "unit": null,
+      "description": "OpenRouter provider.sort (never the object form)",
+      "defaults": {
+        "frugal": "price",
+        "standard": "none",
+        "generous": "none"
+      }
+    },
+    {
+      "key": "routing.max_price",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "{prompt, completion} | 'model×k' | null",
+      "unit": "usd_per_mtok",
+      "description": "OpenRouter provider.max_price (hard filter; no provider -> infra_error:no_provider)",
+      "defaults": {
+        "frugal": "model×1.25",
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "routing.allow_fallbacks",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "OpenRouter provider.allow_fallbacks",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": true
+      }
+    },
+    {
+      "key": "routing.only",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "list[str]",
+      "unit": null,
+      "description": "Provider allow list",
+      "defaults": {
+        "frugal": [],
+        "standard": [],
+        "generous": []
+      }
+    },
+    {
+      "key": "routing.ignore",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "list[str]",
+      "unit": null,
+      "description": "Provider deny list",
+      "defaults": {
+        "frugal": [],
+        "standard": [],
+        "generous": []
+      }
+    },
+    {
+      "key": "routing.order",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "list[str]",
+      "unit": null,
+      "description": "Provider order list",
+      "defaults": {
+        "frugal": [],
+        "standard": [],
+        "generous": []
+      }
+    },
+    {
+      "key": "routing.quantizations",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "list[str]",
+      "unit": null,
+      "description": "Quantization floor",
+      "defaults": {
+        "frugal": ["fp8", "bf16", "fp16", "fp32"],
+        "standard": ["fp8", "bf16", "fp16", "fp32"],
+        "generous": ["fp8", "bf16", "fp16", "fp32"]
+      }
+    },
+    {
+      "key": "routing.require_parameters",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Only providers that support every forced parameter",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": true
+      }
+    },
+    {
+      "key": "routing.data_collection",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "enum allow,deny",
+      "unit": null,
+      "description": "Privacy filter (shrinks the provider pool)",
+      "defaults": {
+        "frugal": "allow",
+        "standard": "allow",
+        "generous": "allow"
+      }
+    },
+    {
+      "key": "routing.zdr",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Zero-data-retention filter",
+      "defaults": {
+        "frugal": false,
+        "standard": false,
+        "generous": false
+      }
+    },
+    {
+      "key": "routing.preferred_min_throughput",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "float|null",
+      "unit": "tokens_per_s",
+      "description": "Soft reordering",
+      "defaults": {
+        "frugal": null,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "routing.preferred_max_latency",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "routing",
+      "key_limit": false,
+      "type": "float|null",
+      "unit": "s",
+      "description": "Soft reordering",
+      "defaults": {
+        "frugal": null,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "routing.serving_tier",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["GW", "SLT"],
+      "ui_group": "routing",
+      "key_limit": true,
+      "type": "enum standard,flex,batch,auto_batch",
+      "unit": null,
+      "description": "batch only with slot_executor=single_shot; auto_batch resolves per study; agentic runs are standard",
+      "defaults": {
+        "frugal": "auto_batch",
+        "standard": "standard",
+        "generous": "standard"
+      }
+    },
+    {
+      "key": "time.wall_clock_s",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["SBX"],
+      "ui_group": "time",
+      "key_limit": false,
+      "type": "int",
+      "unit": "s",
+      "description": "Harness wall clock (timeout -k 15)",
+      "defaults": {
+        "frugal": 1200,
+        "standard": 3600,
+        "generous": 7200
+      }
+    },
+    {
+      "key": "time.idle_timeout_s",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["SBX"],
+      "ui_group": "time",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "s",
+      "description": "Stop when no gateway call ended and no workspace change for N s (paused while in flight or CPU busy)",
+      "defaults": {
+        "frugal": 300,
+        "standard": 600,
+        "generous": 1200
+      }
+    },
+    {
+      "key": "time.command_timeout_s",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["HAR"],
+      "ui_group": "time",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "s",
+      "description": "Per-shell-command timeout (overrides the preset when set)",
+      "defaults": {
+        "frugal": 120,
+        "standard": 300,
+        "generous": 600
+      }
+    },
+    {
+      "key": "time.llm_call_timeout_s",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "time",
+      "key_limit": false,
+      "type": "int",
+      "unit": "s",
+      "description": "Upstream timeout per call",
+      "defaults": {
+        "frugal": 300,
+        "standard": 600,
+        "generous": 900
+      }
+    },
+    {
+      "key": "retries.upstream_retries",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "retries",
+      "key_limit": false,
+      "type": "int 0-8",
+      "unit": "retries",
+      "description": "Gateway retries before the first byte",
+      "defaults": {
+        "frugal": 2,
+        "standard": 4,
+        "generous": 6
+      }
+    },
+    {
+      "key": "retries.backoff_s",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "retries",
+      "key_limit": false,
+      "type": "float",
+      "unit": "s",
+      "description": "Base backoff",
+      "defaults": {
+        "frugal": 2.0,
+        "standard": 2.0,
+        "generous": 3.0
+      }
+    },
+    {
+      "key": "retries.retry_on",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "retries",
+      "key_limit": false,
+      "type": "set",
+      "unit": null,
+      "description": "Statuses retried",
+      "defaults": {
+        "frugal": ["429", "5xx"],
+        "standard": ["408", "429", "5xx"],
+        "generous": ["408", "429", "5xx"]
+      }
+    },
+    {
+      "key": "retries.infra_retries",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["EXE"],
+      "ui_group": "retries",
+      "key_limit": false,
+      "type": "int",
+      "unit": "retries",
+      "description": "Re-queue a whole run after infra_error (same manifest and seed, attempt+1)",
+      "defaults": {
+        "frugal": 1,
+        "standard": 2,
+        "generous": 3
+      }
+    },
+    {
+      "key": "retries.count_failed_calls",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW"],
+      "ui_group": "retries",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Whether failed upstream calls count toward run.max_llm_requests",
+      "defaults": {
+        "frugal": false,
+        "standard": false,
+        "generous": false
+      }
+    },
+    {
+      "key": "sandbox.memory",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["SBX"],
+      "ui_group": "sandbox",
+      "key_limit": false,
+      "type": "str",
+      "unit": "bytes",
+      "description": "Agent container memory; resolved per study to max(policy, every stack profile minimum)",
+      "defaults": {
+        "frugal": "2g",
+        "standard": "3g",
+        "generous": "4g"
+      }
+    },
+    {
+      "key": "sandbox.nano_cpus",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["SBX"],
+      "ui_group": "sandbox",
+      "key_limit": false,
+      "type": "int",
+      "unit": "nano_cpus",
+      "description": "Agent container CPUs; resolved per study like sandbox.memory",
+      "defaults": {
+        "frugal": 1000000000,
+        "standard": 2000000000,
+        "generous": 4000000000
+      }
+    },
+    {
+      "key": "network_policy",
+      "class": "C",
+      "class_when_tokens": null,
+      "where": ["SBX", "GW"],
+      "ui_group": "network_policy",
+      "key_limit": false,
+      "type": "enum none,packages",
+      "unit": null,
+      "description": "Sandbox egress",
+      "defaults": {
+        "frugal": "packages",
+        "standard": "packages",
+        "generous": "packages"
+      }
+    },
+    {
+      "key": "concurrency.study_max_parallel",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SCH"],
+      "ui_group": "concurrency",
+      "key_limit": true,
+      "type": "int",
+      "unit": "runs",
+      "description": "Max running runs of the study",
+      "defaults": {
+        "frugal": 2,
+        "standard": 4,
+        "generous": 8
+      }
+    },
+    {
+      "key": "concurrency.per_endpoint",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SCH"],
+      "ui_group": "concurrency",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "runs",
+      "description": "Extra cap below LLMEndpoint.max_concurrency",
+      "defaults": {
+        "frugal": 1,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "concurrency.per_model",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SCH"],
+      "ui_group": "concurrency",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "runs",
+      "description": "Max running runs per model",
+      "defaults": {
+        "frugal": 1,
+        "standard": 2,
+        "generous": null
+      }
+    },
+    {
+      "key": "concurrency.per_provider",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SCH"],
+      "ui_group": "concurrency",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "runs",
+      "description": "Max running runs per pinned upstream provider",
+      "defaults": {
+        "frugal": null,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "concurrency.rpm_per_model",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SCH", "GW"],
+      "ui_group": "concurrency",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "requests_per_min",
+      "description": "Gateway-side rate limit per model across the study",
+      "defaults": {
+        "frugal": 20,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "concurrency.max_resident_models",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SCH"],
+      "ui_group": "concurrency",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "models",
+      "description": "Local endpoints: residency-aware blocking (scheduling=auto)",
+      "defaults": {
+        "frugal": 1,
+        "standard": 1,
+        "generous": 2
+      }
+    },
+    {
+      "key": "concurrency.eval_parallel",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SCH"],
+      "ui_group": "concurrency",
+      "key_limit": false,
+      "type": "int",
+      "unit": "evaluations",
+      "description": "Max concurrent evaluations of this study",
+      "defaults": {
+        "frugal": 1,
+        "standard": 2,
+        "generous": 2
+      }
+    },
+    {
+      "key": "cell.max_cost_usd",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["LED"],
+      "ui_group": "cell",
+      "key_limit": true,
+      "type": "float",
+      "unit": "usd",
+      "description": "Sum over all attempts of a cell; beyond it, no retries (excluded:cell_budget)",
+      "defaults": {
+        "frugal": 0.6,
+        "standard": 4.0,
+        "generous": 20.0
+      }
+    },
+    {
+      "key": "study.max_cost_usd",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["LED", "SCH"],
+      "ui_group": "study",
+      "key_limit": true,
+      "type": "float | 'auto'",
+      "unit": "usd",
+      "description": "Hard study cap; auto = round-up(p90_total x 1.1 / 1.25 / 1.5), confirmed in LaunchDialog",
+      "defaults": {
+        "frugal": "auto",
+        "standard": "auto",
+        "generous": "auto"
+      }
+    },
+    {
+      "key": "study.max_total_tokens",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["LED", "SCH", "STU"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "tokens",
+      "description": "Token cap that binds for local and subscription endpoints",
+      "defaults": {
+        "frugal": null,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "study.max_runs",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["LED", "SCH", "STU"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "runs",
+      "description": "Run-count cap",
+      "defaults": {
+        "frugal": null,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "study.max_wall_hours",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["LED", "SCH", "STU"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "float|null",
+      "unit": "h",
+      "description": "Wall-clock cap for the whole study",
+      "defaults": {
+        "frugal": null,
+        "standard": null,
+        "generous": null
+      }
+    },
+    {
+      "key": "study.cap_basis",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["LED"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "enum billed,list,auto",
+      "unit": null,
+      "description": "auto = list when any condition uses an endpoint with cost_basis != billed",
+      "defaults": {
+        "frugal": "auto",
+        "standard": "auto",
+        "generous": "auto"
+      }
+    },
+    {
+      "key": "study.budget_basis",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["PLN"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "enum usd,tokens,auto",
+      "unit": null,
+      "description": "auto = tokens for confirmatory multi-model studies, else usd",
+      "defaults": {
+        "frugal": "auto",
+        "standard": "auto",
+        "generous": "auto"
+      }
+    },
+    {
+      "key": "study.alert_at",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["LED"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "list[float]",
+      "unit": "fraction",
+      "description": "Fractions of the cap that fire budget_alert",
+      "defaults": {
+        "frugal": [0.5, 0.8],
+        "standard": [0.5, 0.8],
+        "generous": [0.8]
+      }
+    },
+    {
+      "key": "study.on_budget_exhausted",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["SCH"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "enum pause,stop_balanced,stop",
+      "unit": null,
+      "description": "stop_balanced: finish started blocks, claim no new block",
+      "defaults": {
+        "frugal": "stop_balanced",
+        "standard": "pause",
+        "generous": "pause"
+      }
+    },
+    {
+      "key": "study.stop_rules",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "study",
+      "key_limit": false,
+      "type": "list[StopRule]",
+      "unit": null,
+      "description": "Stop rules (section 4.6); default set in every tier",
+      "defaults": {
+        "frugal": [
+          {
+            "code": "infra_error_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.3,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "no_provider_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.2,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "consecutive_failures",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 5.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "cost_overrun",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 2.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "spend_fraction",
+            "scope": "study",
+            "window": 20,
+            "threshold": 1.0,
+            "action": "alert",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          }
+        ],
+        "standard": [
+          {
+            "code": "infra_error_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.3,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "no_provider_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.2,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "consecutive_failures",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 5.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "cost_overrun",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 2.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "spend_fraction",
+            "scope": "study",
+            "window": 20,
+            "threshold": 1.0,
+            "action": "alert",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          }
+        ],
+        "generous": [
+          {
+            "code": "infra_error_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.3,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "no_provider_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.2,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "consecutive_failures",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 5.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "cost_overrun",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 2.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "spend_fraction",
+            "scope": "study",
+            "window": 20,
+            "threshold": 1.0,
+            "action": "alert",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "pilot.enabled",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["PLN"],
+      "ui_group": "pilot",
+      "key_limit": true,
+      "type": "bool",
+      "unit": null,
+      "description": "Launch stage pilot first",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": false
+      }
+    },
+    {
+      "key": "pilot.repeats",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["PLN"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "int",
+      "unit": "repeats",
+      "description": "Repeats per (condition, unit) in the pilot",
+      "defaults": {
+        "frugal": 1,
+        "standard": 1,
+        "generous": 2
+      }
+    },
+    {
+      "key": "pilot.units",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["PLN"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "'all' | int",
+      "unit": "units",
+      "description": "All units or a seeded random k",
+      "defaults": {
+        "frugal": 3,
+        "standard": "all",
+        "generous": "all"
+      }
+    },
+    {
+      "key": "pilot.smoke_first",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["PLN", "SCH"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Before the pilot: 1 cell per new (harness, model) pair on the cheapest unit",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": false
+      }
+    },
+    {
+      "key": "pilot.reuse_as_main",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["PLN"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Exploratory only, same plan_hash: pilot cells become main repeat 0 (forced false for confirmatory)",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": true
+      }
+    },
+    {
+      "key": "pilot.gates.max_infra_error_rate",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "infra_error / runs",
+      "defaults": {
+        "frugal": 0.2,
+        "standard": 0.2,
+        "generous": 0.3
+      }
+    },
+    {
+      "key": "pilot.gates.min_build_rate",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "built / usable",
+      "defaults": {
+        "frugal": 0.5,
+        "standard": 0.5,
+        "generous": 0.3
+      }
+    },
+    {
+      "key": "pilot.gates.max_cost_overrun",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "ratio",
+      "description": "mean cost / estimate",
+      "defaults": {
+        "frugal": 1.5,
+        "standard": 1.5,
+        "generous": 2.0
+      }
+    },
+    {
+      "key": "pilot.gates.max_cap_hit_rate",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "runs with budget_exhausted:*, wall_clock or idle_timeout notes",
+      "defaults": {
+        "frugal": 0.3,
+        "standard": 0.3,
+        "generous": 0.5
+      }
+    },
+    {
+      "key": "pilot.gates.max_truncation_rate",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "truncated runs (BUDGET, WALL_CLOCK, IDLE, MAX_TURNS)",
+      "defaults": {
+        "frugal": 0.2,
+        "standard": 0.2,
+        "generous": 0.2
+      }
+    },
+    {
+      "key": "pilot.gates.max_call_truncation_rate",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "runs with >= 1 call ending finish_reason=length",
+      "defaults": {
+        "frugal": 0.2,
+        "standard": 0.2,
+        "generous": 0.2
+      }
+    },
+    {
+      "key": "pilot.gates.max_wall_clock_rate",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "WALL_CLOCK terminations",
+      "defaults": {
+        "frugal": 0.15,
+        "standard": 0.15,
+        "generous": 0.15
+      }
+    },
+    {
+      "key": "pilot.gates.max_oom_rate",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "OOM terminations (per stack)",
+      "defaults": {
+        "frugal": 0.05,
+        "standard": 0.05,
+        "generous": 0.05
+      }
+    },
+    {
+      "key": "pilot.gates.usd_cap_binding",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "float",
+      "unit": "fraction",
+      "description": "only when budget_basis=tokens: share of budget_exhausted:cost",
+      "defaults": {
+        "frugal": 0.05,
+        "standard": 0.05,
+        "generous": 0.05
+      }
+    },
+    {
+      "key": "pilot.auto_expand",
+      "class": "S",
+      "class_when_tokens": null,
+      "where": ["STU"],
+      "ui_group": "pilot",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Expand automatically when every gate passes",
+      "defaults": {
+        "frugal": false,
+        "standard": false,
+        "generous": true
+      }
+    },
+    {
+      "key": "caches.dependency_cache",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["SBX", "BLD"],
+      "ui_group": "caches",
+      "key_limit": false,
+      "type": "enum off,shared_ro",
+      "unit": null,
+      "description": "Read-only pull-through caches for pip/npm/go/maven",
+      "defaults": {
+        "frugal": "shared_ro",
+        "standard": "shared_ro",
+        "generous": "shared_ro"
+      }
+    },
+    {
+      "key": "caches.reuse_sample_images",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["EVL"],
+      "ui_group": "caches",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Reuse SampleBuildArtifact images by build key",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": true
+      }
+    },
+    {
+      "key": "caches.reuse_parent_build",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["EVL"],
+      "ui_group": "caches",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Slot: build variants on the parent's BuildKit layers",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": true
+      }
+    },
+    {
+      "key": "caches.reuse_eval_by_tree",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["EVL"],
+      "ui_group": "caches",
+      "key_limit": false,
+      "type": "bool",
+      "unit": null,
+      "description": "Reuse the RunEvaluation of an identical (tree_hash, suite hash, check selection)",
+      "defaults": {
+        "frugal": true,
+        "standard": true,
+        "generous": true
+      }
+    },
+    {
+      "key": "slot.max_output_tokens",
+      "class": "R",
+      "class_when_tokens": null,
+      "where": ["GW", "SLT"],
+      "ui_group": "slot",
+      "key_limit": false,
+      "type": "int|null",
+      "unit": "tokens",
+      "description": "Overrides call.max_output_tokens for single-shot slot calls",
+      "defaults": {
+        "frugal": 4096,
+        "standard": 8192,
+        "generous": 16384
+      }
+    },
+    {
+      "key": "estimate.method",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["PLN"],
+      "ui_group": "estimate",
+      "key_limit": false,
+      "type": "enum priors,heuristic",
+      "unit": null,
+      "description": "Section 4.4",
+      "defaults": {
+        "frugal": "priors",
+        "standard": "priors",
+        "generous": "priors"
+      }
+    },
+    {
+      "key": "estimate.require_confirm_above_usd",
+      "class": "O",
+      "class_when_tokens": null,
+      "where": ["UI"],
+      "ui_group": "estimate",
+      "key_limit": false,
+      "type": "float",
+      "unit": "usd",
+      "description": "Typed confirmation above this p90 total",
+      "defaults": {
+        "frugal": 2.0,
+        "standard": 20.0,
+        "generous": 100.0
+      }
+    }
+  ],
+  "key_limits": [
+    "run.max_cost_usd",
+    "reasoning",
+    "routing.serving_tier",
+    "concurrency.study_max_parallel",
+    "cell.max_cost_usd",
+    "study.max_cost_usd",
+    "pilot.enabled"
+  ],
+  "tiers": {
+    "frugal": {
+      "run": {
+        "max_cost_usd": 0.3,
+        "max_total_tokens": 3000000,
+        "max_uncached_input_tokens": 1000000,
+        "max_output_tokens": 150000,
+        "max_llm_requests": 40,
+        "max_aux_requests": 10,
+        "max_turns": 40,
+        "max_workspace_bytes": 209715200
+      },
+      "call": {
+        "max_output_tokens": 8192,
+        "max_input_tokens": 72000
+      },
+      "context": {
+        "max_context_tokens": 64000,
+        "compaction": "auto_prune"
+      },
+      "reasoning": {
+        "mode": "effort",
+        "effort": "low",
+        "max_tokens": null,
+        "exclude": false
+      },
+      "caching": {
+        "prompt_cache": "on",
+        "ttl": "5m",
+        "sticky_session": true
+      },
+      "routing": {
+        "provider_sort": "price",
+        "max_price": "model×1.25",
+        "allow_fallbacks": true,
+        "only": [],
+        "ignore": [],
+        "order": [],
+        "quantizations": ["fp8", "bf16", "fp16", "fp32"],
+        "require_parameters": true,
+        "data_collection": "allow",
+        "zdr": false,
+        "preferred_min_throughput": null,
+        "preferred_max_latency": null,
+        "serving_tier": "auto_batch"
+      },
+      "time": {
+        "wall_clock_s": 1200,
+        "idle_timeout_s": 300,
+        "command_timeout_s": 120,
+        "llm_call_timeout_s": 300
+      },
+      "retries": {
+        "upstream_retries": 2,
+        "backoff_s": 2.0,
+        "retry_on": ["429", "5xx"],
+        "infra_retries": 1,
+        "count_failed_calls": false
+      },
+      "sandbox": {
+        "memory": "2g",
+        "nano_cpus": 1000000000
+      },
+      "network_policy": "packages",
+      "concurrency": {
+        "study_max_parallel": 2,
+        "per_endpoint": 1,
+        "per_model": 1,
+        "per_provider": null,
+        "rpm_per_model": 20,
+        "max_resident_models": 1,
+        "eval_parallel": 1
+      },
+      "cell": {
+        "max_cost_usd": 0.6
+      },
+      "study": {
+        "max_cost_usd": "auto",
+        "max_total_tokens": null,
+        "max_runs": null,
+        "max_wall_hours": null,
+        "cap_basis": "auto",
+        "budget_basis": "auto",
+        "alert_at": [0.5, 0.8],
+        "on_budget_exhausted": "stop_balanced",
+        "stop_rules": [
+          {
+            "code": "infra_error_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.3,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "no_provider_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.2,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "consecutive_failures",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 5.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "cost_overrun",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 2.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "spend_fraction",
+            "scope": "study",
+            "window": 20,
+            "threshold": 1.0,
+            "action": "alert",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          }
+        ]
+      },
+      "pilot": {
+        "enabled": true,
+        "repeats": 1,
+        "units": 3,
+        "smoke_first": true,
+        "reuse_as_main": true,
+        "gates": {
+          "max_infra_error_rate": 0.2,
+          "min_build_rate": 0.5,
+          "max_cost_overrun": 1.5,
+          "max_cap_hit_rate": 0.3,
+          "max_truncation_rate": 0.2,
+          "max_call_truncation_rate": 0.2,
+          "max_wall_clock_rate": 0.15,
+          "max_oom_rate": 0.05,
+          "usd_cap_binding": 0.05
+        },
+        "auto_expand": false
+      },
+      "caches": {
+        "dependency_cache": "shared_ro",
+        "reuse_sample_images": true,
+        "reuse_parent_build": true,
+        "reuse_eval_by_tree": true
+      },
+      "slot": {
+        "max_output_tokens": 4096
+      },
+      "estimate": {
+        "method": "priors",
+        "require_confirm_above_usd": 2.0
+      }
+    },
+    "standard": {
+      "run": {
+        "max_cost_usd": 2.0,
+        "max_total_tokens": 10000000,
+        "max_uncached_input_tokens": 4000000,
+        "max_output_tokens": 500000,
+        "max_llm_requests": 100,
+        "max_aux_requests": 30,
+        "max_turns": 100,
+        "max_workspace_bytes": 524288000
+      },
+      "call": {
+        "max_output_tokens": 16384,
+        "max_input_tokens": 144000
+      },
+      "context": {
+        "max_context_tokens": 128000,
+        "compaction": "harness_default"
+      },
+      "reasoning": {
+        "mode": "provider_default",
+        "effort": null,
+        "max_tokens": null,
+        "exclude": false
+      },
+      "caching": {
+        "prompt_cache": "on",
+        "ttl": "5m",
+        "sticky_session": true
+      },
+      "routing": {
+        "provider_sort": "none",
+        "max_price": null,
+        "allow_fallbacks": true,
+        "only": [],
+        "ignore": [],
+        "order": [],
+        "quantizations": ["fp8", "bf16", "fp16", "fp32"],
+        "require_parameters": true,
+        "data_collection": "allow",
+        "zdr": false,
+        "preferred_min_throughput": null,
+        "preferred_max_latency": null,
+        "serving_tier": "standard"
+      },
+      "time": {
+        "wall_clock_s": 3600,
+        "idle_timeout_s": 600,
+        "command_timeout_s": 300,
+        "llm_call_timeout_s": 600
+      },
+      "retries": {
+        "upstream_retries": 4,
+        "backoff_s": 2.0,
+        "retry_on": ["408", "429", "5xx"],
+        "infra_retries": 2,
+        "count_failed_calls": false
+      },
+      "sandbox": {
+        "memory": "3g",
+        "nano_cpus": 2000000000
+      },
+      "network_policy": "packages",
+      "concurrency": {
+        "study_max_parallel": 4,
+        "per_endpoint": null,
+        "per_model": 2,
+        "per_provider": null,
+        "rpm_per_model": null,
+        "max_resident_models": 1,
+        "eval_parallel": 2
+      },
+      "cell": {
+        "max_cost_usd": 4.0
+      },
+      "study": {
+        "max_cost_usd": "auto",
+        "max_total_tokens": null,
+        "max_runs": null,
+        "max_wall_hours": null,
+        "cap_basis": "auto",
+        "budget_basis": "auto",
+        "alert_at": [0.5, 0.8],
+        "on_budget_exhausted": "pause",
+        "stop_rules": [
+          {
+            "code": "infra_error_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.3,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "no_provider_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.2,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "consecutive_failures",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 5.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "cost_overrun",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 2.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "spend_fraction",
+            "scope": "study",
+            "window": 20,
+            "threshold": 1.0,
+            "action": "alert",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          }
+        ]
+      },
+      "pilot": {
+        "enabled": true,
+        "repeats": 1,
+        "units": "all",
+        "smoke_first": true,
+        "reuse_as_main": true,
+        "gates": {
+          "max_infra_error_rate": 0.2,
+          "min_build_rate": 0.5,
+          "max_cost_overrun": 1.5,
+          "max_cap_hit_rate": 0.3,
+          "max_truncation_rate": 0.2,
+          "max_call_truncation_rate": 0.2,
+          "max_wall_clock_rate": 0.15,
+          "max_oom_rate": 0.05,
+          "usd_cap_binding": 0.05
+        },
+        "auto_expand": false
+      },
+      "caches": {
+        "dependency_cache": "shared_ro",
+        "reuse_sample_images": true,
+        "reuse_parent_build": true,
+        "reuse_eval_by_tree": true
+      },
+      "slot": {
+        "max_output_tokens": 8192
+      },
+      "estimate": {
+        "method": "priors",
+        "require_confirm_above_usd": 20.0
+      }
+    },
+    "generous": {
+      "run": {
+        "max_cost_usd": 10.0,
+        "max_total_tokens": 30000000,
+        "max_uncached_input_tokens": null,
+        "max_output_tokens": null,
+        "max_llm_requests": 200,
+        "max_aux_requests": 60,
+        "max_turns": 200,
+        "max_workspace_bytes": 1073741824
+      },
+      "call": {
+        "max_output_tokens": 32000,
+        "max_input_tokens": null
+      },
+      "context": {
+        "max_context_tokens": null,
+        "compaction": "harness_default"
+      },
+      "reasoning": {
+        "mode": "effort",
+        "effort": "high",
+        "max_tokens": null,
+        "exclude": false
+      },
+      "caching": {
+        "prompt_cache": "on",
+        "ttl": "1h",
+        "sticky_session": true
+      },
+      "routing": {
+        "provider_sort": "none",
+        "max_price": null,
+        "allow_fallbacks": true,
+        "only": [],
+        "ignore": [],
+        "order": [],
+        "quantizations": ["fp8", "bf16", "fp16", "fp32"],
+        "require_parameters": true,
+        "data_collection": "allow",
+        "zdr": false,
+        "preferred_min_throughput": null,
+        "preferred_max_latency": null,
+        "serving_tier": "standard"
+      },
+      "time": {
+        "wall_clock_s": 7200,
+        "idle_timeout_s": 1200,
+        "command_timeout_s": 600,
+        "llm_call_timeout_s": 900
+      },
+      "retries": {
+        "upstream_retries": 6,
+        "backoff_s": 3.0,
+        "retry_on": ["408", "429", "5xx"],
+        "infra_retries": 3,
+        "count_failed_calls": false
+      },
+      "sandbox": {
+        "memory": "4g",
+        "nano_cpus": 4000000000
+      },
+      "network_policy": "packages",
+      "concurrency": {
+        "study_max_parallel": 8,
+        "per_endpoint": null,
+        "per_model": null,
+        "per_provider": null,
+        "rpm_per_model": null,
+        "max_resident_models": 2,
+        "eval_parallel": 2
+      },
+      "cell": {
+        "max_cost_usd": 20.0
+      },
+      "study": {
+        "max_cost_usd": "auto",
+        "max_total_tokens": null,
+        "max_runs": null,
+        "max_wall_hours": null,
+        "cap_basis": "auto",
+        "budget_basis": "auto",
+        "alert_at": [0.8],
+        "on_budget_exhausted": "pause",
+        "stop_rules": [
+          {
+            "code": "infra_error_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.3,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "no_provider_rate",
+            "scope": "study",
+            "window": 20,
+            "threshold": 0.2,
+            "action": "pause",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "consecutive_failures",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 5.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "cost_overrun",
+            "scope": "condition",
+            "window": 5,
+            "threshold": 2.0,
+            "action": "pause_condition",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          },
+          {
+            "code": "spend_fraction",
+            "scope": "study",
+            "window": 20,
+            "threshold": 1.0,
+            "action": "alert",
+            "stages": ["pilot", "main"],
+            "features": [],
+            "n_min": 10,
+            "n_max": null
+          }
+        ]
+      },
+      "pilot": {
+        "enabled": false,
+        "repeats": 2,
+        "units": "all",
+        "smoke_first": false,
+        "reuse_as_main": true,
+        "gates": {
+          "max_infra_error_rate": 0.3,
+          "min_build_rate": 0.3,
+          "max_cost_overrun": 2.0,
+          "max_cap_hit_rate": 0.5,
+          "max_truncation_rate": 0.2,
+          "max_call_truncation_rate": 0.2,
+          "max_wall_clock_rate": 0.15,
+          "max_oom_rate": 0.05,
+          "usd_cap_binding": 0.05
+        },
+        "auto_expand": true
+      },
+      "caches": {
+        "dependency_cache": "shared_ro",
+        "reuse_sample_images": true,
+        "reuse_parent_build": true,
+        "reuse_eval_by_tree": true
+      },
+      "slot": {
+        "max_output_tokens": 16384
+      },
+      "estimate": {
+        "method": "priors",
+        "require_confirm_above_usd": 100.0
+      }
+    }
+  }
+}

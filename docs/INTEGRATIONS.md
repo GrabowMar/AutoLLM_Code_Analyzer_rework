@@ -7,7 +7,7 @@ LLM Lab connects outward in four ways, managed under **Settings → Connections*
 | [MCP server](#1-mcp-server) | Claude, ChatGPT, Cursor, VS Code, Codex, Gemini CLI, Windsurf … drive LLM Lab with tools | `#mcp` |
 | [Cloud LLM providers](#2-cloud-llm-providers) | Claude API, OpenAI, Gemini, Mistral, Groq, DeepSeek, xAI, Together, Fireworks, Cerebras, NVIDIA NIM as endpoints next to OpenRouter | `#providers` |
 | [GitHub](#3-github) | Export a generated app to a repo (one commit) or Gist; findings as SARIF in code scanning | `#github` |
-| [Notifications](#4-notifications-webhooks) | Slack, Discord, Teams, ntfy, Telegram or signed JSON webhooks when jobs, analyses, experiments and reports finish | `#notifications` |
+| [Notifications](#4-notifications-webhooks) | Slack, Discord, Teams, ntfy, Telegram or signed JSON webhooks when generation runs, analyses, studies and reports finish | `#notifications` |
 
 The old `/integrations` page redirects to these sections (`?tab=github` → `#github`).
 
@@ -28,16 +28,16 @@ Create a connection token in **Settings → MCP server** (it mints one via `POST
 > [!WARNING]
 > Scopes only restrict the MCP endpoint. The same token sent as a Bearer header to the REST API has its user's full rights.
 
-**Tools.** 52 in total (`mcp/tools.py`):
+**Tools.** 36 in total (`mcp/tools.py`):
 
-- *47 curated tools*, each mapped to one REST operation with its input schema taken from the OpenAPI definition, so tools never drift from the API. They cover account and catalog (`whoami`, `search_models`, `get_model`, `compare_models`, `list_app_templates`, `list_stacks`) and generation (`generate_apps`, `generate_custom`, `preview_agent_jobs`, `create_agent_jobs`, `list_generation_jobs`, `get_generation_job`, `get_job_artifacts`, `generation_stats`, `cancel_generation_job`, `retry_generation_job`). Runtime: `build_app`, `smoke_test_app`, `list_containers`, `container_logs`, `start_container`, `stop_container`. Analysis: `list_analyzers`, `analyze`, `list_analysis_runs`, `get_analysis_run`, `list_findings`, `cancel_analysis_run`. Results: `rankings`, `top_models`, `dashboard`, `top_findings`, `list_reports`, `generate_report`, `get_report_data`. Experiments: `list_experiments`, `preview_experiment`, `create_experiment`, `get_experiment`, `experiment_status`, `experiment_results`, `launch_experiment`, `pause_experiment`, `resume_experiment`, `cancel_experiment`. Infrastructure: `list_endpoints`, `execution_queue`.
+- *31 curated tools*, each mapped to one REST operation with its input schema taken from the OpenAPI definition, so tools never drift from the API. Account and catalog: `whoami`, `search_models`, `get_model`, `compare_models`. Studies and runs: `list_studies`, `get_study`, `resolve_study` (free dry run with the cost estimate), `launch_study` (spends credits), `list_runs`, `get_run`; a study or run tool whose operation is not published yet is registered disabled. Runtime: `build_app`, `smoke_test_app`, `list_containers`, `container_logs`, `start_container`, `stop_container`. Analysis: `list_analyzers`, `analyze`, `list_analysis_runs`, `get_analysis_run`, `list_findings`, `cancel_analysis_run`. Results: `rankings`, `top_models`, `dashboard`, `top_findings`, `list_reports`, `generate_report`, `get_report_data`. Infrastructure: `list_endpoints`, `execution_queue`.
 - *3 generic tools*: `find_api_operations` → `describe_api_operation` → `call_api` reach every REST operation not excluded above (the tool descriptions do not hard-code a count).
 - *2 docs tools*: `search_docs`, `read_doc`.
 
-A `read` token sees 33 tools. `?toolset=core` (e.g. `/api/mcp?toolset=core`) lists only 20 core tools (about 13k characters of definitions instead of about 48k) for clients with a small tool budget. Combined with a `read` token, that leaves 18.
+A `read` token can call only read operations (write calls are refused). `?toolset=core` (e.g. `/api/mcp?toolset=core`) lists only 19 core tools for clients with a small tool budget.
 
 **Resources**: every docs page (`llmlab://docs/<slug>`) and `llmlab://openapi.json`.
-**Prompts**: `compare_models` (`task`, `models`), `triage_findings` (`run_id`), `experiment_report` (`experiment_id`), `platform_health`.
+**Prompts**: `compare_models` (`task`, `models`), `triage_findings` (`run_id`), `study_report` (`study_id`), `platform_health`.
 
 **Connecting clients.** **Settings → MCP server** renders ready-to-paste snippets with your token filled in (`GET /api/integrations/mcp/config/`):
 
@@ -55,7 +55,7 @@ Generation and agent runs spend LLM credits. The server instructions ask the mod
 
 ## 2. Cloud LLM providers
 
-`GET /api/integrations/providers/` lists the presets (open to every user) with any endpoints already connected from them. `POST /{preset_id}/test/` checks a key without saving it. `POST /{preset_id}/connect/` validates the key against the provider's `/models`, creates a private direct `openai_compatible` endpoint (key encrypted at rest), runs the inventory and hides non-chat models (embeddings, TTS, image, moderation …). Test and connect are staff-only, like every direct endpoint. Models appear as `local-<endpoint slug>/<model>` and can be used in experiments and agent runs like any other endpoint (see [Local models](/docs/LOCAL_MODELS)).
+`GET /api/integrations/providers/` lists the presets (open to every user) with any endpoints already connected from them. `POST /{preset_id}/test/` checks a key without saving it. `POST /{preset_id}/connect/` validates the key against the provider's `/models`, creates a private direct `openai_compatible` endpoint (key encrypted at rest), runs the inventory and hides non-chat models (embeddings, TTS, image, moderation …). Test and connect are staff-only, like every direct endpoint. Models appear as `local-<endpoint slug>/<model>` and can be used in studies like any other endpoint (see [Local models](/docs/LOCAL_MODELS)).
 
 Provider quirks handled by the upstream caller (`backend/inference/upstream.py`):
 
@@ -68,14 +68,14 @@ Caveats: non-chat models are hidden only once, at connect time. `/v1/models` is 
 
 Store a token in **Settings → GitHub** or with `PUT /api/credentials/github/` (`{"api_key": "<PAT>"}`). A classic token needs scope `repo`, plus `gist` and `security_events` as needed. A fine-grained token needs Administration and Contents write. `GET /api/integrations/github/status/` shows the connected login, the token type and (classic tokens only) its scopes.
 
-`POST /api/integrations/github/export/` takes `{application_id, target: "repo"|"gist", repo_name, private, description?, upload_sarif, include_scaffold}`. `application_id` is the generation job UUID. For a repo, it creates the repository and pushes the app (stack skeleton plus generated code) as one commit. Junk and files over 1 MB are skipped, with a 50 MB total cap. The commit adds an LLM Lab README (model, template, findings summary), written as `LLM_LAB_EXPORT.md` if the app has its own `README.md`. With `upload_sarif`, the app's findings go to GitHub code scanning, which needs a public repo or GitHub Advanced Security. The upload has one SARIF run per tool, with each result's level taken from the tool's own label (`none` when the tool rates nothing). Results code scanning cannot place on a repository file are left out: findings without a file, DAST findings (their location is a URL on the running app) and findings in files the export did not include. Gists hold only the generated files, flattened, up to 50 files and 1 MB in total.
+`POST /api/integrations/github/export/` takes `{application_id, target: "repo"|"gist", repo_name, private, description?, upload_sarif, scope: "app"|"model"}`. `application_id` is the generation run UUID. For a repo, it creates the repository and pushes the app as one commit: `scope=app` (default) is the buildable tree (starter files plus the model's files), `scope=model` only the files the model wrote. Junk and files over 1 MB are skipped, with a 50 MB total cap. The commit adds an LLM Lab README (model, task, findings summary), written as `LLM_LAB_EXPORT.md` if the app has its own `README.md`. With `upload_sarif`, the app's findings go to GitHub code scanning, which needs a public repo or GitHub Advanced Security. The upload has one SARIF run per tool, with each result's level taken from the tool's own label (`none` when the tool rates nothing). Results code scanning cannot place on a repository file are left out: findings without a file, DAST findings (their location is a URL on the running app) and findings in files the export did not include. Gists hold only the generated files, flattened, up to 50 files and 1 MB in total.
 
 ## 4. Notifications (webhooks)
 
-`/api/integrations/webhooks/` allows up to 25 subscriptions per user. Each has a kind (`slack`, `discord`, `teams`, `ntfy`, `telegram`, `generic`), a target and a set of events (`GET /event-types/`): `generation.{completed,failed,cancelled}`, `analysis.{completed,failed,cancelled}`, `experiment.{completed,cancelled}`, `report.{completed,failed}`. Jobs inside an experiment only notify with `include_experiment_jobs`.
+`/api/integrations/webhooks/` allows up to 25 subscriptions per user. Each has a kind (`slack`, `discord`, `teams`, `ntfy`, `telegram`, `generic`), a target and a set of events (`GET /event-types/`): `run.{completed,failed,cancelled}`, `analysis.{completed,failed,cancelled}`, `study.{completed,stopped,cancelled}`, `report.{completed,failed}`. Runs inside a study only notify with `include_study_runs`. `run.completed` means the run finished; its outcome may still be `build_fail`, `start_fail`, ….
 
 - URLs and secrets are encrypted and write-only. Telegram takes a bot token (as the secret) and `telegram_chat_id` instead of a URL. ntfy takes an optional access token. `generic` deliveries carry `X-LLMLab-Event`, `X-LLMLab-Delivery` and, with a secret, `X-LLMLab-Signature: sha256=<hex HMAC-SHA256 of the raw body>`.
-- Delivery is a Celery task (`deliver_webhook`) with a 10 s timeout and 3 retries on 5xx, 429 or network errors (backoff 15 s, 60 s, 240 s). It is de-duplicated per `(subscription, event)`. Events are caught by `post_save` and by a 60 s sweep (`integrations: sweep webhook events` beat task, registered after `migrate`), since the executor finishes jobs with bulk updates.
+- Delivery is a Celery task (`deliver_webhook`) with a 10 s timeout and 3 retries on 5xx, 429 or network errors (backoff 15 s, 60 s, 240 s). It is de-duplicated per `(subscription, event)`. Events are caught by `post_save` and by a 60 s sweep (`integrations: sweep webhook events` beat task, registered after `migrate`), since the executor finishes runs with bulk updates.
 - Targets must be public https (http only with `DEBUG`). Private, loopback and platform addresses are refused, connections go to the vetted IP, and redirects are not followed. Allow a LAN ntfy or Teams host with `INFERENCE_DIRECT_ALLOWED_TARGETS`.
 - `POST /{id}/test/` sends a sample event. `GET /{id}/deliveries/` shows the last 50.
 

@@ -1,21 +1,26 @@
 """Export a sample of generated apps for manual review, and score the returned labels.
 
 The automated verdicts (AI-reviewer findings, static findings, the
-conformance outcome) are only as good as their agreement with a human. This
+evaluation outcome) are only as good as their agreement with a human. This
 module draws a seeded, stratified sample of apps, writes their code and
 specs plus blank label sheets into a ZIP, and later scores the filled
 sheets against the automated verdicts:
 
 * AI-reviewer and (deduplicated) static findings: precision with a 95%
   Wilson interval, per normalized severity, category and tool; dependency
-  advisories on their own sheet, also per origin (model-added, scaffold,
+  advisories on their own sheet, also per origin (model-added, starter,
   transitive); runtime issues (reported by dynamic scanners only) on their
   own sheet, one row per issue class per app,
-* app-level functional verdict vs the conformance outcome: Cohen's kappa,
-* per-app requirement compliance vs the conformance pass rate: Spearman rho.
+* app-level functional verdict vs the evaluation outcome: Cohen's kappa,
+* per-app requirement compliance vs the evaluated pass rate: Spearman rho.
+
+The population is a study's current runs (or every sample run the caller owns) with a usable outcome
+and a collected tree. Each app folder holds the app tree (``code/``, read through ``RunView``), its
+``files.csv`` (path, origin, sha, loc) and ``resolved_lock.json``; the frozen ``manifest.json`` names the
+model, so it is kept under ``key/`` with the other automated facts.
 
 With ``blind=True`` (default) sample folders are ``S001``… and model,
-template and automated outcomes live only in ``key.csv``, which the
+task and automated outcomes live only in ``key.csv`` and ``key/``, which the
 reviewer should not open until labelling is done.
 
 Findings come from each app's latest result per tool
@@ -48,9 +53,12 @@ from backend.analysis.services.base import ADVISORY_TOOLS
 from backend.analysis.services.base import is_dependency_advisory
 from backend.export.services.csv_safe import safe_cell
 from backend.export.services.findings import dynamic_tool_slugs
-from backend.generation.models import GenerationJob
+from backend.export.services.runs import files_csv
+from backend.export.services.runs import resolved_lock
+from backend.generation.models import GenerationRun
+from backend.generation.models import choices
 from backend.reports.services.loc import is_test_path
-from backend.reports.services.loc import loc_from_job
+from backend.reports.services.loc import loc_from_view
 from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import SEVERITY_RANK
 from backend.statistics.services.dedup import IssueCluster
@@ -63,16 +71,21 @@ from backend.statistics.services.dependencies import dependency_scope
 from backend.statistics.services.inference import cohens_kappa
 from backend.statistics.services.inference import spearman
 from backend.statistics.services.inference import wilson_interval
+from backend.statistics.services.runs import condition_label
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
+
+    from backend.generation.runs.view import RunView
 
 # 2: tool_severity columns, severity -> normalized_severity, dependency_issues.csv,
 #    key.csv analysis_run_ids (findings may come from several runs).
 # 3: runtime_issues.csv (dynamic-scanner issues); static_issues holds code
 #    issues only (no test code, no runtime issues).
-SAMPLE_FORMAT_VERSION = 3
-STRATIFY_KEYS = ("model", "template")
+# 4: v3 runs: task instead of template, files.csv / resolved_lock.json per app, key/<sid>/manifest.json,
+#    evaluation status and pass rate from RunEvaluation, dependency origin "starter".
+SAMPLE_FORMAT_VERSION = 4
+STRATIFY_KEYS = ("model", "task")
 UNRATED = "unrated"
 # What a deduplicated issue describes, as the study tables classify it.
 CODE, TEST, RUNTIME, DEPENDENCY = "code", "test", "runtime", "dependency"
@@ -116,7 +129,7 @@ DEPENDENCY_ISSUE_COLUMNS = [
     "package",
     "installed_version",
     "advisories",
-    "origin",  # model | scaffold | transitive
+    "origin",  # model | starter | transitive
     "tool_severity",
     "normalized_severity",
     "tools",
@@ -137,17 +150,26 @@ RUNTIME_ISSUE_COLUMNS = [
     "human_verdict",  # TP | FP | unsure
     "notes",
 ]
-REQUIREMENT_COLUMNS = ["sample_id", "requirement_id", "kind", "requirement", "human_met", "notes"]  # yes|partial|no
+REQUIREMENT_COLUMNS = [
+    "sample_id",
+    "requirement_id",
+    "kind",
+    "requirement",
+    "human_met",
+    "notes",
+]  # yes|partial|no; kind is "endpoint" or "ui"
 APP_COLUMNS = ["sample_id", "files", "loc", "human_functional", "human_quality", "notes"]  # works|partial|broken; 1-5
 KEY_COLUMNS = [
     "sample_id",
-    "job_id",
+    "run_id",
     "model",
-    "template",
+    "task",
+    "condition_label",
+    "kind",
     "repeat_index",
-    "build_healing",
-    "conformance_status",
-    "conformance_pass_rate",
+    "outcome",
+    "eval_status",
+    "eval_pass_rate",
     "deployed",
     "analysis_run_ids",
 ]
@@ -156,11 +178,14 @@ _README = """# Manual review sample
 
 Sample {n} apps drawn {method} (seed {seed}) from {population} eligible apps.
 
-Do NOT open `key.csv` until every sheet is filled in: it holds the model,
-template and the automated verdicts you are being compared against.
+Do NOT open `key.csv` or `key/` until every sheet is filled in: they hold the
+model, task and the automated verdicts you are being compared against.
 
-Each `apps/<sample_id>/` folder holds the generated code and
-`REQUIREMENTS.md`. Fill in the blank columns of the sheets in `labels/`:
+Each `apps/<sample_id>/` folder holds the app's code (`code/`), `REQUIREMENTS.md`,
+`files.csv` (every path with its origin: `starter` files came with the starter,
+`authored`/`modified`/`slot` files are the model's, `parent` files come from the
+parent app of a slot variant) and `resolved_lock.json` (the dependency versions
+the build used). Fill in the blank columns of the sheets in `labels/`:
 
 | sheet | column | values |
 |---|---|---|
@@ -179,8 +204,8 @@ the scores. `static_issues.csv` holds issues in the app's code (issues
 in test code are left out); `dependency_issues.csv` holds
 known-vulnerability advisories about its packages, with `origin` saying
 who chose the vulnerable version: `model` (the app added the package, or
-changed the scaffold's version to an affected one), `scaffold` (the stack
-template's own version spec) or `transitive` (no manifest declares it).
+changed the starter's version to an affected one), `starter` (the starter's
+own version spec) or `transitive` (no manifest declares it).
 `runtime_issues.csv` holds what only the dynamic scanners (ZAP, Nuclei,
 Wapiti) reported against the running app, one row per kind of issue with
 the URL paths it was seen on; judge it from the code (does the app set
@@ -192,29 +217,53 @@ Leave a cell empty to skip it. Score the filled sheets with
 """
 
 
-def _stratum(job: GenerationJob, keys: tuple[str, ...]) -> tuple[str, ...]:
+def _stratum(run: GenerationRun, view: RunView, keys: tuple[str, ...]) -> tuple[str, ...]:
     values = {
-        "model": job.model.model_id if job.model_id else "",
-        "template": job.app_requirement.slug if job.app_requirement_id else "",
+        "model": view.model_slug or "",
+        "task": view.task.ref if view.task is not None else "",
     }
     return tuple(values[k] for k in keys)
 
 
-def _has_code(job: GenerationJob) -> bool:
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    files = data.get("files")
-    return bool((isinstance(files, dict) and files) or data.get("backend_code"))
+def is_eligible(run: GenerationRun) -> bool:
+    """A completed run with a usable outcome and a collected tree (infra errors and exclusions are not apps)."""
+    return run.status == choices.RunStatus.COMPLETED and run.usable is True and bool(run.tree_hash)
+
+
+def review_population(user, *, study_id: str | None = None) -> QuerySet[GenerationRun]:
+    """The runs a review sample is drawn from: a study's current runs (owner-checked) or every sample run.
+
+    ``user=None`` is the shell's staff view. Raises ``ValueError`` ("Study not found") for an unknown study
+    or one *user* may not report on.
+    """
+    from django.core.exceptions import ValidationError
+
+    from backend.generation.models import Study
+    from backend.reports.services.generators import owned_study
+    from backend.statistics.services.runs import study_runs
+
+    if study_id and user is not None:
+        owned_study(study_id, user)
+    elif study_id:
+        try:
+            found = Study.objects.filter(id=study_id).exists()
+        except ValidationError:
+            found = False
+        if not found:
+            msg = f"Study not found: {study_id}"
+            raise ValueError(msg)
+    return study_runs(user, study_id=study_id).exclude(kind=choices.RunKind.REFERENCE)
 
 
 def select_sample(
-    jobs: QuerySet[GenerationJob] | list[GenerationJob],
+    runs: QuerySet[GenerationRun] | list[GenerationRun],
     *,
     size: int | None = None,
     per_stratum: int | None = None,
     stratify: tuple[str, ...] = ("model",),
     seed: int = 0,
-) -> tuple[list[GenerationJob], dict[str, Any]]:
-    """A seeded stratified sample of completed jobs with code, and how it was drawn.
+) -> tuple[list[GenerationRun], dict[str, Any]]:
+    """A seeded stratified sample of usable runs with a collected tree (:func:`is_eligible`), and how it was drawn.
 
     ``per_stratum`` takes that many from each stratum; otherwise ``size`` is
     allocated proportionally (largest remainder, at least one per stratum).
@@ -223,10 +272,12 @@ def select_sample(
     if unknown:
         msg = f"Unknown stratify key(s): {', '.join(sorted(unknown))}"
         raise ValueError(msg)
-    eligible = [j for j in jobs if j.status == GenerationJob.Status.COMPLETED and _has_code(j)]
-    strata: dict[tuple[str, ...], list[GenerationJob]] = defaultdict(list)
-    for job in sorted(eligible, key=lambda j: str(j.id)):
-        strata[_stratum(job, stratify)].append(job)
+    from backend.generation.runs.view import run_views
+
+    eligible = sorted((r for r in runs if is_eligible(r)), key=lambda r: str(r.id))
+    strata: dict[tuple[str, ...], list[GenerationRun]] = defaultdict(list)
+    for run, view in zip(eligible, run_views(eligible), strict=True):
+        strata[_stratum(run, view, stratify)].append(run)
 
     rng = random.Random(seed)  # noqa: S311 - reproducible sampling, not crypto
     keys = sorted(strata)
@@ -235,7 +286,7 @@ def select_sample(
     else:
         total = min(size or 0, len(eligible))
         quota = _allocate(total, {k: len(strata[k]) for k in keys})
-    selected: list[GenerationJob] = []
+    selected: list[GenerationRun] = []
     for k in keys:
         selected.extend(rng.sample(strata[k], quota[k]))
     method = (
@@ -274,51 +325,29 @@ def _allocate(total: int, sizes: dict[tuple, int]) -> dict[tuple, int]:
     return quota
 
 
-def _code_files(job: GenerationJob) -> dict[str, str]:
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    files = data.get("files")
-    if isinstance(files, dict) and files:
-        return {k: v for k, v in files.items() if isinstance(v, str)}
-    out = {}
-    if data.get("backend_code"):
-        out["app.py"] = data["backend_code"]
-    if data.get("frontend_code"):
-        out["frontend/src/App.jsx"] = data["frontend_code"]
-    return out
-
-
-def _requirements(job: GenerationJob) -> list[tuple[str, str, str]]:
-    app = job.app_requirement
-    if app is None:
-        return []
+def _requirements(view: RunView) -> list[tuple[str, str, str]]:
+    """The task's checkable requirements: each endpoint (``E<n>``) and each UI requirement (``U<n>``)."""
+    task = view.task_dict() or {}
+    structured = task.get("structured") or {}
     rows = []
-    for prefix, kind, items in (
-        ("B", "backend", app.backend_requirements),
-        ("F", "frontend", app.frontend_requirements),
-        ("A", "admin", app.admin_requirements),
-    ):
-        for i, text in enumerate(items or [], start=1):
-            rows.append((f"{prefix}{i}", kind, text if isinstance(text, str) else json.dumps(text)))
+    for i, endpoint in enumerate(structured.get("endpoints") or [], start=1):
+        text = f"{endpoint.get('method', '')} {endpoint.get('path', '')} (auth: {endpoint.get('auth', '')})"
+        rows.append((f"E{i}", "endpoint", f"[{endpoint.get('id', '')}] {text}".strip()))
+    for i, item in enumerate(structured.get("ui") or [], start=1):
+        rows.append((f"U{i}", "ui", f"[{item.get('id', '')}] {item.get('text', '')}".strip()))
     return rows
 
 
-def _requirements_md(job: GenerationJob, reqs: list[tuple[str, str, str]]) -> str:
-    app = job.app_requirement
-    lines = [
-        f"# {app.name if app else 'Free-form task'}",
-        "",
-        (app.description if app else job.task_description) or "",
-    ]
-    for kind in ("backend", "frontend", "admin"):
+def _requirements_md(view: RunView, reqs: list[tuple[str, str, str]]) -> str:
+    task = view.task_dict() or {}
+    lines = [f"# {task.get('title') or 'Task'}", "", task.get("summary") or ""]
+    if task.get("prose"):
+        lines += ["", "## Task as the model received it", "", task["prose"]]
+    for kind, heading in (("endpoint", "API endpoints"), ("ui", "UI requirements")):
         own = [r for r in reqs if r[1] == kind]
         if own:
-            lines += ["", f"## {kind.title()} requirements", ""]
+            lines += ["", f"## {heading}", ""]
             lines += [f"- **{rid}** {text}" for rid, _k, text in own]
-    if app and app.api_endpoints:
-        lines += ["", "## API endpoints", ""]
-        lines += [
-            f"- `{e.get('method', '')} {e.get('path', '')}` {e.get('description', '')}" for e in app.api_endpoints
-        ]
     return "\n".join(lines) + "\n"
 
 
@@ -332,18 +361,18 @@ def _csv(columns: list[str], rows: list[dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
-def _scope_ownerships(jobs: list[GenerationJob], memo: dict) -> dict[str, DependencyOwnership]:
-    """Every eligible job's ownership, linked on the population's advisory evidence.
+def _scope_ownerships(runs: list[GenerationRun], memo: dict) -> dict[str, DependencyOwnership]:
+    """Every eligible run's ownership, linked on the population's advisory evidence.
 
-    The study tables judge a changed scaffold spec on what every app of the
+    The study tables judge a changed starter spec on what every app of the
     scope installed (:func:`dependency_scope`); the review sample links the
     population it was drawn from the same way, so both attribute an advisory
     to the same party.
     """
-    ownerships = {str(j.id): dependency_ownership(j, memo) for j in jobs}
+    ownerships = {str(r.id): dependency_ownership(r, memo) for r in runs}
     if not ownerships:
         return ownerships
-    result_ids = ToolResult.latest_ids_per_job([j.id for j in jobs])
+    result_ids = ToolResult.latest_ids_per_job([r.id for r in runs])
     rows = (
         Finding.objects.filter(
             result_id__in=result_ids,
@@ -354,22 +383,22 @@ def _scope_ownerships(jobs: list[GenerationJob], memo: dict) -> dict[str, Depend
         .order_by("id")
         .values("result__run__generation_job_id", "tool_severity", "description", *RECORD_FIELDS)
     )
-    by_job: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_run: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        job_id = str(row["result__run__generation_job_id"])
-        by_job[job_id].append(_static_record(row, job_id))
-    clusters = [c for records in by_job.values() for c in cluster_findings(records)]
+        run_id = str(row["result__run__generation_job_id"])
+        by_run[run_id].append(_static_record(row, run_id))
+    clusters = [c for records in by_run.values() for c in cluster_findings(records)]
     dependency_scope(ownerships, clusters)
     return ownerships
 
 
 def _dependency_origins(advisories: list[IssueCluster], ownership: DependencyOwnership) -> dict[int, str]:
-    """Per advisory (by ``id()``), who chose the vulnerable version: the model, the scaffold, or neither.
+    """Per advisory (by ``id()``), who chose the vulnerable version: the model, the starter, or neither.
 
     ``model`` is the study's attribution (package and version,
     :meth:`DependencyOwnership.is_models`, judged on the scope's evidence);
-    otherwise ``scaffold`` when a manifest declares the package (with the
-    scaffold's spec) and ``transitive`` when nothing declares it.
+    otherwise ``starter`` when a manifest declares the package (with the
+    starter's spec) and ``transitive`` when nothing declares it.
     """
     if not advisories:
         return {}
@@ -378,8 +407,8 @@ def _dependency_origins(advisories: list[IssueCluster], ownership: DependencyOwn
         package = cluster_package(c)
         if ownership.is_models(c):
             origins[id(c)] = "model"
-        elif package and (package in ownership.app or package in ownership.scaffold):
-            origins[id(c)] = "scaffold"
+        elif package and (package in ownership.app or package in ownership.starter):
+            origins[id(c)] = "starter"
         else:
             origins[id(c)] = "transitive"
     return origins
@@ -446,30 +475,47 @@ def _sample_clusters(
     return first + rng.sample(rest, cap - len(first))
 
 
-def _job_findings(job_ids: list) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[str]]]:
-    """Per job, its findings from the latest completed result per tool, and the runs those results came from."""
-    result_ids = ToolResult.latest_ids_per_job(job_ids)
+def _run_findings(run_ids: list) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[str]]]:
+    """Per generation run, its findings from the latest completed result per tool, and the analyses they came from."""
+    result_ids = ToolResult.latest_ids_per_job(run_ids)
     results = ToolResult.objects.filter(id__in=result_ids, status=ToolResult.Status.COMPLETED)
-    runs_by_job: dict[str, set[str]] = defaultdict(set)
-    for run_id, job_id in results.values_list("run_id", "run__generation_job_id"):
-        runs_by_job[str(job_id)].add(str(run_id))
+    analyses_by_run: dict[str, set[str]] = defaultdict(set)
+    for analysis_id, run_id in results.values_list("run_id", "run__generation_job_id"):
+        analyses_by_run[str(run_id)].add(str(analysis_id))
     fields = dict.fromkeys(("result__run__generation_job_id", "tool_severity", "description", *RECORD_FIELDS))
     rows = Finding.objects.filter(result__in=results).order_by("file_path", "line_number", "id").values(*fields)
-    by_job: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_run: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        by_job[str(row["result__run__generation_job_id"])].append(row)
-    return by_job, {job: sorted(runs) for job, runs in runs_by_job.items()}
+        by_run[str(row["result__run__generation_job_id"])].append(row)
+    return by_run, {run: sorted(ids) for run, ids in analyses_by_run.items()}
 
 
-def _static_record(row: dict[str, Any], job_id: str) -> dict[str, Any]:
-    """A dedup record (keyed by the app, so its results from several runs cluster together) plus sheet fields."""
+def _static_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """A dedup record (keyed by the app, so its results from several analyses cluster together) plus sheet fields."""
     extra = row["tool_specific_data"] if isinstance(row["tool_specific_data"], dict) else {}
     installed = extra.get("installed_version") or extra.get("version") or ""
-    return finding_record(row, job_id) | {"tool_severity": row["tool_severity"], "installed_version": str(installed)}
+    return finding_record(row, run_id) | {"tool_severity": row["tool_severity"], "installed_version": str(installed)}
+
+
+def _evaluation_key(run: GenerationRun, view: RunView) -> dict[str, Any]:
+    """The automated functional verdict of a run: its latest evaluation's status and pass rate."""
+    evaluation = view.latest_evaluation()
+    status = evaluation.status if evaluation is not None else ""
+    result = (evaluation.result if evaluation is not None else None) or {}
+    measured = status == choices.EvaluationStatus.MEASURED and bool(result.get("measured", True))
+    rate = (result.get("metrics") or {}).get("agent_pass_rate") if measured else None
+    deployed = run.outcome == choices.Outcome.TESTED
+    if measured and not deployed:
+        rate = 0.0  # built or started nothing: every functional check fails
+    return {
+        "eval_status": status,
+        "eval_pass_rate": "" if rate is None else rate,
+        "deployed": int(deployed) if measured else "",
+    }
 
 
 def build_review_sample(
-    jobs: QuerySet[GenerationJob] | list[GenerationJob],
+    runs: QuerySet[GenerationRun] | list[GenerationRun],
     *,
     size: int | None = 30,
     per_stratum: int | None = None,
@@ -480,28 +526,33 @@ def build_review_sample(
     max_dependency_per_app: int = 10,
     max_runtime_per_app: int = 10,
 ) -> tuple[bytes, dict[str, Any]]:
-    """The review ZIP for a sample of *jobs*, and its manifest.
+    """The review ZIP for a sample of *runs*, and its manifest.
 
     Issues in the app's code, dependency advisories and runtime issues go on
     separate sheets with their own per-app caps; advisories about packages
-    the model added itself are drawn before scaffold-pinned and transitive
+    the model added itself are drawn before starter-pinned and transitive
     ones. Issues in test code are counted in the manifest, not sampled.
     """
-    selected, selection = select_sample(jobs, size=size, per_stratum=per_stratum, stratify=stratify, seed=seed)
+    from backend.generation.runs.view import run_views
+
+    runs = list(runs)
+    selected, selection = select_sample(runs, size=size, per_stratum=per_stratum, stratify=stratify, seed=seed)
     rng = random.Random(seed)  # noqa: S311 - reproducible sampling, not crypto
     # Shuffled sample ids: their order must not reveal the stratum.
     order = list(range(len(selected)))
     rng.shuffle(order)
     sample_ids = {selected[i].id: f"S{n + 1:03d}" for n, i in enumerate(order)}
     if not blind:
-        sample_ids = {j.id: str(j.id) for j in selected}
+        sample_ids = {r.id: str(r.id) for r in selected}
 
-    findings_by_job, runs_by_job = _job_findings([j.id for j in selected])
+    findings_by_run, analyses_by_run = _run_findings([r.id for r in selected])
     ai_slugs = AnalyzerTool.ai_slugs()
     dynamic = dynamic_tool_slugs()
     stack_memo: dict = {}
-    population = [j for j in jobs if j.status == GenerationJob.Status.COMPLETED and _has_code(j)]
+    population = [r for r in runs if is_eligible(r)]
     ownerships = _scope_ownerships(population, stack_memo)
+    by_id = GenerationRun.objects.select_related("model", "condition__model").in_bulk([r.pk for r in selected])
+    ordered = sorted((by_id[r.pk] for r in selected if r.pk in by_id), key=lambda r: sample_ids[r.id])
     test_issues = 0
     ai_rows: list[dict[str, Any]] = []
     static_rows: list[dict[str, Any]] = []
@@ -513,17 +564,22 @@ def build_review_sample(
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for job in sorted(selected, key=lambda j: sample_ids[j.id]):
-            sid = sample_ids[job.id]
-            files = _code_files(job)
+        for run, view in zip(ordered, run_views(ordered), strict=True):
+            sid = sample_ids[run.id]
+            files = view.code_files("app")
             for rel, content in files.items():
                 zf.writestr(f"apps/{sid}/code/{rel}", content)
-            reqs = _requirements(job)
-            zf.writestr(f"apps/{sid}/REQUIREMENTS.md", _requirements_md(job, reqs))
+            zf.writestr(f"apps/{sid}/files.csv", files_csv(view))
+            zf.writestr(f"apps/{sid}/resolved_lock.json", json.dumps(resolved_lock(run), indent=2, default=str))
+            # The manifest names the model and the condition: automated facts, kept with the key.
+            zf.writestr(f"key/{sid}/manifest.json", json.dumps(view.manifest() or None, indent=2, default=str))
+            reqs = _requirements(view)
+            zf.writestr(f"apps/{sid}/REQUIREMENTS.md", _requirements_md(view, reqs))
             req_rows += [{"sample_id": sid, "requirement_id": r, "kind": k, "requirement": t} for r, k, t in reqs]
-            app_rows.append({"sample_id": sid, "files": len(files), "loc": loc_from_job(job)["total_loc"]})
+            # LOC: the model's own non-test source lines (unknown, never 0, when not collected).
+            app_rows.append({"sample_id": sid, "files": len(files), "loc": loc_from_view(view)["total_loc"]})
 
-            findings = findings_by_job.get(str(job.id), [])
+            findings = findings_by_run.get(str(run.id), [])
             for f in findings:
                 if f["result__tool_slug"] in ai_slugs:
                     ai_rows.append(
@@ -542,14 +598,14 @@ def build_review_sample(
                     )
             # The study's own dedup records (advisory ids and aliases link one
             # advisory across scanners); every result of the app clusters together.
-            static = [_static_record(f, str(job.id)) for f in findings if f["result__tool_slug"] not in ai_slugs]
+            static = [_static_record(f, str(run.id)) for f in findings if f["result__tool_slug"] not in ai_slugs]
             by_kind: dict[str, list[IssueCluster]] = defaultdict(list)
             for c in cluster_findings(static):
                 by_kind[issue_kind(c, dynamic)].append(c)
             code, advisories = by_kind[CODE], by_kind[DEPENDENCY]
             test_issues += len(by_kind[TEST])
             code = _sample_clusters(code, max_static_per_app, rng)
-            ownership = ownerships.get(str(job.id)) or dependency_ownership(job, stack_memo)
+            ownership = ownerships.get(str(run.id)) or dependency_ownership(run, stack_memo)
             origin = _dependency_origins(advisories, ownership)
             advisories = _sample_clusters(
                 advisories,
@@ -609,21 +665,18 @@ def build_review_sample(
                     },
                 )
 
-            result = job.result_data if isinstance(job.result_data, dict) else {}
-            evaluation = result.get("evaluation") or {}
-            status = evaluation.get("status") or ""
             key_rows.append(
                 {
                     "sample_id": sid,
-                    "job_id": str(job.id),
-                    "model": job.model.model_id if job.model_id else "",
-                    "template": job.app_requirement.slug if job.app_requirement_id else "",
-                    "repeat_index": job.repeat_index if job.repeat_index is not None else "",
-                    "build_healing": job.build_healing,
-                    "conformance_status": status,
-                    "conformance_pass_rate": (evaluation.get("summary") or {}).get("pass_rate", ""),
-                    "deployed": "" if not status else int(status in ("passed", "failed")),
-                    "analysis_run_ids": ";".join(runs_by_job.get(str(job.id), [])),
+                    "run_id": str(run.id),
+                    "model": view.model_slug or "",
+                    "task": view.task.ref if view.task is not None else "",
+                    "condition_label": condition_label(run.condition) if run.condition is not None else "",
+                    "kind": run.kind,
+                    "repeat_index": run.repeat_index if run.repeat_index is not None else "",
+                    "outcome": run.outcome,
+                    **_evaluation_key(run, view),
+                    "analysis_run_ids": ";".join(analyses_by_run.get(str(run.id), [])),
                 },
             )
 
@@ -746,10 +799,12 @@ def score_review_labels(source: Path | bytes) -> dict[str, Any]:
     confusion: Counter = Counter()
     for r in apps:
         human = (r.get("human_functional") or "").strip().lower()
-        auto = (key.get(r["sample_id"], {}).get("conformance_status") or "").strip()
-        if human not in ("works", "partial", "broken") or auto in ("", "infra_error", "not_applicable"):
+        auto_key = key.get(r["sample_id"], {})
+        rate = (auto_key.get("eval_pass_rate") or "").strip()
+        # Not measured (tester or infra error, never evaluated) has no automated verdict to agree with.
+        if human not in ("works", "partial", "broken") or auto_key.get("eval_status") != "measured" or not rate:
             continue
-        h, a = human == "works", auto == "passed"
+        h, a = human == "works", float(rate) == 1.0
         functional_pairs.append((h, a))
         confusion[f"human_{'works' if h else 'not_works'}__auto_{'passed' if a else 'not_passed'}"] += 1
 
@@ -760,7 +815,7 @@ def score_review_labels(source: Path | bytes) -> dict[str, Any]:
             compliance[r["sample_id"]].append(v)
     human_c, auto_c = [], []
     for sid, values in compliance.items():
-        rate = key.get(sid, {}).get("conformance_pass_rate")
+        rate = key.get(sid, {}).get("eval_pass_rate")
         if rate not in (None, ""):
             human_c.append(sum(values) / len(values))
             auto_c.append(float(rate))
@@ -793,7 +848,7 @@ def score_review_labels(source: Path | bytes) -> dict[str, Any]:
             "mean_human_compliance": round(sum(sum(v) / len(v) for v in compliance.values()) / len(compliance), 3)
             if compliance
             else None,
-            "spearman_vs_conformance_pass_rate": spearman(human_c, auto_c),
+            "spearman_vs_eval_pass_rate": spearman(human_c, auto_c),
             "paired_apps": len(human_c),
         },
         "quality": {

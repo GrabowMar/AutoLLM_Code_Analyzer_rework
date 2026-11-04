@@ -1,0 +1,4 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: aider (native)
+description: aider 0.86.2 with its native system prompt, tools and defaults.
+content: {harness: aider, harness_version: 0.86.2}

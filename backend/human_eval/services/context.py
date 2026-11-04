@@ -1,16 +1,16 @@
 """Assignment context (owner B2): what a participant sees, frozen when the assignment is first opened.
 
 An assignment's ``context`` (TS ``AssignmentContext``) records per design block what
-the participant was shown, so analysis and exports never depend on live job,
-spec or finding rows that may change or disappear later:
+the participant was shown, so analysis and exports never depend on live run,
+task or finding rows that may change or disappear later:
 
 - **requirements** blocks: per app slot the checklist items derived from the
-  app's spec frozen at first task open (:func:`frozen_spec`: ``EvalTaskApp.snapshot
-  ["spec"]``, else the job's :func:`spec_dict`) plus the block's custom items, with ids
-  ``f"{prefix}_{sha1(f'{source}|{key}').hexdigest()[:10]}"`` (prefix b/f/a/ep/aep;
-  key = the text for prose requirements, ``"METHOD /path"`` for endpoints, whose
-  text is ``"METHOD /path — description"``; custom items ``c_<id>``). The same spec
-  yields the same ids for every app, so verdicts are comparable across apps.
+  run's task frozen at first task open (:func:`frozen_spec`: ``EvalTaskApp.snapshot
+  ["spec"]``, else ``RunView.task_dict()`` of the run) plus the block's custom items, with ids
+  ``f"{prefix}_{sha1(f'{source}|{key}').hexdigest()[:10]}"`` (prefix f/ep/aep; sources:
+  ``frontend`` = the task's ``ui`` requirements, key = the text; ``api`` / ``admin_api`` = the
+  task's non-admin / admin endpoints, key and text ``"METHOD /path"``; custom items ``c_<id>``).
+  The same task yields the same ids for every app, so verdicts are comparable across apps.
 - the **security** block with ``finding_review.enabled``: per slot the automated
   findings to review (TS ``ReviewFinding`` — the tool's own ``tool_severity`` label
   only, never the normalized ``Finding.severity``), drawn once per task app
@@ -61,9 +61,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-REQUIREMENT_PREFIXES: dict[str, str] = {"backend": "b", "frontend": "f", "admin": "a", "api": "ep", "admin_api": "aep"}
-_PROSE_FIELDS = {"backend": "backend_requirements", "frontend": "frontend_requirements", "admin": "admin_requirements"}
-_ENDPOINT_FIELDS = {"api": "api_endpoints", "admin_api": "admin_api_endpoints"}
+REQUIREMENT_PREFIXES: dict[str, str] = {"frontend": "f", "api": "ep", "admin_api": "aep"}
+#: Endpoint sources: which task endpoints each lists (``auth == "admin"`` or not).
+_ENDPOINT_SOURCES = {"api": False, "admin_api": True}
 _MAX_REQUIREMENT_TEXT = 2000
 
 # ReviewFinding text caps (the participant reads them; the frozen context stays small).
@@ -78,96 +78,75 @@ _MAX_SHORT = 200
 # ---------------------------------------------------------------------------
 
 
-def spec_dict(job: Any) -> dict[str, Any] | None:
-    """The app spec dict the job was generated from (frozen snapshot first).
+def spec_dict(run: Any) -> dict[str, Any] | None:
+    """The task the run was generated from (``RunView.task_dict()``), or None (no run, or a run without a task)."""
+    from backend.human_eval.services.snapshot import spec_dict as run_spec_dict
 
-    ``job.resolved_bundle["app_requirement"]`` when it is a dict, else
-    ``profile_resolver.app_requirement_to_dict(job.app_requirement)``, else None.
-    """
-    if job is None:
-        return None
-    bundle = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    snapshot = bundle.get("app_requirement")
-    if isinstance(snapshot, dict):
-        return snapshot
-    if job.app_requirement_id is None:
-        return None
-    from backend.generation.services.profile_resolver import app_requirement_to_dict
-
-    return app_requirement_to_dict(job.app_requirement)
+    return run_spec_dict(run)
 
 
-def _text(value: Any) -> str:
-    """A requirement entry as plain text (strings; dicts with text/description; else '')."""
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, dict):
-        for key in ("text", "description", "requirement"):
-            if isinstance(value.get(key), str):
-                return value[key].strip()
-    return ""
+def _structured(spec: dict[str, Any] | None) -> dict[str, Any]:
+    structured = spec.get("structured") if isinstance(spec, dict) else None
+    return structured if isinstance(structured, dict) else {}
 
 
-def _string_list(values: Any) -> list[str]:
-    if not isinstance(values, list):
-        return []
-    return [text for text in (_text(value) for value in values) if text]
+def _ui_requirements(spec: dict[str, Any] | None) -> list[str]:
+    texts = []
+    for entry in _structured(spec).get("ui") or []:
+        text = entry.get("text") if isinstance(entry, dict) else None
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    return texts
 
 
-def _endpoints(values: Any) -> list[dict[str, str]]:
+def _endpoints(spec: dict[str, Any] | None, *, admin: bool) -> list[dict[str, str]]:
     endpoints: list[dict[str, str]] = []
-    for value in values if isinstance(values, list) else []:
+    for value in _structured(spec).get("endpoints") or []:
         if not isinstance(value, dict):
             continue
         method = str(value.get("method") or "").strip().upper()
         path = str(value.get("path") or "").strip()
-        if not method or not path:
+        auth = str(value.get("auth") or "").strip()
+        if not method or not path or (auth == "admin") != admin:
             continue
-        endpoints.append(
-            {
-                "method": method,
-                "path": path,
-                "description": str(value.get("description") or "").strip(),
-                "auth": str(value.get("auth") or "").strip(),
-            },
-        )
+        endpoints.append({"method": method, "path": path, "description": "", "auth": auth})
     return endpoints
 
 
-def frozen_spec(task_app: EvalTaskApp, job: Any = None) -> dict[str, Any] | None:
-    """The app spec frozen at first task open (``snapshot["spec"]``, None when the app had none then).
+def frozen_spec(task_app: EvalTaskApp, run: Any = None) -> dict[str, Any] | None:
+    """The task frozen at first task open (``snapshot["spec"]``, None when the app had none then).
 
-    Apps without a frozen copy (added after the first open) fall back to :func:`spec_dict` of ``job``
-    (default: ``task_app.job``).
+    Apps without a frozen copy (added after the first open) fall back to :func:`spec_dict` of ``run``
+    (default: ``task_app.job``, the app's GenerationRun).
     """
     snapshot = task_app.snapshot if isinstance(task_app.snapshot, dict) else {}
     if "spec" in snapshot:
         spec = snapshot["spec"]
         return spec if isinstance(spec, dict) else None
-    return spec_dict(job if job is not None else task_app.job)
+    return spec_dict(run if run is not None else task_app.job)
 
 
-def spec_view(job: Any) -> dict[str, Any] | None:
-    """TS ``AppSpecView`` of the job's spec (only these fields), or None when the job has no spec."""
-    return _spec_view(spec_dict(job))
+def spec_view(run: Any) -> dict[str, Any] | None:
+    """TS ``AppSpecView`` of the run's task (only these fields), or None when the run has no task."""
+    return _spec_view(spec_dict(run))
 
 
-def app_spec_view(task_app: EvalTaskApp, job: Any = None) -> dict[str, Any] | None:
+def app_spec_view(task_app: EvalTaskApp, run: Any = None) -> dict[str, Any] | None:
     """TS ``AppSpecView`` of the app's :func:`frozen_spec` (what the participant's requirement items use)."""
-    return _spec_view(frozen_spec(task_app, job))
+    return _spec_view(frozen_spec(task_app, run))
 
 
 def _spec_view(spec: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Title, summary, the prose variant the model was given, the ui requirements and the endpoints."""
     if spec is None:
         return None
     return {
-        "name": str(spec.get("name") or ""),
-        "description": str(spec.get("description") or ""),
-        "backend_requirements": _string_list(spec.get("backend_requirements")),
-        "frontend_requirements": _string_list(spec.get("frontend_requirements")),
-        "admin_requirements": _string_list(spec.get("admin_requirements")),
-        "api_endpoints": _endpoints(spec.get("api_endpoints")),
-        "admin_api_endpoints": _endpoints(spec.get("admin_api_endpoints")),
+        "name": str(spec.get("title") or ""),
+        "description": str(spec.get("summary") or ""),
+        "prose": str(spec.get("prose") or ""),
+        "frontend_requirements": _ui_requirements(spec),
+        "api_endpoints": _endpoints(spec, admin=False),
+        "admin_api_endpoints": _endpoints(spec, admin=True),
     }
 
 
@@ -196,16 +175,14 @@ def requirement_items(
         seen.add(item_id)
         items.append({"id": item_id, "source": source, "text": text[:_MAX_REQUIREMENT_TEXT]})
 
-    spec = spec if isinstance(spec, dict) else {}
     for source in sources or []:
-        if source in _PROSE_FIELDS:
-            for text in _string_list(spec.get(_PROSE_FIELDS[source])):
+        if source == "frontend":
+            for text in _ui_requirements(spec):
                 add(requirement_id(source, text), source, text)
-        elif source in _ENDPOINT_FIELDS:
-            for endpoint in _endpoints(spec.get(_ENDPOINT_FIELDS[source])):
+        elif source in _ENDPOINT_SOURCES:
+            for endpoint in _endpoints(spec, admin=_ENDPOINT_SOURCES[source]):
                 key = f"{endpoint['method']} {endpoint['path']}"
-                text = f"{key} — {endpoint['description']}" if endpoint["description"] else key
-                add(requirement_id(source, key), source, text)
+                add(requirement_id(source, key), source, key)
     for entry in custom or []:
         text = str(entry.get("text") or "").strip()
         if entry.get("id") and text:
@@ -218,15 +195,15 @@ def requirement_items(
 # ---------------------------------------------------------------------------
 
 
-def _population(job: Any, config: dict[str, Any]) -> dict[str, list[str]]:
+def _population(run: Any, config: dict[str, Any]) -> dict[str, list[str]]:
     """Eligible finding ids per tool slug, each list in a deterministic order (file, line, id)."""
     from backend.analysis.models import AnalyzerTool
     from backend.analysis.models import Finding
     from backend.analysis.models import ToolResult
 
-    if job is None:
+    if run is None:
         return {}
-    result_ids = ToolResult.latest_ids_per_job([job.id])
+    result_ids = ToolResult.latest_ids_per_job([run.pk])
     results = ToolResult.objects.filter(id__in=result_ids, status=ToolResult.Status.COMPLETED)
     slugs = set(results.values_list("tool_slug", flat=True))
     excluded: set[str] = set()
@@ -297,7 +274,7 @@ def finding_sample(task_app: EvalTaskApp, config: dict[str, Any], seed: int) -> 
 
     Drawn once under a row lock (``finding_sample`` + ``finding_sample_at`` + ``finding_frame``, and
     the sampled findings' ReviewFinding dicts in ``snapshot["review_findings"]``); later calls return
-    the stored ids even if the job's findings changed or were deleted.
+    the stored ids even if the run's findings changed or were deleted.
     """
     if task_app.finding_sample_at is None:
         with transaction.atomic():
@@ -378,10 +355,9 @@ def _cwe(value: Any) -> str:
     return _clip(str(value), _MAX_SHORT)
 
 
-def review_finding(finding: Any, *, job: Any = None, tool: Any = None) -> dict[str, Any]:
+def review_finding(finding: Any, *, tool: Any = None) -> dict[str, Any]:
     """TS ``ReviewFinding`` of an analysis Finding (``tool_severity`` only, never ``severity``).
 
-    ``job`` (the finding's generation job) maps scaffolding blob paths to the source viewer's names;
     ``tool`` is the ``AnalyzerTool`` (looked up by slug when omitted). DAST URLs are reduced to
     path + query; ``docs_url`` is kept only when it is an http(s) URL.
     """
@@ -390,8 +366,6 @@ def review_finding(finding: Any, *, job: Any = None, tool: Any = None) -> dict[s
     slug = finding.result.tool_slug
     if tool is None:
         tool = AnalyzerTool.objects.filter(slug=slug).only("slug", "name", "analysis_mode").first()
-    if job is None:
-        job = getattr(finding.result.run, "generation_job", None)
     data = finding.tool_specific_data if isinstance(finding.tool_specific_data, dict) else {}
     dynamic = tool is not None and tool.analysis_mode == "dynamic"
     return {
@@ -403,7 +377,7 @@ def review_finding(finding: Any, *, job: Any = None, tool: Any = None) -> dict[s
         "rule_id": finding.rule_id or "",
         "title": _clip(finding.title, _MAX_TITLE),
         "description": _clip(finding.description, _MAX_DESCRIPTION),
-        "file_path": source_service.display_path(finding.file_path or "", job),
+        "file_path": source_service.display_path(finding.file_path or ""),
         "line": finding.line_number,
         "code_snippet": _clip(finding.code_snippet, _MAX_SNIPPET),
         "docs_url": _http_url(data.get("docs_url")),
@@ -425,9 +399,8 @@ def _live_review_findings(task_app: EvalTaskApp, ids: list[str]) -> list[dict[st
     findings = {str(f.id): f for f in Finding.objects.filter(id__in=ids).select_related("result")}
     slugs = {finding.result.tool_slug for finding in findings.values()}
     tools = {tool.slug: tool for tool in AnalyzerTool.objects.filter(slug__in=slugs)}
-    job = task_app.job
     return [
-        review_finding(findings[finding_id], job=job, tool=tools.get(findings[finding_id].result.tool_slug))
+        review_finding(findings[finding_id], tool=tools.get(findings[finding_id].result.tool_slug))
         for finding_id in ids
         if finding_id in findings
     ]

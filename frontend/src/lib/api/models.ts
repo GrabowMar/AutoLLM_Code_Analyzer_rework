@@ -276,9 +276,10 @@ export interface CatalogPercentile {
 
 export interface ModelInsights {
   generation: {
-    jobs_total: number;
+    runs_total: number;
     by_status: Record<string, number>;
-    by_mode: Record<string, number>;
+    /** Run kinds (app_agentic, slot_single_shot, ...). */
+    by_kind: Record<string, number>;
     completed: number;
     success: RateWithCI;
     functional: RateWithCI & {
@@ -300,30 +301,28 @@ export interface ModelInsights {
       mean_lines_of_code: number | null;
       median_output_tps: number | null;
     };
-    repair_rate: number | null;
-    continuations_used: number;
-    engines: Record<string, number>;
+    harnesses: Record<string, number>;
     providers: Record<string, number>;
     terminations: Record<string, number>;
-    first_job_at: string | null;
-    last_job_at: string | null;
+    first_run_at: string | null;
+    last_run_at: string | null;
   };
-  templates: {
+  tasks: {
     slug: string;
     name: string;
-    jobs: number;
+    runs: number;
     completed: number;
     functional: RateWithCI;
   }[];
-  experiments: {
+  studies: {
     id: string;
     name: string;
     status: string;
-    jobs: number;
+    runs: number;
     created_at: string;
   }[];
   analysis: {
-    analyzed_jobs: number;
+    analyzed_runs: number;
     /** Code findings of the static tools (dependency advisories apart), by normalized level. */
     findings_static: NormalizedCounts;
     findings_ai: NormalizedCounts;

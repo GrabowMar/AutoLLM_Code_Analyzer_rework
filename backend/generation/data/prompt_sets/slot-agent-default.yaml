@@ -1,0 +1,5 @@
+name: Slot agent (default)
+description: Brief of a restricted slot agent. Slot studies default to the t07 sampling preset.
+content:
+  mode: slot
+  roles: {slot_agent_brief: slot-agent-brief@1}

@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-open_redirect",
+      "cwe": "cwe-601",
+      "kind": "open_redirect",
+      "status": "not_exploited"
+    },
+    {
+      "id": "p-other",
+      "cwe": "cwe-611",
+      "kind": "xxe",
+      "status": "exploited",
+      "evidence": "fixture"
+    }
+  ]
+}

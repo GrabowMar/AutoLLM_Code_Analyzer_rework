@@ -54,7 +54,7 @@ class ActivityCountsSchema(Schema):
     applications: int
     applications_completed: int
     analyses: int
-    experiments: int
+    studies: int
     reports: int
 
 

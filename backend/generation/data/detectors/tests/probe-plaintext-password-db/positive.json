@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-plaintext_password_db",
+      "cwe": "cwe-256",
+      "kind": "plaintext_password_db",
+      "status": "exploited",
+      "evidence": "fixture"
+    },
+    {
+      "id": "p-other",
+      "cwe": "cwe-611",
+      "kind": "xxe",
+      "status": "not_exploited"
+    }
+  ]
+}

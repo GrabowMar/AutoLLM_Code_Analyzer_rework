@@ -1,0 +1,8 @@
+
+    __( O)>  ● new session · openai deepseek/deepseek-v4.1-flash
+   \____)    20261103_1 · /workspace
+     L L     goose is ready
+{"type":"message","message":{"id":"chatcmpl-1","role":"assistant","created":1793708320,"content":[{"type":"toolRequest","id":"call_1","toolCall":{"status":"success","value":{"name":"shell","arguments":{"command":"printf 'hello from the scripted upstream\\n' > /workspace/hello.txt && ls /workspace"}}},"_meta":{"goose.toolCall.providerIndex":0,"goose_extension":"developer"}}],"metadata":{"userVisible":true,"agentVisible":true,"inference":{"provider":"openai","requestedModel":"deepseek/deepseek-v4.1-flash"},"operations":{"llm":{"advertised_tools":["edit","load_skill","read_image","shell","tree","write"]}}}}}
+{"type":"message","message":{"id":"msg_dbb71fa7-d31a-44c6-a91b-a698fa3a9554","role":"user","created":1793708320,"content":[{"type":"toolResponse","id":"call_1","toolResult":{"status":"success","value":{"resultType":"complete","content":[{"type":"text","text":"README.md\nhello.txt","annotations":{"priority":0.0}}],"structuredContent":{"stdout":"README.md\nhello.txt","stderr":"","exit_code":0},"isError":false}}}],"metadata":{"userVisible":true,"agentVisible":true}}}
+{"type":"message","message":{"id":"chatcmpl-2","role":"assistant","created":1793708320,"content":[{"type":"text","text":"Done. I created hello.txt in the workspace."}],"metadata":{"userVisible":true,"agentVisible":true,"inference":{"provider":"openai","requestedModel":"deepseek/deepseek-v4.1-flash"},"operations":{"llm":{"advertised_tools":["edit","load_skill","read_image","shell","tree","write"]}}}}}
+{"type":"complete","total_tokens":2100,"input_tokens":2000,"output_tokens":100,"cache_read_input_tokens":0,"cache_write_input_tokens":0}

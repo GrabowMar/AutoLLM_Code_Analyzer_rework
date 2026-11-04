@@ -9,7 +9,8 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models import RunFile
 from backend.human_eval.models import Assignment
 from backend.human_eval.models import EvalInvite
 from backend.human_eval.models import EvalItem
@@ -24,8 +25,9 @@ from backend.human_eval.tests.factories import AssignmentFactory
 from backend.human_eval.tests.factories import EvalInviteFactory
 from backend.human_eval.tests.factories import EvalTaskFactory
 from backend.human_eval.tests.factories import ParticipantFactory
+from backend.human_eval.tests.factories import add_app_files
 from backend.human_eval.tests.factories import make_draft_task
-from backend.human_eval.tests.factories import make_eval_jobs
+from backend.human_eval.tests.factories import make_eval_runs
 from backend.human_eval.tests.factories import make_open_task
 from backend.users.tests.factories import UserFactory
 
@@ -39,7 +41,7 @@ DETAIL_KEYS = {
     "status",
     "mode",
     "counts",
-    "experiment",
+    "study",
     "opens_at",
     "closes_at",
     "created_at",
@@ -170,45 +172,45 @@ def test_create_validation_errors_leave_nothing_behind(api, researcher):
     )
     assert res.json()["errors"][0]["path"] == "closes_at"
 
-    foreign_experiment, _, foreign_jobs = make_eval_jobs(UserFactory(), 1, conditions=1)
-    assert post({"title": "T", "mode": "single", "experiment_id": str(foreign_experiment.id)}).status_code == 404
-    _, _, mine = make_eval_jobs(researcher, 1, conditions=0)
-    res = post({"title": "T", "mode": "single", "job_ids": [str(mine[0].id), str(foreign_jobs[0].id)]})
+    foreign_study, _, foreign_runs = make_eval_runs(UserFactory(), 1, conditions=1)
+    assert post({"title": "T", "mode": "single", "study_id": str(foreign_study.pk)}).status_code == 404
+    _, _, mine = make_eval_runs(researcher, 1, conditions=0)
+    res = post({"title": "T", "mode": "single", "run_ids": [str(mine[0].pk), str(foreign_runs[0].pk)]})
     assert res.status_code == 404
     assert not EvalTask.objects.filter(created_by=researcher).exists()
     assert not EvalTaskApp.objects.filter(job=mine[0]).exists()
 
 
-def test_create_with_an_experiment_adds_its_current_attempts_plus_listed_jobs(api, researcher):
-    experiment, _, jobs = make_eval_jobs(researcher, 3, conditions=2)
-    _, _, outside = make_eval_jobs(researcher, 1, conditions=0)
+def test_create_with_a_study_adds_its_current_runs_plus_listed_runs(api, researcher):
+    study, _, runs = make_eval_runs(researcher, 3, conditions=2)
+    _, _, outside = make_eval_runs(researcher, 1, conditions=0)
     body = api.post(
         f"{API}/tasks/",
-        {"title": "All", "mode": "single", "experiment_id": str(experiment.id)},
+        {"title": "All", "mode": "single", "study_id": str(study.pk)},
         content_type=JSON,
     ).json()
-    assert body["experiment"] == {"id": str(experiment.id), "name": experiment.name}
+    assert body["study"] == {"id": str(study.pk), "name": study.name}
     assert body["counts"]["apps"] == 3
-    # experiment + extra jobs → union (the wizard links an experiment and adds individual apps)
+    # study + extra runs → union (the wizard links a study and adds individual apps)
     body = api.post(
         f"{API}/tasks/",
         {
             "title": "Union",
             "mode": "single",
-            "experiment_id": str(experiment.id),
-            "job_ids": [str(jobs[1].id), str(outside[0].id)],
+            "study_id": str(study.pk),
+            "run_ids": [str(runs[1].pk), str(outside[0].pk)],
         },
         content_type=JSON,
     ).json()
     task = EvalTask.objects.get(pk=body["id"])
-    assert set(task.apps.values_list("job_id", flat=True)) == {job.id for job in jobs} | {outside[0].id}
-    # an explicit empty list links the experiment without adding its apps
+    assert set(task.apps.values_list("job_id", flat=True)) == {run.pk for run in runs} | {outside[0].pk}
+    # an explicit empty list links the study without adding its apps
     body = api.post(
         f"{API}/tasks/",
-        {"title": "Linked", "mode": "single", "experiment_id": str(experiment.id), "job_ids": []},
+        {"title": "Linked", "mode": "single", "study_id": str(study.pk), "run_ids": []},
         content_type=JSON,
     ).json()
-    assert body["experiment"]["id"] == str(experiment.id)
+    assert body["study"]["id"] == str(study.pk)
     assert body["counts"]["apps"] == 0
 
 
@@ -227,7 +229,7 @@ def test_list_is_owner_scoped_with_filters(api, client, researcher):
         "status",
         "mode",
         "counts",
-        "experiment",
+        "study",
         "opens_at",
         "closes_at",
         "created_at",
@@ -411,16 +413,16 @@ def test_protocol_log_records_text_changes_after_open(api, researcher):
     assert _patch(api, task, {"title": "New title"}).json()["protocol_log"] == log
 
 
-def test_experiment_ownership_is_checked_on_patch(api, researcher):
+def test_study_ownership_is_checked_on_patch(api, researcher):
     task = make_draft_task(researcher, n_apps=1)
-    foreign, _, _ = make_eval_jobs(UserFactory(), 1, conditions=1)
-    assert _patch(api, task, {"experiment_id": str(foreign.id)}).status_code == 404
-    assert _patch(api, task, {"experiment_id": "junk"}).status_code == 404
-    mine, _, _ = make_eval_jobs(researcher, 1, conditions=1)
-    assert _patch(api, task, {"experiment_id": str(mine.id)}).json()["experiment"]["id"] == str(mine.id)
+    foreign, _, _ = make_eval_runs(UserFactory(), 1, conditions=1)
+    assert _patch(api, task, {"study_id": str(foreign.pk)}).status_code == 404
+    assert _patch(api, task, {"study_id": "junk"}).status_code == 404
+    mine, _, _ = make_eval_runs(researcher, 1, conditions=1)
+    assert _patch(api, task, {"study_id": str(mine.pk)}).json()["study"]["id"] == str(mine.pk)
     opened = make_open_task(researcher, n_apps=2)
-    assert _patch(api, opened, {"experiment_id": str(mine.id)}).json()["code"] == "design_frozen"
-    assert _patch(api, opened, {"experiment_id": None}).json()["code"] == "design_frozen"
+    assert _patch(api, opened, {"study_id": str(mine.pk)}).json()["code"] == "design_frozen"
+    assert _patch(api, opened, {"study_id": None}).json()["code"] == "design_frozen"
 
 
 # --- status transitions -----------------------------------------------------------------------
@@ -587,7 +589,7 @@ def test_delete_stops_apps_and_removes_everything(api, researcher, monkeypatch):
     assert not EvalTask.objects.filter(pk=task.pk).exists()
     assert not EvalTaskApp.objects.filter(task_id=task.pk).exists()
     assert not Participant.objects.filter(task_id=task.pk).exists()
-    assert GenerationJob.objects.filter(created_by=researcher).count() == 2  # jobs are untouched
+    assert GenerationRun.objects.filter(created_by=researcher).count() == 2  # runs are untouched
 
 
 # --- warnings --------------------------------------------------------------------------------
@@ -607,7 +609,7 @@ def test_open_warnings(api, researcher):
 
     mixed = make_draft_task(researcher, n_apps=2, settings={"blinding": {"show_source_code": True}})
     _, second = mixed.apps.order_by("position")
-    second.snapshot = {**second.snapshot, "spec_content_hash": "e" * 64, "mode": "scaffolding"}
+    second.snapshot = {**second.snapshot, "spec_content_hash": "e" * 64, "kind": "slot_agent"}
     second.save(update_fields=["snapshot"])
     warnings = api.get(f"{API}/tasks/{mixed.id}/").json()["open_warnings"]
     assert "mixed_spec_versions" in warnings
@@ -617,9 +619,8 @@ def test_open_warnings(api, researcher):
 def test_model_name_in_shown_source_is_flagged_and_cached(api, researcher):
     task = make_draft_task(researcher, n_apps=1, settings={"blinding": {"show_source_code": True}})
     app = task.apps.get()
-    job = app.job
-    job.result_data = {"files": {"backend/app.py": "# Written by Claude for this exercise\n"}}
-    job.save(update_fields=["result_data"])
+    RunFile.objects.filter(run_id=app.job_id).delete()
+    add_app_files(app.job, {"backend/app.py": ("# Written by Claude for this exercise\n", 1)})
     app.snapshot = {
         **app.snapshot,
         "provider": "Anthropic",
@@ -632,25 +633,6 @@ def test_model_name_in_shown_source_is_flagged_and_cached(api, researcher):
     assert app.snapshot["blinding_scan"]["source"] == ["claude"]
     hidden = make_draft_task(researcher, n_apps=1)
     assert "model_name_in_source" not in api.get(f"{API}/tasks/{hidden.id}/").json()["open_warnings"]
-
-
-def test_model_name_in_blob_code_behind_an_all_blank_files_map_is_flagged(api, researcher):
-    """C44: participants see ``backend/app.py`` from ``backend_code`` (the blank map is no code), so it is scanned."""
-    task = make_draft_task(researcher, n_apps=1, settings={"blinding": {"show_source_code": True}})
-    app = task.apps.get()
-    job = app.job
-    job.result_data = {"files": {"backend/__init__.py": ""}, "backend_code": "# Generated by claude\n"}
-    job.save(update_fields=["result_data"])
-    app.snapshot = {
-        **{key: value for key, value in app.snapshot.items() if key != "blinding_scan"},
-        "provider": "Anthropic",
-        "model_id": "anthropic/claude-3.5-sonnet",
-        "model_name": "Anthropic: Claude 3.5 Sonnet",
-    }
-    app.save(update_fields=["snapshot"])
-    assert "model_name_in_source" in api.get(f"{API}/tasks/{task.id}/").json()["open_warnings"]
-    app.refresh_from_db()
-    assert app.snapshot["blinding_scan"]["source"] == ["claude"]
 
 
 # --- items / preview -------------------------------------------------------------------------

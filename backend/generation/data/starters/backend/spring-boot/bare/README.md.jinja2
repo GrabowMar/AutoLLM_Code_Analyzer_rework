@@ -1,0 +1,4 @@
+{% set layout = "- `backend/`: the Spring Boot app (Java 21), a Maven project. The Dockerfile runs `mvn package` when `backend/pom.xml` exists and starts the executable jar it builds in `backend/target/`." %}
+{% set manifest = "pom.xml" %}
+{% set entry = "`java -jar app.jar` (the jar `mvn package` builds), which must start the server on port " ~ run.port %}
+{% include "common/README.md.jinja2" %}

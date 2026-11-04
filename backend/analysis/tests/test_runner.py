@@ -11,6 +11,7 @@ from backend.analysis.services import runner
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import AnalyzerWorkspaceFactory
+from backend.analysis.tests.factories import generation_run
 
 pytestmark = pytest.mark.django_db
 
@@ -129,8 +130,8 @@ def test_execute_skips_unknown_tool(monkeypatch, user):
     assert result.status == "skipped"
 
 
-def test_materialize_scaffolding_keys():
-    """Scaffolding blobs get sensible filenames/extensions (JS frontend != .py)."""
+def test_materialize_semantic_keys():
+    """Pasted-code blobs with bare keys get sensible filenames/extensions (JS frontend != .py)."""
     files = runner._materialize(
         {"backend_code": "import os\n", "frontend_code": "const x = 1;\n", "content": "x = 1\n"},
     )
@@ -147,40 +148,38 @@ def test_materialize_preserves_real_paths():
     assert "leading/slash.py" in files  # leading slash stripped
 
 
-def test_get_code_for_analysis_from_scaffolding_job(user):
-    from backend.generation.tests.factories import GenerationJobFactory
-
-    job = GenerationJobFactory(
-        created_by=user,
-        result_data={
-            "backend_code": "import os\n",
-            "frontend_code": "const x = 1;\n",
-            "backend_truncated": False,
-            "backend_files": 3,
-        },
+def test_get_code_for_analysis_reads_the_app_scope_of_the_generation_run(user):
+    gen = generation_run(
+        user,
+        files={"backend/app.py": "import flask\n", "backend/routes.py": "x = 1\n", "dist/app.js": "1\n"},
+        origins={"backend/app.py": "starter", "dist/app.js": "artifact"},
     )
-    run = AnalysisRunFactory(created_by=user, source_code=None, generation_job=job)
-    code = run.get_code_for_analysis()
-    assert code == {"backend_code": "import os\n", "frontend_code": "const x = 1;\n"}
-    # And materialization yields proper extensions end to end.
-    files = runner._materialize(code)
-    assert set(files) == {"backend_code.py", "frontend_code.jsx"}
+    run = AnalysisRunFactory(created_by=user, source_code=None, generation_job=gen)
+    # The whole app tree (starter files included), never just the model's files; artifacts are not in it.
+    assert run.get_code_for_analysis() == {"backend/app.py": "import flask\n", "backend/routes.py": "x = 1\n"}
 
 
-def test_get_code_for_analysis_prefers_copilot_files(user):
-    from backend.generation.tests.factories import GenerationJobFactory
+def test_get_code_for_analysis_of_a_slot_variant_overlays_the_parent_tree(user):
+    from backend.generation.testing import factories as gen_factories
 
-    job = GenerationJobFactory(
-        created_by=user,
-        result_data={
-            "content": "ignored blob",
-            "backend_code": "ignored blob",
-            "files": {"backend/app.py": "print('hi')", "frontend/src/App.jsx": "x"},
-        },
+    variant = gen_factories.GenerationRunFactory(slot_single_shot=True, created_by=user)
+    parent = variant.parent_run
+    for path, text in {"backend/app.py": "def f():\n    return 0\n", "backend/db.py": "x = 1\n"}.items():
+        gen_factories.RunFileFactory(run=parent, path=path, blob=_blob(text), origin="authored")
+    gen_factories.RunFileFactory(
+        run=variant,
+        path="backend/app.py",
+        blob=_blob("def f():\n    return 1\n"),
+        origin="slot",
     )
-    run = AnalysisRunFactory(created_by=user, source_code=None, generation_job=job)
-    code = run.get_code_for_analysis()
-    assert code == {"backend/app.py": "print('hi')", "frontend/src/App.jsx": "x"}
+    run = AnalysisRunFactory(created_by=user, source_code=None, generation_job=variant)
+    assert run.get_code_for_analysis() == {"backend/app.py": "def f():\n    return 1\n", "backend/db.py": "x = 1\n"}
+
+
+def _blob(text: str) -> str:
+    from backend.generation import blobs
+
+    return blobs.put_text(text)
 
 
 def test_execute_ai_tool(monkeypatch, user):
@@ -235,29 +234,20 @@ def test_ai_tool_gets_materialized_files_and_workspace_config(monkeypatch, user)
 
 def test_truncated_generation_input_flagged_in_summary(monkeypatch, user):
     from backend.analysis.services.base import AnalyzerOutput
-    from backend.generation.tests.factories import GenerationJobFactory
 
     AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
-    job = GenerationJobFactory(
-        created_by=user,
-        result_data={
-            "backend_code": "import os\n",
-            "frontend_code": "const x = 1;\n",
-            "backend_truncated": False,
-            "frontend_truncated": True,
-        },
+    gen = generation_run(
+        user,
+        files={"backend/app.py": "import os\n"},
+        validity={"termination": "budget_exhausted", "truncated": True, "notes": []},
     )
-    run = AnalysisRunFactory(
-        created_by=user,
-        tool_slugs=["llm_review"],
-        source_code=None,
-        generation_job=job,
-    )
+    run = AnalysisRunFactory(created_by=user, tool_slugs=["llm_review"], source_code=None, generation_job=gen)
     monkeypatch.setattr(runner.ai_runner, "run", lambda *a, **k: AnalyzerOutput(findings=[]))
 
     runner.execute(run)
     run.refresh_from_db()
-    assert run.summary["truncated_inputs"] == ["frontend"]
+    # The run was cut off (budget): the findings describe an incomplete app.
+    assert run.summary["truncated_inputs"] == ["budget_exhausted"]
 
 
 def _container_run(monkeypatch, user, tool_kw, exec_result, source=None):
@@ -320,6 +310,12 @@ def test_tool_without_applicable_files_is_skipped(monkeypatch, user):
     )
     assert result.status == "skipped"
     assert result.summary["skip_reason"] == runner.SKIP_NOT_APPLICABLE
+    # Not measured (never a clean zero), and recorded per (run, tool).
+    assert result.summary["measurement"] == runner.NOT_MEASURED
+    assert result.summary["tool_applicable"] is False
+    run.refresh_from_db()
+    assert run.summary["tool_applicable"] == {result.tool_slug: False}
+    assert run.summary["code_findings"] is None
     assert run.status == AnalysisRun.Status.COMPLETED
 
 
@@ -349,14 +345,6 @@ def test_workspace_cleanup_failure_fails_the_run(monkeypatch, user):
     # Stale files from the previous run would otherwise be scanned as this app's.
     assert run.status == AnalysisRun.Status.FAILED
     assert "Could not clear the workspace" in run.error_message
-
-
-def test_job_metadata_fields_are_not_analyzed(user):
-    from backend.generation.tests.factories import GenerationJobFactory
-
-    job = GenerationJobFactory(created_by=user, result_data={"content": "print(1)", "finish_reason": "stop"})
-    run = AnalysisRunFactory(created_by=user, source_code=None, generation_job=job)
-    assert run.get_code_for_analysis() == {"content": "print(1)"}
 
 
 def test_single_manifest_hallucinated_dependency_is_stored_on_failed_result(monkeypatch, user):
@@ -827,14 +815,14 @@ def test_a_scope_no_tool_measured_is_none_not_zero(user):
     assert (s["code_findings"], s["dependency_findings"], s["runtime_findings"]) == (0, None, None)
 
     # A scope that has findings shows them, even if they sit on a failed result;
-    # not applicable is a measurement (a true zero).
+    # not applicable is not a measurement (never a zero): code stays unmeasured.
     other = AnalysisRunFactory(created_by=user, status="running")
     failed = ToolResultFactory(run=other, tool_slug="osv-scanner", category="dependencies", status="failed")
     FindingFactory(result=failed, category="dependency", rule_id="nonexistent-package")
     ToolResultFactory(run=other, tool_slug="semgrep", status="skipped", summary={"skip_reason": "not_applicable"})
     counts = runner.run_scope_counts([other.id, str(run.id)])
     assert counts[other.id]["dependency_findings"] == 1
-    assert counts[other.id]["code_findings"] == 0
+    assert counts[other.id]["code_findings"] is None
     assert counts[other.id]["runtime_findings"] is None
     assert counts[str(run.id)]["dependency_findings"] is None
 
@@ -843,11 +831,9 @@ def test_a_scope_no_tool_measured_is_none_not_zero(user):
 
 
 def test_empty_package_files_are_analyzed_but_never_make_a_tool_applicable(monkeypatch, user):
-    from backend.generation.tests.factories import GenerationJobFactory
-
-    job = GenerationJobFactory(
-        created_by=user,
-        result_data={"files": {"pkg/__init__.py": "", "pkg/a.py": "from .b import x\n", "requirements.txt": ""}},
+    job = generation_run(
+        user,
+        files={"pkg/__init__.py": "", "pkg/a.py": "from .b import x\n", "requirements.txt": ""},
     )
     AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
     AnalyzerToolFactory(
@@ -880,15 +866,13 @@ def test_empty_package_files_are_analyzed_but_never_make_a_tool_applicable(monke
 
 
 def test_files_in_dependency_or_scratch_dirs_are_left_out_of_the_analyzed_tree(monkeypatch, user):
-    from backend.generation.tests.factories import GenerationJobFactory
-
     files = {
         "app.py": "x = 1\n",
         ".tmp/rr/package/package.json": '{"name": "react-router"}',
         ".tmp/rr/package/README.md": "docs",
         "frontend/node_modules/x/index.js": "y",
     }
-    job = GenerationJobFactory(created_by=user, result_data={"files": files})
+    job = generation_run(user, files=files)
     AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
     run = AnalysisRunFactory(
         created_by=user,
@@ -958,17 +942,154 @@ def test_ai_tool_without_reviewable_files_is_not_applicable(monkeypatch, user):
     assert result.summary["skip_reason"] == runner.SKIP_NOT_APPLICABLE
 
 
-def test_truncated_agent_output_is_flagged_like_the_reports_do(monkeypatch, user):
-    from backend.analysis.services.base import AnalyzerOutput
-    from backend.generation.services.experiment_results import output_truncated
-    from backend.generation.tests.factories import GenerationJobFactory
+# --- v3: app scope, origins, applicability (spec section 8.8) ------------------------------------
 
-    AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
-    data = {"files": {"app.py": "x = 1\n"}, "agent": {"final_response_truncated": True}}
-    job = GenerationJobFactory(created_by=user, result_data=data)
-    run = AnalysisRunFactory(created_by=user, tool_slugs=["llm_review"], source_code=None, generation_job=job)
-    monkeypatch.setattr(runner.ai_runner, "run", lambda *a, **k: AnalyzerOutput(findings=[]))
+
+RUFF_TWO_FILES = json.dumps(
+    [
+        {"code": "F401", "message": "unused", "filename": "/work/backend/app.py", "location": {"row": 1}},
+        {"code": "F401", "message": "unused", "filename": "/work/backend/routes.py", "location": {"row": 1}},
+    ],
+)
+
+
+def _app_scope_run(monkeypatch, user, *, gen, slugs, output):
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=AnalyzerWorkspaceFactory(user=user),
+        generation_job=gen,
+        source_code=None,
+        tool_slugs=slugs,
+    )
+    copied = {}
+    monkeypatch.setattr(runner.workspace_service, "require_ready_container", lambda ws: "cname")
+    monkeypatch.setattr(runner.docker_manager, "copy_files_in", lambda name, f, **k: copied.update(f) or {})
+
+    def exec_in(name, cmd, **k):
+        if cmd.startswith("find "):  # clearing /work
+            return {"exit_code": 0, "output": ""}
+        return {"exit_code": 1 if json.loads(output) else 0, "output": output}
+
+    monkeypatch.setattr(runner.docker_manager, "exec_in", exec_in)
     runner.execute(run)
     run.refresh_from_db()
-    assert output_truncated(data) is True
-    assert run.summary["truncated_inputs"] == ["agent"]
+    return run, copied
+
+
+def test_generation_run_is_analyzed_on_app_scope_and_the_scope_is_recorded(monkeypatch, user):
+    from backend.generation.identity import H
+
+    gen = generation_run(
+        user,
+        files={"backend/app.py": "import os\n", "backend/routes.py": "import sys\n", "requirements.txt": "flask\n"},
+        origins={"backend/app.py": "starter", "requirements.txt": "starter"},
+    )
+    AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
+    run, copied = _app_scope_run(monkeypatch, user, gen=gen, slugs=["fixture-ruff"], output=RUFF_TWO_FILES)
+
+    # Starter files and manifests reach the tools: analysis input is never filtered to the model's files.
+    assert set(copied) == {"backend/app.py", "backend/routes.py", "requirements.txt"}
+    assert run.code_scope == "app"
+    assert run.code_scope_paths_sha == H(sorted(copied))
+    result = run.results.get()
+    assert result.summary["tool_applicable"] is True
+    assert result.summary["measurement"] == runner.MEASURED
+    assert run.summary["tool_applicable"] == {"fixture-ruff": True}
+
+
+def test_findings_carry_the_origin_of_their_file(monkeypatch, user):
+    gen = generation_run(
+        user,
+        files={"backend/app.py": "import os\n", "backend/routes.py": "import sys\n"},
+        origins={"backend/app.py": "starter", "backend/routes.py": "modified"},
+    )
+    AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
+    run, _ = _app_scope_run(monkeypatch, user, gen=gen, slugs=["fixture-ruff"], output=RUFF_TWO_FILES)
+
+    origins = {
+        f.file_path: f.tool_specific_data.get(runner.FILE_ORIGIN_KEY) for f in Finding.objects.filter(result__run=run)
+    }
+    # Attribution happens at stats time: the starter's finding is stored too, tagged as such.
+    assert origins == {"backend/app.py": "starter", "backend/routes.py": "modified"}
+
+
+def test_findings_of_a_slot_variant_tag_overlaid_parent_files_as_parent(monkeypatch, user):
+    from backend.generation.testing import factories as gen_factories
+
+    variant = gen_factories.GenerationRunFactory(slot_single_shot=True, created_by=user)
+    gen_factories.RunFileFactory(run=variant.parent_run, path="backend/app.py", blob=_blob("import os\n"))
+    gen_factories.RunFileFactory(run=variant, path="backend/routes.py", blob=_blob("import sys\n"), origin="slot")
+    AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
+    run, copied = _app_scope_run(monkeypatch, user, gen=variant, slugs=["fixture-ruff"], output=RUFF_TWO_FILES)
+
+    assert set(copied) == {"backend/app.py", "backend/routes.py"}
+    origins = {
+        f.file_path: f.tool_specific_data.get(runner.FILE_ORIGIN_KEY) for f in Finding.objects.filter(result__run=run)
+    }
+    assert origins == {"backend/app.py": "parent", "backend/routes.py": "slot"}
+
+
+def test_a_tool_with_no_applicable_in_scope_files_is_not_measured_never_zero(monkeypatch, user):
+    gen = generation_run(user, files={"backend/app.py": "import os\n"})
+    AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
+    AnalyzerToolFactory(
+        slug="fixture-eslint",
+        kind="container",
+        parser_key="eslint",
+        run_cmd="eslint {target}",
+        file_patterns=["*.js", "*.jsx"],
+    )
+    run, _ = _app_scope_run(
+        monkeypatch,
+        user,
+        gen=gen,
+        slugs=["fixture-ruff", "fixture-eslint"],
+        output=json.dumps([]),
+    )
+    results = {r.tool_slug: r for r in run.results.all()}
+    eslint = results["fixture-eslint"]
+    assert eslint.status == "skipped"
+    assert (eslint.summary["tool_applicable"], eslint.summary["measurement"]) == (False, runner.NOT_MEASURED)
+    assert eslint.findings.count() == 0
+    assert run.summary["tool_applicable"] == {"fixture-ruff": True, "fixture-eslint": False}
+    # The ruff run is a measured clean zero; eslint measured nothing (counted as not applicable, not as 0).
+    assert run.summary["code_findings"] == 0
+    assert run.summary["tools_not_applicable"] == 1
+
+
+def test_a_run_whose_only_code_tool_is_not_applicable_reports_code_as_unmeasured(monkeypatch, user):
+    gen = generation_run(user, files={"backend/app.py": "import os\n"})
+    AnalyzerToolFactory(
+        slug="fixture-eslint",
+        kind="container",
+        parser_key="eslint",
+        run_cmd="eslint {target}",
+        file_patterns=["*.js"],
+    )
+    run, _ = _app_scope_run(monkeypatch, user, gen=gen, slugs=["fixture-eslint"], output="[]")
+    assert run.summary["code_findings"] is None
+    assert run.summary["total_findings"] == 0
+
+
+def test_per_tool_latest_is_unchanged(user):
+    """Per (run, tool) the latest decided result counts: a later failure never hides an earlier measurement,
+    and re-running one tool does not discard the other tools' results."""
+    from backend.analysis.models import ToolResult
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    gen = generation_run(user, files={"app.py": "x = 1\n"})
+    first = AnalysisRunFactory(created_by=user, generation_job=gen, source_code=None, status="completed")
+    a_bandit = ToolResultFactory(run=first, tool_slug="bandit")
+    a_ruff = ToolResultFactory(run=first, tool_slug="ruff")
+    a_eslint = ToolResultFactory(
+        run=first,
+        tool_slug="eslint",
+        status="skipped",
+        summary={"skip_reason": "not_applicable", "tool_applicable": False, "measurement": "not_measured"},
+    )
+    second = AnalysisRunFactory(created_by=user, generation_job=gen, source_code=None, status="partial")
+    ToolResultFactory(run=second, tool_slug="bandit", status="failed")
+    b_ruff = ToolResultFactory(run=second, tool_slug="ruff")
+    latest = set(ToolResult.latest_ids_per_job([gen.id]))
+    assert latest == {a_bandit.id, b_ruff.id, a_eslint.id}
+    assert a_ruff.id not in latest

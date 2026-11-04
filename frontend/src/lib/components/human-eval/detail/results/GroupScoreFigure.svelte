@@ -9,7 +9,7 @@
 	 * primary outcome), `note` (caption text), `children` (extra content under the plot).
 	 */
 	import type { Snippet } from 'svelte';
-	import StudyFigure from '$lib/components/experiments/study/StudyFigure.svelte';
+	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import type { GroupScore } from '$lib/api/human-eval';
 	import { plural, type Domain } from '../../format';
 	import DotCiPlot from './DotCiPlot.svelte';

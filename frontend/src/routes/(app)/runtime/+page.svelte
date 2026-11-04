@@ -81,7 +81,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Runtime" description="Docker containers created by generation jobs.">
+	<PageHeader title="Runtime" description="Docker containers started for generated samples.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
 				<RefreshCw />Refresh
@@ -127,7 +127,7 @@
 		<EmptyState
 			icon={Layers}
 			title="No containers found"
-			description="Containers are created automatically when generation jobs run."
+			description="Containers are created automatically when samples are built and tested."
 		/>
 	{:else}
 		<Card.Root class="gap-0 overflow-clip py-0">

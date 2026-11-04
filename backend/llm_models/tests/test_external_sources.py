@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from django.core.management import call_command
 
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.tests.factories import GenerationRunFactory
 from backend.llm_models.models import LLMModel
 from backend.llm_models.services import external_sources as es
 from backend.llm_models.services.external_sources import ARENA_CONFIGS
@@ -422,7 +422,7 @@ class TestImport:
 
     def test_reports_unknown_models_and_used_models_missing_from_map(self, user):
         used = LLMModelFactory(model_id="lab/used-unmapped")
-        GenerationJobFactory(model=used, created_by=user)
+        GenerationRunFactory(model=used, created_by=user)
         report = self._run({"lab/ghost": _entry("lab/ghost", epoch="Flash One")})
         assert report.rows[0]["epoch"] == "model_not_in_db"
         assert any("lab/used-unmapped" in w for w in report.warnings)

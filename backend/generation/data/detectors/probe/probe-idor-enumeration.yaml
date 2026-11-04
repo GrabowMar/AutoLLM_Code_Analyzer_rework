@@ -1,0 +1,11 @@
+name: IDOR (object enumeration) probe exploited
+description: Maps the evaluation's idor_enumeration probes (CWE-639) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:idor_enumeration'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-idor-enumeration
+  polarity: insecure
+  cwe: [cwe-639]
+  description: A idor_enumeration probe was exploited against the assembled app.

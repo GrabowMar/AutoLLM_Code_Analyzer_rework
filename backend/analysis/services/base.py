@@ -16,11 +16,11 @@ from typing import Any
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 
 # Known-vulnerability scanners. Every ``dependency`` finding of theirs is about
-# a package (often one the stack scaffold pinned), not code the model wrote, so
+# a package (often one the starter pinned), not code the model wrote, so
 # it is counted apart from code findings: this is the study tables' rule
 # (``statistics.dedup.IssueCluster.is_advisory``), and it includes packages
 # that do not exist (``nonexistent-*``): the study reports them with the other
-# dependency findings, split by who declared the package (model or scaffold).
+# dependency findings, split by who declared the package (model or starter).
 # Manifest hygiene (deptry, depcheck: missing/unused dependencies) is the
 # app's own code issue.
 ADVISORY_TOOLS = frozenset({"pip-audit", "npm-audit", "osv-scanner", "trivy", "retire"})

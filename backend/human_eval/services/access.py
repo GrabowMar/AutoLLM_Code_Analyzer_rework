@@ -205,7 +205,7 @@ def parse_uuid(value: Any) -> uuid.UUID | None:
 
 def researcher_tasks_qs(user: Any) -> QuerySet[EvalTask]:
     """Tasks the user may manage: their own (``created_by``), every task for staff, none when anonymous."""
-    qs = EvalTask.objects.select_related("created_by", "experiment")
+    qs = EvalTask.objects.select_related("created_by", "study")
     if user is None or not getattr(user, "is_authenticated", False):
         return qs.none()
     if getattr(user, "is_staff", False):

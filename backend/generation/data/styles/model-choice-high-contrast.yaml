@@ -1,0 +1,9 @@
+name: Model's choice, high contrast tone
+description: No styling prescription, with the high contrast visual tone.
+content:
+  system: model-choice
+  tone: high-contrast
+  tone_text: 'High contrast: black and white with one strong accent, large text, thick focus outlines and visible
+    link underlines.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

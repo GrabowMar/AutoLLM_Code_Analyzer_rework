@@ -1,0 +1,32 @@
+{# Python backends (flask, fastapi, django): backend/ + the optional frontend build. #}
+{% include "dockerfiles/_frontend_stage.Dockerfile.jinja2" %}
+FROM {{ base.python }}
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PORT={{ run.port }}
+WORKDIR /app
+{% if level == "bare" %}
+COPY . .
+RUN if [ -f backend/requirements.txt ]; then \
+      if [ -f backend/requirements.lock ]; then \
+        pip install --no-cache-dir -r backend/requirements.txt -c backend/requirements.lock; \
+      else \
+        pip install --no-cache-dir -r backend/requirements.txt; \
+      fi; \
+    fi
+{% else %}
+COPY backend/requirements.txt backend/requirements.lock* backend/
+RUN if [ -f backend/requirements.lock ]; then \
+      pip install --no-cache-dir -r backend/requirements.txt -c backend/requirements.lock; \
+    else \
+      pip install --no-cache-dir -r backend/requirements.txt; \
+    fi
+COPY backend/ backend/
+{% endif %}
+{% if has_frontend %}
+COPY --from=frontend /app/frontend/dist frontend/dist
+{% endif %}
+RUN mkdir -p data
+EXPOSE {{ run.port }}
+{% block command %}{% endblock %}

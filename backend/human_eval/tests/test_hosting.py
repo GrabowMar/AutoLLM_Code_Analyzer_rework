@@ -716,10 +716,11 @@ def test_an_old_failed_start_is_retried_and_a_newer_start_wins(runtime, django_c
     assert hosting.participant_hosting_info(_reload(app))["state"] == "idle"
 
 
-def test_jobs_without_code_are_never_built(runtime, django_capture_on_commit_callbacks):
+def test_runs_without_code_are_never_built(runtime, django_capture_on_commit_callbacks):
+    from backend.generation.models import RunFile
+
     app = _apps(_task())[0]
-    app.job.result_data = {"content": ""}
-    app.job.save(update_fields=["result_data"])
+    RunFile.objects.filter(run_id=app.job_id).delete()
     with django_capture_on_commit_callbacks(execute=True):
         info = hosting.ensure_running(app, actor=app.task.created_by)
     assert info["state"] == "failed"

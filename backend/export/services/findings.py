@@ -3,10 +3,13 @@
 Every exported finding carries the level exactly as its tool printed it
 (``tool_severity``; ``unrated`` when the tool rates nothing) and, labelled as
 such, the normalized heuristic level (``normalized_severity``). It also names
-the app it describes (generation job, model, app, experiment cell) and says
-whether its result is the one the study tables count (``is_latest``: the
-job's latest result per tool, ``ToolResult.latest_ids_per_job``). Findings of
-an ad-hoc run without a generation job have no app and no ``is_latest``.
+the app it describes (generation run, model, task, study cell), the origin of
+its file in the run's app tree (``file_origin``: ``starter``, ``authored``,
+``modified``, ``slot`` or ``parent``, from ``RunView.files("app")``; empty for
+a URL or a path outside the tree) and says whether its result is the one the
+study tables count (``is_latest``: the run's latest result per tool,
+``ToolResult.latest_ids_per_job``). Findings of an ad-hoc analysis without a
+generation run have no app and no ``is_latest``.
 """
 
 from __future__ import annotations
@@ -30,10 +33,9 @@ if TYPE_CHECKING:
 UNRATED = "unrated"
 
 # A row's result and run, joined in one query (no per-row lookups on large exports).
-# Only the columns a row reads are loaded: a result's raw output, and above all
-# the generation job's code and bundle (about 0.25 MB per job), must not be
+# Only the columns a row reads are loaded: a result's raw output must not be
 # parsed again for every finding. The app a row describes comes from one
-# per-export job map instead (:func:`export_context`).
+# per-export run map instead (:func:`export_context`).
 FINDING_SELECT_RELATED = ("result", "result__run")
 FINDING_ONLY = (
     "id",
@@ -61,12 +63,14 @@ FINDING_HEADERS = [
     "task_id",  # the analysis run
     "result_id",
     "result_status",
-    "generation_job_id",
-    "experiment_id",
+    "generation_run_id",
+    "study_id",
     "condition_id",
     "condition_label",
     "model",
-    "app",
+    "task",
+    "unit",
+    "kind",
     "stack",
     "repeat_index",
     "analyzer",
@@ -75,6 +79,7 @@ FINDING_HEADERS = [
     "normalized_severity",
     "category",
     "file_path",
+    "file_origin",
     "line",
     "column",
     "rule_id",
@@ -146,11 +151,11 @@ def dynamic_tool_slugs() -> set[str]:
     return set(AnalyzerTool.objects.filter(analysis_mode=AnalysisMode.DYNAMIC).values_list("slug", flat=True))
 
 
-def latest_result_ids(job_ids: Iterable[Any]) -> set[str]:
-    """The results the study tables count for these jobs: latest per (job, tool)."""
+def latest_result_ids(run_ids: Iterable[Any]) -> set[str]:
+    """The results the study tables count for these runs: latest per (run, tool)."""
     from backend.analysis.models import ToolResult
 
-    ids = {str(j) for j in job_ids if j}
+    ids = {str(r) for r in run_ids if r}
     return {str(r) for r in ToolResult.latest_ids_per_job(ids)} if ids else set()
 
 
@@ -176,55 +181,55 @@ def _tool_version(result: Any) -> str | None:
     return str(version) if version else None
 
 
-_JOB_KEYS = (
-    "generation_job_id",
-    "experiment_id",
+_RUN_KEYS = (
+    "generation_run_id",
+    "study_id",
     "condition_id",
     "condition_label",
     "model",
-    "app",
+    "task",
+    "unit",
+    "kind",
     "stack",
     "repeat_index",
 )
 
 
-def job_identities(job_ids: Iterable[Any]) -> dict[str, dict[str, Any]]:
-    """Per generation job (by id), the app it is: the job columns of an exported row, from two small queries.
+def run_identities(run_ids: Iterable[Any]) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
+    """Per generation run (by id): the run columns of an exported row, and ``{path: origin}`` of its app tree.
 
-    ``condition_label`` is the study tables' name of the experiment arm
-    (its label, else ``<model> / <method>``), so rows join to them by label too.
+    ``condition_label`` is the study tables' name of the condition (``statistics.services.runs.condition_label``:
+    its label, else its model id), so rows join to them by label too.
+    Origins come from ``RunView.files("app")`` (``parent`` for a slot variant's overlaid parent rows).
     """
-    from backend.export.services.jobs import condition_labels
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.runs.view import run_views
 
-    ids = {str(j) for j in job_ids if j}
+    ids = {str(r) for r in run_ids if r}
     if not ids:
-        return {}
-    rows = list(
-        GenerationJob.objects.filter(id__in=ids).values(
-            "id",
-            "experiment_id",
-            "condition_id",
-            "model__model_id",
-            "app_requirement__slug",
-            "stack_slug",
-            "repeat_index",
-        ),
-    )
-    labels = condition_labels(r["condition_id"] for r in rows)
-    return {
-        str(r["id"]): {
-            "generation_job_id": str(r["id"]),
-            "experiment_id": str(r["experiment_id"]) if r["experiment_id"] else None,
-            "condition_id": str(r["condition_id"]) if r["condition_id"] else None,
-            "condition_label": labels.get(r["condition_id"]) if r["condition_id"] else None,
-            "model": r["model__model_id"],
-            "app": r["app_requirement__slug"],
-            "stack": r["stack_slug"] or None,
-            "repeat_index": r["repeat_index"],
+        return {}, {}
+    from backend.statistics.services.runs import condition_label
+
+    runs = list(GenerationRun.objects.filter(id__in=ids).select_related("condition__model"))
+    conditions = {str(r.id): r.condition for r in runs}
+    identities: dict[str, dict[str, Any]] = {}
+    origins: dict[str, dict[str, str]] = {}
+    for view in run_views(runs):
+        condition = conditions.get(view.id)
+        identities[view.id] = {
+            "generation_run_id": view.id,
+            "study_id": view.study_id,
+            "condition_id": str(view.condition_id) if view.condition_id is not None else None,
+            "condition_label": condition_label(condition) if condition is not None else None,
+            "model": view.model_slug,
+            "task": view.task.ref if view.task is not None else None,
+            "unit": view.unit_key,
+            "kind": view.kind,
+            "stack": view.stack.ref if view.stack is not None else None,
+            "repeat_index": view.repeat_index,
         }
-        for r in rows
-    }
+        origins[view.id] = {entry.path: entry.origin for entry in view.files("app")}
+    return identities, origins
 
 
 @dataclass(frozen=True)
@@ -232,23 +237,32 @@ class ExportContext:
     """What the rows of one export share: the results the study tables count, and the apps the rows describe."""
 
     latest_ids: set[str] = field(default_factory=set)
-    jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    runs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    origins: dict[str, dict[str, str]] = field(default_factory=dict)
 
-    def job_fields(self, job_id: Any) -> dict[str, Any]:
-        """The job columns of a row of *job_id*'s findings (all ``None`` for an ad-hoc run)."""
-        if not job_id:
-            return dict.fromkeys(_JOB_KEYS)
-        return self.jobs.get(str(job_id)) or {**dict.fromkeys(_JOB_KEYS), "generation_job_id": str(job_id)}
+    def run_fields(self, run_id: Any) -> dict[str, Any]:
+        """The run columns of a row of *run_id*'s findings (all ``None`` for an ad-hoc analysis)."""
+        if not run_id:
+            return dict.fromkeys(_RUN_KEYS)
+        return self.runs.get(str(run_id)) or {**dict.fromkeys(_RUN_KEYS), "generation_run_id": str(run_id)}
+
+    def file_origin(self, run_id: Any, path: str) -> str | None:
+        """The origin of *path* in the run's app tree; ``None`` for a URL, an unknown path or no run."""
+        if not run_id or not path:
+            return None
+        rel = path[2:] if path.startswith("./") else path
+        return self.origins.get(str(run_id), {}).get(rel)
 
     def is_latest(self, result: Any) -> bool | None:
-        """Whether *result* is one the study tables count; ``None`` for an ad-hoc run (no job)."""
+        """Whether *result* is one the study tables count; ``None`` for an ad-hoc analysis (no run)."""
         return (str(result.id) in self.latest_ids) if result.run.generation_job_id else None
 
 
-def export_context(job_ids: Iterable[Any]) -> ExportContext:
-    """The :class:`ExportContext` of an export whose findings describe these jobs."""
-    ids = {str(j) for j in job_ids if j}
-    return ExportContext(latest_ids=latest_result_ids(ids), jobs=job_identities(ids))
+def export_context(run_ids: Iterable[Any]) -> ExportContext:
+    """The :class:`ExportContext` of an export whose findings describe these runs."""
+    ids = {str(r) for r in run_ids if r}
+    identities, origins = run_identities(ids)
+    return ExportContext(latest_ids=latest_result_ids(ids), runs=identities, origins=origins)
 
 
 def finding_row(f: Any, ctx: ExportContext) -> dict[str, Any]:
@@ -261,13 +275,15 @@ def finding_row(f: Any, ctx: ExportContext) -> dict[str, Any]:
         "task_id": str(result.run_id),
         "result_id": str(result.id),
         "result_status": result.status,
-        **ctx.job_fields(result.run.generation_job_id),
+        **ctx.run_fields(result.run.generation_job_id),
         "analyzer": result.tool_slug,
         "tool_version": _tool_version(result),
         "tool_severity": f.tool_severity or UNRATED,
         "normalized_severity": f.severity,
         "category": f.category,
         "file_path": f.file_path,
+        # The origin the analysis tagged on the finding, else the run's app tree (RunView.files("app")).
+        "file_origin": _text(extra.get("file_origin")) or ctx.file_origin(result.run.generation_job_id, f.file_path),
         "line": f.line_number,
         "column": f.column_number,
         "rule_id": f.rule_id,
@@ -410,10 +426,10 @@ def findings_sarif(
             "analysis_run_id": str(result.run_id),
             "result_id": str(result.id),
             "result_status": result.status,
-            **ctx.job_fields(result.run.generation_job_id),
+            **ctx.run_fields(result.run.generation_job_id),
             "is_latest": ctx.is_latest(result),
         }
-        subject = identity["generation_job_id"] or identity["analysis_run_id"]
+        subject = identity["generation_run_id"] or identity["analysis_run_id"]
         runs.append(
             {
                 "tool": {"driver": driver},

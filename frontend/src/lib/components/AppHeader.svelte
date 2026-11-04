@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { avatarColorClasses } from '$lib/constants/colors';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -26,7 +27,9 @@
 		user: { id: number; email: string; display?: string; name?: string } | null;
 	}
 
-	let { auth }: { auth: AuthState } = $props();
+	// `actions`: optional controls rendered at the start of the right-hand cluster, before the theme toggle
+	// (the study spend chip; see SAMPLE_GEN_V3_CHANGES "WP-15 → lead").
+	let { auth, actions }: { auth: AuthState; actions?: Snippet } = $props();
 
 	const authStore = getAuth();
 	const preferences = getPreferences();
@@ -183,6 +186,7 @@
 	<div class="flex-1"></div>
 
 	<div class="flex items-center gap-1.5">
+		{@render actions?.()}
 		<ThemeToggle />
 
 		{#if auth.isAuthenticated && auth.user}

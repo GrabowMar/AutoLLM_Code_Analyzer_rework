@@ -108,9 +108,7 @@ export const REQUIREMENT_SOURCES: {
   value: RequirementSource;
   label: string;
 }[] = [
-  { value: "backend", label: "Backend requirements" },
   { value: "frontend", label: "Frontend requirements" },
-  { value: "admin", label: "Admin requirements" },
   { value: "api", label: "API endpoints" },
   { value: "admin_api", label: "Admin API endpoints" },
 ];
@@ -332,7 +330,7 @@ export function newBlock(
         type,
         title: info.title,
         instructions: "",
-        sources: ["backend", "frontend", "api"],
+        sources: ["frontend", "api"],
         custom: [],
         note: "optional",
       };

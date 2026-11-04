@@ -1,0 +1,14 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: claude-code (controlled)
+description: claude-code 2.1.316 with the equalised knobs of spec 5.5 (command timeout, web tools off, subagents
+  off, turn cap from the budget preset, pinned captured prompt).
+archived: false
+content:
+  harness: claude-code
+  harness_version: 2.1.316
+  controlled: true
+  command_timeout_s: 300
+  subagents: false
+  tool_policy:
+    deny: [WebFetch, WebSearch]
+  pin_system_prompt: true

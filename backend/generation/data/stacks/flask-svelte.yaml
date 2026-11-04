@@ -1,0 +1,14 @@
+name: Flask + Svelte (SQLite)
+description: Flask (Python 3.13) API serving a Vite Svelte (TypeScript) build.
+content:
+  choice_mode: fixed
+  backend: {language: python, framework: flask, runtime: python3.13}
+  frontend: {framework: svelte, language: ts, build_tool: vite}
+  database: sqlite
+  run_contract: {port: 8000, api_prefix: /api, health_path: /api/health, static_serving: backend, data_dir: ./data, start: dockerfile}
+  brief_fragment: stack-flask-svelte@1
+  adherence:
+    backend_markers: [flask]
+    frontend_markers: [svelte]
+    db_markers: [sqlite3]
+  resources: {min_memory: 2g, min_cpus: 1.0}

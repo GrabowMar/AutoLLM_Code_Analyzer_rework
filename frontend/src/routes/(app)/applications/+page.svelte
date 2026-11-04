@@ -1,614 +1,226 @@
 <script lang="ts">
+	// Applications: the agentic app samples (`GET /runs/?kind=app_agentic`, spec 9.5, 10.1). Each row opens
+	// `/samples/[id]`; tested, usable rows can be used as slot parents. A pass rate that was not measured is
+	// shown as "not measured", never 0.
+	import { untrack } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
-	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import * as Card from '$lib/components/ui/card';
-	import { TableToolbar } from '$lib/components/table';
-	import {
-		getGenerationJobs,
-		getGenerationJobsStats,
-		cancelGenerationJob,
-		deleteGenerationJob,
-		retryGenerationJob,
-		type PaginatedJobs,
-	} from '$lib/api/client';
-	import {
-		getContainers,
-		buildContainerForJob,
-		startContainer,
-		stopContainer,
-		removeContainer,
-		type ContainerInstance,
-	} from '$lib/api/runtime';
-	import JobsTable from '$lib/components/applications/JobsTable.svelte';
-	import JobCards from '$lib/components/applications/JobCards.svelte';
-	import { onMount, onDestroy } from 'svelte';
-	import { toast } from 'svelte-sonner';
-	import { formatApiError } from '$lib/api/core';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import * as Select from '$lib/components/ui/select';
+	import { Input } from '$lib/components/ui/input';
+	import { Button } from '$lib/components/ui/button';
+	import { rowLink, tableFrame, TableToolbar } from '$lib/components/table';
 	import AppWindow from '@lucide/svelte/icons/app-window';
-	import CircleCheck from '@lucide/svelte/icons/circle-check';
-	import CircleX from '@lucide/svelte/icons/circle-x';
-	import Clock from '@lucide/svelte/icons/clock';
-	import FlaskConical from '@lucide/svelte/icons/flask-conical';
-	import Layers from '@lucide/svelte/icons/layers';
-	import { goto } from '$app/navigation';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Scissors from '@lucide/svelte/icons/scissors';
+	import { formatApiError, isAbortError } from '$lib/api/core';
+	import { listSamples } from '$lib/api/v3/samples';
+	import { RUN_OUTCOMES, type Page, type RunListOut } from '$lib/api/v3/types';
+	import {
+		fmtRate,
+		fmtSeconds,
+		fmtUsd,
+		OUTCOME_TONES,
+		outcomeLabel,
+		shortSha,
+		UseAsParentAction,
+	} from '$lib/components/runs';
+	import { formatDate } from '$lib/utils/formatters';
 
+	const PAGE_SIZE = 50;
+
+	const outcome = $derived(page.url.searchParams.get('outcome') ?? '');
+	const usable = $derived(page.url.searchParams.get('usable') ?? '');
+	const model = $derived(page.url.searchParams.get('model') ?? '');
+	const currentPage = $derived(Math.max(1, Number(page.url.searchParams.get('page') ?? '1') || 1));
+
+	let data = $state<Page<RunListOut> | null>(null);
 	let loading = $state(true);
-	let refreshing = $state(false);
-	let data = $state<PaginatedJobs | null>(null);
-	let containers = $state<ContainerInstance[]>([]);
-	let containerBusy = $state<Record<string, string | null>>({});
+	let error = $state('');
+	let modelInput = $state('');
+	let reloadKey = $state(0);
 
-	let searchQuery = $state('');
-	let modeFilter = $state('');
-	let statusFilter = $state('');
-	let containerFilter = $state('');
-	let modelFilter = $state('');
-	let sortBy = $state('created_at');
-	let sortDir = $state<'asc' | 'desc'>('desc');
-	let currentPage = $state(1);
-	let perPage = $state(25);
+	$effect(() => {
+		modelInput = model;
+	});
 
-	// Derive unique models from loaded data for the model filter dropdown
-	const uniqueModels = $derived.by(() => {
-		if (!data?.items) return [];
-		const seen = new Set<string>();
-		return data.items
-			.filter((j) => j.model_name && j.model_id_str)
-			.filter((j) => {
-				if (seen.has(j.model_id_str!)) return false;
-				seen.add(j.model_id_str!);
-				return true;
+	function setParam(key: string, value: string) {
+		const url = new URL(page.url);
+		if (value) url.searchParams.set(key, value);
+		else url.searchParams.delete(key);
+		if (key !== 'page') url.searchParams.delete('page');
+		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	$effect(() => {
+		void reloadKey;
+		const controller = new AbortController();
+		const query = {
+			kind: 'app_agentic',
+			outcome: outcome || undefined,
+			usable: usable === '' ? undefined : usable === 'true',
+			model: model || undefined,
+			page: currentPage,
+			page_size: PAGE_SIZE,
+		};
+		loading = untrack(() => data === null);
+		listSamples(query, { signal: controller.signal })
+			.then((out) => {
+				data = out;
+				error = '';
 			})
-			.map((j) => ({ name: j.model_name!, id: j.model_id_str! }))
-			.sort((a, b) => a.name.localeCompare(b.name));
+			.catch((e) => {
+				if (!isAbortError(e)) error = formatApiError(e, 'Could not load the applications.');
+			})
+			.finally(() => (loading = false));
+		return () => controller.abort();
 	});
 
-	// Map sortBy/sortDir to backend sort_by values
-	const sortOption = $derived.by(() => {
-		if (sortBy === 'created_at') return sortDir === 'desc' ? 'created_desc' : 'created_asc';
-		if (sortBy === 'duration_seconds') return sortDir === 'desc' ? 'duration_desc' : 'duration_asc';
-		if (sortBy === 'model_name') return 'model_asc';
-		return 'created_desc';
+	const pages = $derived(data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1);
+	const labelKeys = $derived.by(() => {
+		const keys = new Set<string>();
+		for (const row of data?.items ?? [])
+			for (const key of Object.keys(row.labels ?? {})) if (key !== 'model' && key !== 'task') keys.add(key);
+		return [...keys].sort().slice(0, 4);
 	});
-
-	let stats = $state<Awaited<ReturnType<typeof getGenerationJobsStats>> | null>(null);
-
-	let pollTimer: ReturnType<typeof setInterval> | null = null;
-	let debounceTimer: ReturnType<typeof setTimeout>;
-
-	async function fetchContainers() {
-		try {
-			const res = await getContainers({ per_page: 100 });
-			containers = res.containers || [];
-		} catch (e) {
-			console.error('Failed to load containers:', e);
-		}
-	}
-
-	async function fetchJobs() {
-		try {
-			const params: Record<string, any> = {
-				page: currentPage,
-				per_page: perPage,
-			};
-			if (modeFilter) params.mode = modeFilter;
-			if (statusFilter) params.status = statusFilter;
-			if (searchQuery) params.search = searchQuery;
-			if (containerFilter) params.container_status = containerFilter;
-			if (modelFilter) params.model_id = modelFilter;
-			if (sortOption) params.sort_by = sortOption;
-
-			const [jobsData, statsData] = await Promise.all([
-				getGenerationJobs(params),
-				getGenerationJobsStats(),
-				fetchContainers()
-			]);
-			data = jobsData;
-			stats = statsData;
-			checkAndStartPolling();
-		} catch (e: any) {
-			toast.error('Failed to load applications');
-		} finally {
-			loading = false;
-			refreshing = false;
-		}
-	}
-
-	function checkAndStartPolling() {
-		stopPolling();
-		const hasTransitioning = containers.some(c => c.status === 'building' || c.status === 'pending');
-		const hasBusyActions = Object.values(containerBusy).some(v => v != null);
-
-		if (hasTransitioning || hasBusyActions) {
-			pollTimer = setInterval(async () => {
-				await fetchContainers();
-				const stillTransitioning = containers.some(c => c.status === 'building' || c.status === 'pending');
-				const stillBusy = Object.values(containerBusy).some(v => v != null);
-				if (!stillTransitioning && !stillBusy) {
-					stopPolling();
-				}
-			}, 5000);
-		}
-	}
-
-	function stopPolling() {
-		if (pollTimer) {
-			clearInterval(pollTimer);
-			pollTimer = null;
-		}
-	}
-
-	async function runContainerAction(jobId: string, actionName: string, apiCall: () => Promise<unknown>, successMessage: string) {
-		containerBusy[jobId] = actionName;
-		try {
-			await apiCall();
-			toast.success(successMessage);
-			await fetchContainers();
-			checkAndStartPolling();
-		} catch (e: any) {
-			const msg = e?.message || 'Action failed';
-			toast.error(`${actionName} failed: ${msg}`);
-		} finally {
-			containerBusy[jobId] = null;
-		}
-	}
-
-	function handleBuildContainer(jobId: string) {
-		runContainerAction(jobId, 'build', () => buildContainerForJob(jobId), 'Container build started');
-	}
-
-	function handleStartContainer(jobId: string, containerId: string) {
-		runContainerAction(jobId, 'start', () => startContainer(containerId), 'Container starting');
-	}
-
-	function handleStopContainer(jobId: string, containerId: string) {
-		runContainerAction(jobId, 'stop', () => stopContainer(containerId), 'Container stopping');
-	}
-
-	// One confirm dialog for the destructive row actions (container removal, job deletion).
-	let pendingConfirm = $state<
-		| { kind: 'remove-container'; jobId: string; containerId: string }
-		| { kind: 'delete-job'; jobId: string }
-		| null
-	>(null);
-	let confirmOpen = $state(false);
-	let confirmBusy = $state(false);
-
-	function handleRemoveContainer(jobId: string, containerId: string) {
-		pendingConfirm = { kind: 'remove-container', jobId, containerId };
-		confirmOpen = true;
-	}
-
-	async function runConfirmed() {
-		const action = pendingConfirm;
-		if (!action) return;
-		confirmBusy = true;
-		try {
-			if (action.kind === 'remove-container') {
-				confirmOpen = false;
-				await runContainerAction(action.jobId, 'remove', () => removeContainer(action.containerId), 'Container removed');
-			} else {
-				await deleteJob(action.jobId);
-				confirmOpen = false;
-			}
-		} finally {
-			confirmBusy = false;
-		}
-	}
-
-	async function refresh() {
-		refreshing = true;
-		await fetchJobs();
-		toast.success('Refreshed');
-	}
-
-	function goToPage(p: number) {
-		currentPage = p;
-		fetchJobs();
-	}
-
-	function debouncedLoad() {
-		clearTimeout(debounceTimer);
-		currentPage = 1;
-		debounceTimer = setTimeout(fetchJobs, 300);
-	}
-
-	function applyFilters() {
-		currentPage = 1;
-		fetchJobs();
-	}
-
-	function clearFilters() {
-		searchQuery = '';
-		modeFilter = '';
-		statusFilter = '';
-		containerFilter = '';
-		modelFilter = '';
-		sortBy = 'created_at';
-		sortDir = 'desc';
-		currentPage = 1;
-		fetchJobs();
-	}
-
-	function toggleSort(field: string) {
-		if (sortBy === field) {
-			// model_name only has asc from backend; toggle via created fallback
-			if (field === 'model_name') {
-				sortBy = 'created_at';
-				sortDir = 'desc';
-			} else {
-				sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-			}
-		} else {
-			sortBy = field;
-			sortDir = field === 'model_name' ? 'asc' : 'desc';
-		}
-		currentPage = 1;
-		fetchJobs();
-	}
-
-	function copyId(id: string) {
-		navigator.clipboard.writeText(id);
-		toast.success('Copied job ID');
-	}
-
-	async function handleCancel(id: string) {
-		try {
-			const result = await cancelGenerationJob(id);
-			if (result.success) {
-				toast.success('Job cancelled');
-				await fetchJobs();
-			} else {
-				toast.error('Cannot cancel this job');
-			}
-		} catch {
-			toast.error('Failed to cancel job');
-		}
-	}
-
-	function handleDelete(id: string) {
-		pendingConfirm = { kind: 'delete-job', jobId: id };
-		confirmOpen = true;
-	}
-
-	async function deleteJob(id: string) {
-		try {
-			const result = await deleteGenerationJob(id);
-			if (result.success) {
-				toast.success('Job deleted');
-				await fetchJobs();
-			} else {
-				toast.error('Cannot delete this job');
-			}
-		} catch {
-			toast.error('Failed to delete job');
-		}
-	}
-
-	async function handleRetry(id: string) {
-		try {
-			const newJob = await retryGenerationJob(id);
-			toast.success('Job retried — new job created');
-			goto(`/applications/${newJob.id}`);
-		} catch (e) {
-			toast.error(formatApiError(e, 'Failed to retry job'));
-		}
-	}
-
-	const containersByJobId = $derived(
-		containers.reduce((acc, c) => {
-			if (c.generation_job_id) acc[c.generation_job_id] = c;
-			return acc;
-		}, {} as Record<string, ContainerInstance>)
-	);
-
-	const filteredItems = $derived(data?.items ?? []);
-
-	const activeFilters = $derived.by((): FilterTag[] => {
-		const tags: FilterTag[] = [];
-		if (searchQuery) {
-			tags.push({
-				key: 'search',
-				label: `Search: "${searchQuery}"`,
-				onRemove: () => {
-					searchQuery = '';
-					applyFilters();
-				}
-			});
-		}
-		if (modeFilter) {
-			const labels: Record<string, string> = { agent: 'Agent', custom: 'Custom', scaffolding: 'Scaffolding', copilot: 'Copilot (legacy)' };
-			tags.push({
-				key: 'mode',
-				label: `Mode: ${labels[modeFilter] || modeFilter}`,
-				onRemove: () => {
-					modeFilter = '';
-					applyFilters();
-				}
-			});
-		}
-		if (containerFilter) {
-			const labels: Record<string, string> = {
-				running: 'Running Container',
-				stopped: 'Stopped Container',
-				building: 'Building/Provisioning',
-				none: 'No Container'
-			};
-			tags.push({
-				key: 'container',
-				label: labels[containerFilter] || containerFilter,
-				onRemove: () => {
-					containerFilter = '';
-					applyFilters();
-				}
-			});
-		}
-		if (modelFilter) {
-			const model = uniqueModels.find((m) => m.id === modelFilter);
-			tags.push({
-				key: 'model',
-				label: `Model: ${model?.name ?? modelFilter}`,
-				onRemove: () => {
-					modelFilter = '';
-					applyFilters();
-				}
-			});
-		}
-		return tags;
-	});
-
-	const hasActiveFilters = $derived(activeFilters.length > 0);
-
-	const resultsText = $derived(
-		data && data.total > 0
-			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
-			: ''
-	);
-
-	function selectStatusTab(status: string) {
-		statusFilter = status;
-		applyFilters();
-	}
-
-	onMount(() => {
-		fetchJobs();
-	});
-
-	onDestroy(() => {
-		stopPolling();
-	});
+	const filtered = $derived(!!(outcome || usable || model));
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Applications" description="Browse and manage generated web applications.">
+	<PageHeader
+		title="Applications"
+		description="Agentic app samples: open one to see its manifest, files, trajectory and evaluation, or use it as a slot parent."
+	>
 		{#snippet actions()}
-			<Button id="btn-refresh" variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
-				<RefreshCw class="h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
-				Refresh
+			<Button variant="outline" size="sm" onclick={() => (reloadKey += 1)}>
+				<RefreshCw class="mr-1.5 h-3.5 w-3.5" />Refresh
 			</Button>
-			<Button variant="outline" size="sm" href="/sample-generator/batches">
-				<Layers class="h-3.5 w-3.5" />
-				Batches
-			</Button>
-			<Button id="btn-generate-new" size="sm" href="/sample-generator">
-				<FlaskConical class="h-3.5 w-3.5" />
-				Generate New
+			<Button size="sm" href="/slots/new">
+				<Scissors class="mr-1.5 h-3.5 w-3.5" />Regenerate a part…
 			</Button>
 		{/snippet}
-		{#if stats}
+		{#if data}
 			<div class="header-stats">
-				<span class="header-stat"><b>{stats.total}</b> total</span>
-				<span class="header-stat"><b>{stats.completed}</b> completed</span>
-				<span class="header-stat"><b>{stats.running}</b> running{#if stats.queued}<span class="ml-1">({stats.queued} queued for a sandbox)</span>{/if}</span>
-				<span class="header-stat"><b>{stats.failed}</b> failed</span>
-				<span class="header-stat"><b>{stats.pending}</b> pending</span>
+				<span class="header-stat"><b>{data.total.toLocaleString()}</b> {filtered ? 'matching' : 'total'}</span>
 			</div>
 		{/if}
 	</PageHeader>
 
+	{#if error}<ErrorAlert message={error} onretry={() => (reloadKey += 1)} />{/if}
+
 	<Card.Root class="gap-0 overflow-clip py-0">
-		<FilterBar
-			embedded
-			searchPlaceholder="Search applications..."
-			bind:searchValue={searchQuery}
-			onSearchInput={() => { currentPage = 1; debouncedLoad(); }}
-			activeTags={activeFilters}
-			onClearAll={clearFilters}
-		>
-			{#snippet filters()}
-				<!-- Row 1: Status -->
-				<div class="fb-group">
-					<span class="fb-group-label">Status</span>
-					<button
-						class="fb-chip {statusFilter === '' ? 'fb-chip-on' : ''}"
-						onclick={() => selectStatusTab('')}
+		<TableToolbar>
+			{#snippet summary()}
+				<div class="flex flex-wrap items-center gap-2">
+					<Select.Simple
+						size="sm"
+						aria-label="Outcome"
+						value={outcome}
+						onValueChange={(v: string) => setParam('outcome', v)}
+						placeholder="Any outcome"
+						clearLabel="Any outcome"
+						items={RUN_OUTCOMES.map((o) => ({ value: o, label: outcomeLabel(o) }))}
+					/>
+					<Select.Simple
+						size="sm"
+						aria-label="Usable"
+						value={usable}
+						onValueChange={(v: string) => setParam('usable', v)}
+						placeholder="Usable or not"
+						clearLabel="Usable or not"
+						items={[
+							{ value: 'true', label: 'Usable', description: 'Model-attributable outcomes (analysed as data)' },
+							{ value: 'false', label: 'Not usable', description: 'Infra errors and exclusions' },
+						]}
+					/>
+					<form
+						class="flex items-center gap-1"
+						onsubmit={(e) => {
+							e.preventDefault();
+							setParam('model', modelInput.trim());
+						}}
 					>
-						<AppWindow class="h-3 w-3" /> All
-						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.total}</span>{/if}
-					</button>
-					<button
-						class="fb-chip {statusFilter === 'completed' ? 'fb-chip-on' : ''}"
-						onclick={() => selectStatusTab('completed')}
-					>
-						<CircleCheck class="h-3 w-3" /> Completed
-						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.completed}</span>{/if}
-					</button>
-					<button
-						class="fb-chip {statusFilter === 'running' ? 'fb-chip-on' : ''}"
-						onclick={() => selectStatusTab('running')}
-					>
-						<span class="status-dot status-dot-live h-1.5 w-1.5 text-info" aria-hidden="true"></span>
-						Running
-						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.running}</span>{/if}
-					</button>
-					<button
-						class="fb-chip {statusFilter === 'failed' ? 'fb-chip-on' : ''}"
-						onclick={() => selectStatusTab('failed')}
-					>
-						<CircleX class="h-3 w-3" /> Failed
-						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.failed}</span>{/if}
-					</button>
-					<button
-						class="fb-chip {statusFilter === 'pending' ? 'fb-chip-on' : ''}"
-						onclick={() => selectStatusTab('pending')}
-					>
-						<Clock class="h-3 w-3" /> Pending
-						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.pending}</span>{/if}
-					</button>
-				</div>
-
-				<!-- Row 2: Mode -->
-				<div class="fb-group">
-					<span class="fb-group-label">Mode</span>
-					<button class="fb-chip {modeFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = ''; applyFilters(); }}>All</button>
-					<button class="fb-chip {modeFilter === 'agent' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'agent'; applyFilters(); }}>Agent</button>
-					<button class="fb-chip {modeFilter === 'custom' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'custom'; applyFilters(); }}>Custom</button>
-					<button class="fb-chip {modeFilter === 'scaffolding' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'scaffolding'; applyFilters(); }}>Scaffolding</button>
-					<button class="fb-chip {modeFilter === 'copilot' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'copilot'; applyFilters(); }}>Copilot (legacy)</button>
-				</div>
-
-				<!-- Row 3: Container -->
-				<div class="fb-group">
-					<span class="fb-group-label">Container</span>
-					<button class="fb-chip {containerFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = ''; applyFilters(); }}>All</button>
-					<button class="fb-chip {containerFilter === 'running' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'running'; applyFilters(); }}>Running</button>
-					<button class="fb-chip {containerFilter === 'stopped' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'stopped'; applyFilters(); }}>Stopped</button>
-					<button class="fb-chip {containerFilter === 'building' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'building'; applyFilters(); }}>Building</button>
-					<button class="fb-chip {containerFilter === 'none' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'none'; applyFilters(); }}>None</button>
-				</div>
-
-				<!-- Row 4: Model + Sort -->
-				<div class="fb-group flex-wrap">
-					<span class="fb-group-label">Model</span>
-					<select
-						class="fb-select"
-						bind:value={modelFilter}
-						onchange={applyFilters}
-					>
-						<option value="">All Models</option>
-						{#each uniqueModels as model}
-							<option value={model.id}>{model.name}</option>
-						{/each}
-					</select>
-					<span class="fb-group-label ml-2">Sort</span>
-					<button
-						class="fb-chip {sortBy === 'created_at' && sortDir === 'desc' ? 'fb-chip-on' : ''}"
-						onclick={() => { sortBy = 'created_at'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
-					>Newest</button>
-					<button
-						class="fb-chip {sortBy === 'created_at' && sortDir === 'asc' ? 'fb-chip-on' : ''}"
-						onclick={() => { sortBy = 'created_at'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
-					>Oldest</button>
-					<button
-						class="fb-chip {sortBy === 'duration_seconds' ? 'fb-chip-on' : ''}"
-						onclick={() => { sortBy = 'duration_seconds'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
-					>Longest</button>
-					<button
-						class="fb-chip {sortBy === 'model_name' ? 'fb-chip-on' : ''}"
-						onclick={() => { sortBy = 'model_name'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
-					>A–Z Model</button>
+						<Input class="h-8 w-56" placeholder="Model id (exact), Enter" aria-label="Model" bind:value={modelInput} />
+					</form>
 				</div>
 			{/snippet}
-
-			{#snippet actions()}
-				<select
-					class="fb-select"
-					bind:value={perPage}
-					onchange={() => { currentPage = 1; fetchJobs(); }}
-				>
-					<option value={10}>10/pg</option>
-					<option value={25}>25/pg</option>
-					<option value={50}>50/pg</option>
-					<option value={100}>100/pg</option>
-				</select>
-			{/snippet}
-		</FilterBar>
+		</TableToolbar>
 
 		{#if loading}
 			<LoadingState label="loading applications" />
-		{:else if filteredItems.length === 0}
+		{:else if !data || data.items.length === 0}
 			<EmptyState
 				compact
 				icon={AppWindow}
-				title="No applications found"
-				description={hasActiveFilters
-					? 'No applications match your filters. Try clearing them or searching for another term.'
-					: 'No code generation jobs yet. Get started by generating your first application.'}
+				title={filtered ? 'No application matches' : 'No applications yet'}
+				description={filtered
+					? 'Change or clear the filters.'
+					: 'Agentic app runs appear here when an experiment (or a “Generate a parent app” run) creates them.'}
 			>
 				{#snippet action()}
-					{#if hasActiveFilters}
-						<Button id="btn-empty-clear" variant="outline" size="sm" onclick={clearFilters}>Clear Filters</Button>
-					{:else}
-						<Button id="btn-empty-create" size="sm" href="/sample-generator">Go to Sample Generator</Button>
-					{/if}
+					{#if !filtered}<Button size="sm" href="/experiments/new?mode=app">New experiment</Button>{/if}
 				{/snippet}
 			</EmptyState>
 		{:else}
-			<TableToolbar>
-				{#snippet summary()}{resultsText} · click a row to open{/snippet}
-			</TableToolbar>
-			<!-- Table (desktop) -->
-			<div class="hidden md:block">
-				<JobsTable
-					jobs={filteredItems}
-					{containersByJobId}
-					{containerBusy}
-					{sortBy}
-					{sortDir}
-					onToggleSort={toggleSort}
-					onBuild={handleBuildContainer}
-					onStart={handleStartContainer}
-					onStop={handleStopContainer}
-					onRemoveContainer={handleRemoveContainer}
-					onCancel={handleCancel}
-					onDelete={handleDelete}
-					onRetry={handleRetry}
-					onCopyId={copyId}
-				/>
+			<div class="table-frame" {@attach tableFrame}>
+				<table>
+					<thead>
+						<tr>
+							<th>Sample</th>
+							<th>Model</th>
+							{#each labelKeys as key (key)}<th>{key.replace(/_/g, ' ')}</th>{/each}
+							<th>Outcome</th>
+							<th class="num" title="Agent checks only; infra and flaky checks excluded">Pass rate</th>
+							<th class="num">Cost</th>
+							<th class="num">Wall time</th>
+							<th>Created</th>
+							<th><span class="sr-only">Actions</span></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each data.items as row (row.id)}
+							<tr class="row-link" onclick={rowLink(`/samples/${row.id}`)}>
+								<td>
+									<a class="font-mono text-xs text-primary hover:underline" href={`/samples/${row.id}`}>{shortSha(row.id, 8)}</a>
+									{#if row.task_title || row.labels?.task || row.task}<div class="cell-sub" title={row.task ?? ''}>{row.task_title ?? row.labels?.task ?? row.task}</div>{/if}
+								</td>
+								<td class="font-mono text-xs">{row.model ?? '—'}</td>
+								{#each labelKeys as key (key)}<td class="text-xs">{row.labels?.[key] ?? '—'}</td>{/each}
+								<td>
+									{#if row.outcome}
+										<StatusBadge status={row.outcome} tones={OUTCOME_TONES} label={outcomeLabel(row.outcome)} />
+									{:else}
+										<StatusBadge status={row.status} />
+									{/if}
+									{#if row.phase && row.status === 'running'}<div class="cell-sub">{row.phase}</div>{/if}
+								</td>
+								<td class="num">
+									{#if row.agent_pass_rate === null}<span class="text-muted-foreground">not measured</span>{:else}{fmtRate(row.agent_pass_rate)}{/if}
+								</td>
+								<td class="num">{fmtUsd(row.cost_usd)}</td>
+								<td class="num">{fmtSeconds(row.wall_s)}</td>
+								<td class="text-xs text-muted-foreground">{formatDate(row.created_at)}</td>
+								<td class="text-right">
+									<UseAsParentAction runId={row.id} run={row} hideWhenIneligible />
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
 			</div>
-
-			<!-- Cards (mobile) -->
-			<div class="md:hidden">
-				<JobCards
-					jobs={filteredItems}
-					{containersByJobId}
-					{containerBusy}
-					onBuild={handleBuildContainer}
-					onStart={handleStartContainer}
-					onStop={handleStopContainer}
-					onRemoveContainer={handleRemoveContainer}
-					onCancel={handleCancel}
-					onDelete={handleDelete}
-					onRetry={handleRetry}
-					onCopyId={copyId}
-				/>
-			</div>
-
 			<PaginationBar
-				page={data?.page}
-				pages={data?.pages}
-				onGoToPage={goToPage}
 				class="border-t border-border"
-				scrollToCard
+				resultsText={`${data.items.length} of ${data.total.toLocaleString()}`}
+				page={currentPage}
+				{pages}
+				onGoToPage={(p) => setParam('page', String(p))}
 			/>
 		{/if}
 	</Card.Root>
 </div>
-
-<ConfirmDialog
-	bind:open={confirmOpen}
-	title={pendingConfirm?.kind === 'remove-container' ? 'Remove this container?' : 'Delete this job?'}
-	description={pendingConfirm?.kind === 'remove-container'
-		? 'Stops and removes the container. The generated code is kept.'
-		: 'Deletes the job, its generated files and its run record. This cannot be undone.'}
-	confirmLabel={pendingConfirm?.kind === 'remove-container' ? 'Remove container' : 'Delete job'}
-	destructive
-	busy={confirmBusy}
-	onConfirm={runConfirmed}
-/>

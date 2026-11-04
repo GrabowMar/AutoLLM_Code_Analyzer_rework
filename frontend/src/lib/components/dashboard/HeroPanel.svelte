@@ -101,7 +101,7 @@
 						{@render actionIcon('caches', Eraser)}Clear caches
 					</DropdownMenu.Item>
 					<DropdownMenu.Item class={itemClass} disabled={pendingAction !== null} onSelect={() => onClearStuck?.()}>
-						{@render actionIcon('stuck', Activity)}Clear stuck jobs
+						{@render actionIcon('stuck', Activity)}Clear stuck runs
 					</DropdownMenu.Item>
 					<DropdownMenu.Separator class="-mx-1 my-1 h-px bg-border" />
 					<DropdownMenu.Item class={itemClass} onSelect={() => goto('/system')}>
@@ -115,7 +115,7 @@
 			<Plus class="h-3.5 w-3.5" />
 			New analysis
 		</Button>
-		<Button href="/sample-generator" size="sm" class="gap-1.5">
+		<Button href="/generate" size="sm" class="gap-1.5">
 			<Wand2 class="h-3.5 w-3.5" />
 			Generate app
 		</Button>

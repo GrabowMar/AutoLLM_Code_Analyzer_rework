@@ -1,8 +1,7 @@
 import { redirect } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
-// Automation is now Schedules and Post-run on each experiment (Experiments →
-// an experiment → Automation tab); the hub and its pipelines are retired.
+// Automation is schedules and post-runs on each study (Studies → a study → Operations); the v2 hub is retired.
 export const load: PageLoad = () => {
   redirect(308, "/experiments");
 };

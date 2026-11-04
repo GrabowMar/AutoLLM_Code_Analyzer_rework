@@ -24,7 +24,7 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import SectionHeading from '$lib/components/SectionHeading.svelte';
-	import StudyFigure from '$lib/components/experiments/study/StudyFigure.svelte';
+	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
 	import { Segmented } from '$lib/components/ui/segmented';
@@ -122,7 +122,7 @@
 	});
 
 	const GROUP_ITEMS = [
-		{ value: 'condition', label: 'Condition', title: 'Experiment condition (model × method); apps without one fall back to their model' },
+		{ value: 'condition', label: 'Condition', title: 'Experiment condition (the factor levels of the cell); apps without one fall back to their model' },
 		{ value: 'model', label: 'Model' },
 		{ value: 'app', label: 'App', title: 'Every app on its own' },
 	];
@@ -290,7 +290,7 @@
 			<section class="space-y-3">
 				<SectionHeading number={sectionNo.contrasts} title="Contrasts against the baseline" lead="Each condition minus the baseline condition, per pre-registered metric." />
 				{#if results.contrasts.length === 0}
-					<p class="text-sm text-muted-foreground">No contrasts: they need a baseline condition (pairing baseline or the experiment’s baseline) and data in both groups.</p>
+					<p class="text-sm text-muted-foreground">No contrasts: they need a baseline condition (pairing baseline or the experiment’s baseline condition) and data in both groups.</p>
 				{:else}
 					<StudyFigure id="tab-contrasts" kind="table" number="{sectionNo.contrasts}.1" title="Difference to the baseline per metric" flush>
 						<div class="overflow-x-auto">
@@ -438,7 +438,7 @@
 
 		<!-- Apps (de-blinding key) -->
 		<section class="space-y-3">
-			<SectionHeading number={sectionNo.apps} title="Apps" lead="The de-blinding key: blinded label → model, condition and job (researchers only)." />
+			<SectionHeading number={sectionNo.apps} title="Apps" lead="The de-blinding key: blinded label → model, condition and run (researchers only)." />
 			<StudyFigure id="tab-apps" kind="table" number="{sectionNo.apps}.1" title="Blinded labels and what they stand for" flush>
 				<div class="max-h-[32rem] overflow-auto">
 					<table class="text-sm">
@@ -449,7 +449,7 @@
 							{#each results.apps as a (a.app_id)}
 								<tr>
 									<td class="font-mono text-xs">
-										{#if a.job_id}<a class="hover:text-primary" href="/applications/{a.job_id}">{a.label}</a>{:else}{a.label}{/if}
+										{#if a.run_id}<a class="hover:text-primary" href="/samples/{a.run_id}">{a.label}</a>{:else}{a.label}{/if}
 									</td>
 									<td class="max-w-48 truncate text-xs" title={a.model_name}>{a.model_name || '—'}</td>
 									<td class="max-w-48 truncate text-xs" title={a.condition_label}>{a.condition_label || '—'}</td>

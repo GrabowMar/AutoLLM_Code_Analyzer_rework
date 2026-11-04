@@ -31,12 +31,23 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Python 'run' stage
 FROM python:3.13.14-slim-bookworm AS python-run-stage
 
+# Sample image builds use an explicit, resource-limited BuildKit builder on
+# the same daemon used by the Docker SDK.
+COPY --from=docker.io/library/docker:29.9.1-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker.io/library/docker:29.9.1-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
+
 ARG APP_HOME=/app
 
 WORKDIR ${APP_HOME}
 
 RUN addgroup --system django \
-  && adduser --system --ingroup django django
+  && adduser --system --home /home/django --ingroup django django \
+  && mkdir -p /home/django/.docker \
+  && chown -R django:django /home/django
+
+# Buildx keeps only CLI/builder metadata here; its build cache is a daemon
+# volume. Deployments can still override DOCKER_CONFIG for registry auth.
+ENV HOME=/home/django
 
 
 # Install required system dependencies

@@ -1,0 +1,6 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: goose (controlled)
+description: goose 1.57.0 with the equalised knobs of spec 5.5 (command timeout, web tools off, subagents off, turn
+  cap from the budget preset).
+archived: false
+content: {harness: goose, harness_version: 1.57.0, controlled: true, command_timeout_s: 300, subagents: false}

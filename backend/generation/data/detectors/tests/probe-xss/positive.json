@@ -1,0 +1,11 @@
+{
+  "probes": [
+    {
+      "id": "p-1",
+      "cwe": "cwe-79",
+      "kind": "xss_stored",
+      "status": "exploited",
+      "evidence": "fixture"
+    }
+  ]
+}

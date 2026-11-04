@@ -86,7 +86,7 @@ def _context(review_finding_id: str = "101") -> dict:
             "requirements": {
                 "requirements": {
                     "single": [
-                        {"id": "b_0000000001", "source": "backend", "text": "Users can register and log in"},
+                        {"id": "f_0000000001", "source": "frontend", "text": "Users can register and log in"},
                         {"id": "ep_000000002", "source": "api", "text": "GET /api/items — List the user's items"},
                     ],
                 },
@@ -192,7 +192,7 @@ def study():
         block_id="requirements",
         answers={
             "items": {
-                "b_0000000001": {"verdict": "met"},
+                "f_0000000001": {"verdict": "met"},
                 "ep_000000002": {"verdict": "cannot_test", "note": "endpoint missing"},
                 "zz_stale": {"verdict": "partial"},
             },
@@ -547,10 +547,10 @@ def test_ratings_csv(study):
 
 def test_requirements_csv_scores_and_context(study):
     rows = {row["req_id"]: row for row in _rows(export.csv_text(study["task"], "requirements"))}
-    assert set(rows) == {"b_0000000001", "ep_000000002", "zz_stale"}
-    met = rows["b_0000000001"]
+    assert set(rows) == {"f_0000000001", "ep_000000002", "zz_stale"}
+    met = rows["f_0000000001"]
     assert (met["source"], met["verdict"], met["score"], met["score_strict"], met["in_context"]) == (
-        "backend",
+        "frontend",
         "met",
         "1",
         "1",
@@ -654,7 +654,7 @@ def test_apps_csv_is_the_deblinding_key(study):
     app = study["items"][0].app_a
     row = rows[app.label]
     snapshot = app.snapshot
-    assert row["job_id"] == str(app.job_id)
+    assert row["run_id"] == str(app.job_id)
     assert (row["model_id"], row["model_name"]) == (snapshot["model_id"], snapshot["model_name"])
     assert (row["condition_id"], row["condition_label"]) == (
         str(snapshot["condition_id"]),
@@ -665,8 +665,10 @@ def test_apps_csv_is_the_deblinding_key(study):
         snapshot["functional"]["status"],
         repr(snapshot["functional"]["pass_rate"]),
     )
-    assert row["conformance_endpoint_checks"] == "4"
+    assert row["conformance_endpoint_checks"] == "6"  # every task endpoint was checked
     assert row["static_findings_loc"] == "120"
+    assert (row["study_id"], row["run_kind"], row["harness"]) == (snapshot["study_id"], "app_agentic", "opencode")
+    assert row["task_ref"] == snapshot["task_ref"]
     # assignments counted per app (preview excluded): P001, P002, P003 rated this app
     assert (row["assignments"], row["submitted"]) == ("3", "3")
     # no other file names a model

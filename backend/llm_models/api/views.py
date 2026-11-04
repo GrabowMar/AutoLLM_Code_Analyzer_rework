@@ -291,7 +291,7 @@ def list_models(
     if context_range:
         qs = _apply_context_range(qs, context_range)
     if used_in_apps:
-        qs = qs.filter(generation_jobs__isnull=False).distinct()
+        qs = qs.filter(generation_runs__isnull=False).distinct()
 
     qs = _apply_sorting(qs, sort_by, sort_dir)
 
@@ -468,7 +468,7 @@ def get_related_models(request, slug: str, limit: int = Query(10, ge=1, le=20)):
 
 @router.get("/detail/{slug}/insights/", response=dict)
 def get_model_insights(request, slug: str):
-    """What this platform measured for the model (caller's jobs) and its place in the catalog."""
+    """What this platform measured for the model (caller's runs) and its place in the catalog."""
     model = _get_model_by_identifier(request, slug)
     return model_insights(model, request.auth)
 
@@ -495,74 +495,57 @@ SAMPLING_USAGE_KEYS = (
     "presence_penalty",
     "reasoning",
 )
-# Policies under which a key the platform did not send was sent by nobody: ``provider_default``
-# strips every harness sampling key it does not force, template modes send exactly the frozen
-# values. Under ``harness_native`` (pass-through) or an unrecorded policy, an unforced key may
-# have come from the harness: unknown, never "not sent".
-_NOT_SENT_KNOWN_POLICIES = frozenset({"provider_default", "template_mode"})
+# The policy under which a key the platform did not send was sent by nobody: ``provider_default``
+# strips every harness sampling key the gateway does not force. Under ``explicit`` or an unrecorded
+# policy (a run without a manifest), an unforced key may have come from the harness: unknown,
+# never "not sent".
+_NOT_SENT_KNOWN_POLICIES = frozenset({"provider_default"})
 
 
-def _job_sampling(row: dict) -> tuple[dict, str, str]:
-    """``(params sent on every request, sampling policy, where it was read)`` for one job row.
+def _run_sampling(manifest: dict) -> tuple[dict, str, str, list[str]]:
+    """``(params sent on every request, sampling policy, where it was read, stripped keys)`` of one run.
 
-    Agent runs: what the gateway forced (``resolved_bundle.gateway.forced_params``);
-    under ``provider_default`` everything else was stripped, so the provider's
-    own defaults applied. Template modes: the frozen ``resolved_bundle.llm``
-    (legacy jobs without one: the job's own fields).
+    Read from the run's frozen manifest (``sampling.forced_params``: what the gateway forced on every
+    call; ``stripped_params``: harness keys it removed). A run without a manifest recorded nothing.
     """
-    gateway = row.get("resolved_bundle__gateway")
-    if row["mode"] == "agent":
-        policy = row.get("result_data__agent__sampling_policy")
-        if isinstance(gateway, dict):
-            forced = gateway.get("forced_params") or {}
-            policy = gateway.get("sampling_policy") or policy or "not_recorded"
-            sent = {k: forced[k] for k in SAMPLING_USAGE_KEYS if forced.get(k) is not None}
-            return sent, policy, "resolved_bundle.gateway.forced_params"
-        return {}, policy or "not_recorded", "not_recorded"
-    llm = row.get("resolved_bundle__llm")
-    if isinstance(llm, dict):
-        sent = {k: llm[k] for k in SAMPLING_USAGE_KEYS if llm.get(k) is not None}
-        return sent, "template_mode", "resolved_bundle.llm"
-    legacy = {"temperature": row.get("temperature"), "top_p": row.get("top_p"), **(row.get("llm_params") or {})}
-    return {k: legacy[k] for k in SAMPLING_USAGE_KEYS if legacy.get(k) is not None}, "template_mode", "job_fields"
+    sampling = manifest.get("sampling") if isinstance(manifest, dict) else None
+    if not isinstance(sampling, dict):
+        return {}, "not_recorded", "not_recorded", []
+    forced = sampling.get("forced_params") or {}
+    sent = {k: forced[k] for k in SAMPLING_USAGE_KEYS if forced.get(k) is not None}
+    stripped = [str(k) for k in sampling.get("stripped_params") or []]
+    return sent, str(sampling.get("policy") or "not_recorded"), "manifest.sampling.forced_params", stripped
 
 
 def model_sampling_usage(model: LLMModel, user) -> dict:
-    """What the caller's runs of ``model`` actually sent (same job scope as the insights)."""
-    from backend.generation.models import GenerationJob
-    from backend.generation.models import RunPreset
+    """What the caller's runs of ``model`` actually sent (same run scope as the insights)."""
+    from backend.generation.models import GenerationRun
+    from backend.generation.runs.view import run_views
 
-    jobs = GenerationJob.objects.filter(model=model)
+    runs = GenerationRun.objects.filter(model=model, beyond_plan=False)
     if user is not None and getattr(user, "is_authenticated", False):
-        jobs = jobs.filter(created_by=user)
-    rows = jobs.values(
-        "mode",
-        "temperature",
-        "top_p",
-        "llm_params",
-        "sampling_preset_id",
-        "resolved_bundle__gateway",
-        "resolved_bundle__llm",
-        "result_data__agent__sampling_policy",
-        "result_data__agent__harness_sampling_stripped",
-    )
-    by_mode: dict[str, int] = {}
+        runs = runs.filter(created_by=user)
+    rows = list(runs.select_related("sampling_preset"))
+    by_kind: dict[str, int] = {}
     policies: dict[str, int] = {}
     sources: dict[str, int] = {}
-    presets: dict[int, int] = {}
+    presets: dict[int, dict] = {}
     values: dict[str, dict[str, dict]] = {k: {} for k in SAMPLING_USAGE_KEYS}
     sent_counts = dict.fromkeys(SAMPLING_USAGE_KEYS, 0)
     unknown_counts = dict.fromkeys(SAMPLING_USAGE_KEYS, 0)
-    stripped: dict[str, dict[str, int]] = {}
-    n = 0
-    for row in rows:
-        n += 1
-        by_mode[row["mode"]] = by_mode.get(row["mode"], 0) + 1
-        sent, policy, source = _job_sampling(row)
+    stripped: dict[str, int] = {}
+    for run, view in zip(rows, run_views(rows), strict=True):
+        by_kind[view.kind] = by_kind.get(view.kind, 0) + 1
+        sent, policy, source, stripped_keys = _run_sampling(view.manifest())
         policies[policy] = policies.get(policy, 0) + 1
         sources[source] = sources.get(source, 0) + 1
-        if row.get("sampling_preset_id"):
-            presets[row["sampling_preset_id"]] = presets.get(row["sampling_preset_id"], 0) + 1
+        preset = run.sampling_preset
+        if preset is not None:
+            entry = presets.setdefault(
+                preset.pk,
+                {"id": preset.pk, "slug": preset.slug, "version": preset.version, "name": preset.name, "n": 0},
+            )
+            entry["n"] += 1
         for key, value in sent.items():
             sent_counts[key] += 1
             slot = values[key].setdefault(json.dumps(value, sort_keys=True), {"value": value, "n": 0})
@@ -571,40 +554,38 @@ def model_sampling_usage(model: LLMModel, user) -> dict:
             for key in SAMPLING_USAGE_KEYS:
                 if key not in sent:
                     unknown_counts[key] += 1
-        harness_stripped = row.get("result_data__agent__harness_sampling_stripped")
-        if isinstance(harness_stripped, dict):
-            for key, calls in harness_stripped.items():
-                entry = stripped.setdefault(str(key), {"jobs": 0, "calls": 0})
-                entry["jobs"] += 1
-                entry["calls"] += int(calls) if isinstance(calls, int) and not isinstance(calls, bool) else 0
-    preset_rows = RunPreset.objects.filter(pk__in=presets).values("id", "slug", "version", "name")
+        for key in stripped_keys:
+            stripped[key] = stripped.get(key, 0) + 1
+    n = len(rows)
     return {
         "n_jobs": n,
-        "scope": "your jobs",
-        "by_mode": by_mode,
+        "scope": "your runs",
+        # Run kinds (the key name is kept for the model page).
+        "by_mode": by_kind,
         "policies": policies,
         "sources": sources,
         "params": [
             {
                 "key": key,
                 "n_sent": sent_counts[key],
-                # Known not sent (provider_default / template mode): the provider's default applied.
+                # Known not sent (provider_default): the provider's default applied.
                 "n_not_sent": n - sent_counts[key] - unknown_counts[key],
                 # Not forced by the platform, but the harness may have sent its own value
-                # (harness_native pass-through, or a run that recorded no policy).
+                # (explicit policy, or a run that recorded no manifest).
                 "n_unknown": unknown_counts[key],
                 "values": sorted(values[key].values(), key=lambda v: -v["n"]),
             }
             for key in SAMPLING_USAGE_KEYS
         ],
-        "harness_sampling_stripped": [{"key": k, **v} for k, v in sorted(stripped.items())],
-        "presets": sorted(({**p, "n": presets[p["id"]]} for p in preset_rows), key=lambda p: -p["n"]),
+        # Per stripped key, how many runs' gateways removed it; per-call counts are not recorded (None).
+        "harness_sampling_stripped": [{"key": k, "jobs": v, "calls": None} for k, v in sorted(stripped.items())],
+        "presets": sorted(presets.values(), key=lambda p: -p["n"]),
     }
 
 
 @router.get("/detail/{slug}/sampling/", response=dict)
 def get_model_sampling_usage(request, slug: str):
-    """Sampling params the caller's runs of this model actually sent (agent policy, template-mode values)."""
+    """Sampling params the caller's runs of this model actually sent (from each run's manifest)."""
     model = _get_model_by_identifier(request, slug)
     return model_sampling_usage(model, request.auth)
 

@@ -16,7 +16,7 @@ install_cmd: "npm install -g stylelint@16 stylelint-config-recommended@14"
 verify_cmd: "stylelint --version"
 uninstall_cmd: "npm uninstall -g stylelint stylelint-config-recommended"
 # stylelint 16 writes the report to stderr when it finds problems; use a file.
-# The scaffolds use Tailwind 4 (`@import "tailwindcss"; @theme {...}`): its
+# The starters use Tailwind 4 (`@import "tailwindcss"; @theme {...}`): its
 # at-rules (theme, source, utility, variant, custom-variant, plugin,
 # reference) and Tailwind's theme()/screen() functions are not unknown CSS.
 run_cmd: |

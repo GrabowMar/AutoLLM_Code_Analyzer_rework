@@ -1,40 +1,31 @@
-"""Local-model snapshots and fingerprints (spec §D.5); OpenRouter snapshots stay byte-identical."""
+"""Local-model endpoint sections and fingerprints (spec §D.5) under v3.
+
+The v2 agent-snapshot builders are gone; what remains in ``inference.snapshot`` is the endpoint
+section of a local model (what the proxy falls back to for keys the manifest does not freeze), the
+``llm_source`` provenance, and the v3 rule that the pinned weights are part of ``config_fingerprint``
+(``identity.compute_keys``, model ``{slug, endpoint_kind, pinned_digest}``).
+"""
 
 from __future__ import annotations
 
-import json
+from dataclasses import replace
 
 import pytest
 
-from backend.generation.services.agent.images import gateway_image_plan
-from backend.generation.services.agent.images import image_tag
-from backend.generation.services.agent.snapshot import build_agent_snapshot
-from backend.generation.services.agent.snapshot import reseed_agent_snapshot
-from backend.generation.services.profile_resolver import build_custom_snapshot
-from backend.generation.services.profile_resolver import run_fingerprint
-from backend.generation.tests import test_default_run_golden as golden
+from backend.generation import identity
+from backend.generation.tests.wp01_foundation.test_identity_algebra import APP_INPUTS
+from backend.inference.proxy_server import frozen_endpoint
+from backend.inference.snapshot import effective_num_ctx
+from backend.inference.snapshot import endpoint_section
+from backend.inference.snapshot import llm_source
 from backend.inference.tests.conftest import make_endpoint
 from backend.inference.tests.conftest import make_local_model
 from backend.inference.timeouts import chain
+from backend.llm_models.tests.factories import LLMModelFactory
 
 pytestmark = pytest.mark.django_db
-fixture_rows = golden.fixture_rows  # the golden module's own fixture (read, never edited)
 D1 = "sha256:" + "1" * 64
 D2 = "sha256:" + "2" * 64
-
-
-def _snapshot(model, app, harness="opencode", seed=None):
-    return build_agent_snapshot(
-        app_requirement=app,
-        description="",
-        profile=None,
-        stack_slug="flask-react",
-        model=model,
-        max_tokens=32000,
-        experiment_seed=golden._seed() if seed is None else seed,
-        llm_overrides={},
-        agent_overrides={"harness": harness},
-    )
 
 
 def _local(owner, *, digest=D1, endpoint=None, **endpoint_kwargs):
@@ -42,96 +33,74 @@ def _local(owner, *, digest=D1, endpoint=None, **endpoint_kwargs):
     return make_local_model(endpoint, digest=digest, context_window=131072)
 
 
-@pytest.mark.parametrize("harness", golden.HARNESS_NAMES)
-def test_openrouter_snapshot_unchanged(fixture_rows, harness):
-    model, app = fixture_rows
-    snapshot = _snapshot(model, app, harness)
-    assert "endpoint" not in snapshot
-    assert snapshot["images"]["gateway"] == image_tag("llm-gateway")
-    assert golden._identity(snapshot) == golden.GOLDEN[harness]
-    assert snapshot["llm"]["provider_routing_source"] == "default"
+def test_openrouter_models_have_no_endpoint_section():
+    model = LLMModelFactory(model_id="vendor/z")
+    assert endpoint_section(model) is None
+    assert effective_num_ctx(model) is None
+    assert llm_source({}) is None
 
 
-@pytest.mark.parametrize("harness", golden.HARNESS_NAMES)
-def test_local_snapshot(fixture_rows, owner, harness):
-    _model, app = fixture_rows
+def test_local_endpoint_section(owner):
     model = _local(owner)
-    snapshot = _snapshot(model, app, harness)
-    section = snapshot["endpoint"]
+    section = endpoint_section(model)
     assert (section["slug"], section["served_model_name"], section["digest"], section["num_ctx"]) == (
         model.endpoint.slug,
         "qwen2.5-coder:7b",
         D1,
-        16384,
+        16384,  # min(context_window, endpoint cap)
     )
     assert section["client_timeout_s"] == chain(model.endpoint).harness_client_s
-    forced = snapshot["gateway"]["forced_params"]
-    assert "provider" not in forced
-    assert forced["seed"] == golden._seed()
-    assert forced["max_tokens"] <= 16384
-    assert snapshot["llm"]["provider_routing_source"] == "not_applicable"
-    assert snapshot["llm"]["context_window_source"] == "endpoint_num_ctx"
-    assert snapshot["llm"]["supported_params_source"] == "endpoint_static"
-    assert snapshot["images"]["gateway"] == gateway_image_plan(local=True)[-1][2]
-    assert snapshot["images"]["gateway"].startswith("llmlab/llm-gateway-local:")
+    assert section["capabilities"] == ["completion", "tools"]
+    assert llm_source({"endpoint": section}) == {
+        "kind": "ollama",
+        "api_flavor": "native",
+        "served_model_name": "qwen2.5-coder:7b",
+        "digest": D1,
+        "num_ctx": 16384,
+    }
 
 
-def test_harness_rendering_gets_the_client_timeout(fixture_rows, owner):
-    model_or, app = fixture_rows
+def test_manifest_endpoint_wins_over_the_live_row(owner):
     model = _local(owner)
-    timeout = chain(model.endpoint).harness_client_s
-    opencode = _snapshot(model, app, "opencode")["harness"]
-    options = opencode["config"]["provider"]["openrouter"]["options"]
-    assert options["timeout"] == timeout * 1000
-    assert opencode["config"]["provider"]["openrouter"]["models"][model.model_id]["reasoning"] is False
-    assert json.loads(opencode["env"]["OPENCODE_CONFIG_CONTENT"]) == opencode["config"]
-    aider = _snapshot(model, app, "aider")["harness"]["args"]
-    assert aider[aider.index("--timeout") + 1] == str(timeout)
-    assert aider[-2:] == ["--message-file", "/out/brief.md"]
-    mini = _snapshot(model, app, "mini-swe-agent")["harness"]["config"]["model"]["model_kwargs"]
-    assert mini["timeout"] == timeout
-    # OpenRouter rendering has none of it.
-    assert (
-        "timeout" not in _snapshot(model_or, app, "opencode")["harness"]["config"]["provider"]["openrouter"]["options"]
-    )
-    assert "--timeout" not in _snapshot(model_or, app, "aider")["harness"]["args"]
-    assert "timeout" not in _snapshot(model_or, app, "mini-swe-agent")["harness"]["config"]["model"]["model_kwargs"]
+    manifest = {
+        "model": {
+            "slug": model.model_id,
+            "endpoint": {
+                "id": model.endpoint_id,
+                "kind": "ollama",
+                "served_model_name": "frozen:7b",
+                "digest": D2,
+                "cost_basis": "free",
+            },
+        },
+    }
+    section = frozen_endpoint(manifest, model)
+    assert (section["served_model_name"], section["digest"]) == ("frozen:7b", D2)
+    # Not frozen by the v3 manifest yet: taken from the run's model, never left to the server default.
+    assert section["num_ctx"] == 16384
+    openrouter = {"model": {"endpoint": {"id": 1, "kind": "openrouter", "cost_basis": "billed"}}}
+    assert frozen_endpoint(openrouter, model) is None
+    assert frozen_endpoint({}, model) is None
 
 
-def test_fingerprints_follow_the_weights(fixture_rows, owner):
-    _model, app = fixture_rows
+def test_fingerprints_follow_the_weights(owner):
+    def keys(model, **changes):
+        section = endpoint_section(model)
+        pinned = {"slug": model.model_id, "endpoint_kind": section["kind"], "pinned_digest": section["digest"]}
+        return identity.compute_keys(replace(APP_INPUTS, model=pinned, **changes))
+
     endpoint = make_endpoint(owner)
-    a = _snapshot(make_local_model(endpoint, name="m:7b", digest=D1), app)
-    from backend.llm_models.models import LLMModel
-
-    LLMModel.objects.filter(endpoint=endpoint).update(digest=D2)
-    b = _snapshot(LLMModel.objects.get(endpoint=endpoint), app)
-    assert a["run_fingerprint"] != b["run_fingerprint"]
-    assert a["config_fingerprint"] != b["config_fingerprint"]
-    # Same served name and digest on another endpoint: a different condition (no pooling).
-    other = _snapshot(make_local_model(make_endpoint(owner), name="m:7b", digest=D2), app)
-    assert other["run_fingerprint"] != b["run_fingerprint"]
-    # Replicates keep the endpoint section and only change the seed.
-    again = reseed_agent_snapshot(b, 7)
-    assert again["endpoint"] == b["endpoint"]
-    assert again["config_fingerprint"] == b["config_fingerprint"]
-
-
-def test_scaffolding_fingerprint(owner):
-    base = {"prompt_hash": "p", "seed": 1, "llm": {"model_slug": "x", "temperature": 0.2}, "scaffolding_slug": "s"}
-    assert run_fingerprint(base) == run_fingerprint(json.loads(json.dumps(base)))
-    model = _local(owner)
-    custom = build_custom_snapshot(model=model, temperature=0.2, max_tokens=100)
-    assert custom["endpoint"]["digest"] == D1
-    assert custom["llm"]["served_model_name"] == "qwen2.5-coder:7b"
-    local = {**base, "endpoint": custom["endpoint"]}
-    changed = {**base, "endpoint": {**custom["endpoint"], "digest": D2}}
-    assert run_fingerprint(local) != run_fingerprint(base)
-    assert run_fingerprint(local) != run_fingerprint(changed)
-    openrouter = build_custom_snapshot(
-        model=golden.LLMModelFactory(model_id="vendor/z"),
-        temperature=0.2,
-        max_tokens=100,
-    )
-    assert "endpoint" not in openrouter
-    assert "served_model_name" not in openrouter["llm"]
+    model = make_local_model(endpoint, name="m:7b", digest=D1)
+    a = keys(model)
+    model.digest = D2
+    model.save(update_fields=["digest"])
+    b = keys(model)
+    assert a.run_fingerprint != b.run_fingerprint
+    assert a.config_fingerprint != b.config_fingerprint
+    # Same served name and digest on another endpoint: a different model slug, so a different condition.
+    other = keys(make_local_model(make_endpoint(owner), name="m:7b", digest=D2))
+    assert other.config_fingerprint != b.config_fingerprint
+    # Replicates differ only by seed.
+    again = keys(model, seed=7)
+    assert again.config_fingerprint == b.config_fingerprint
+    assert again.run_fingerprint != b.run_fingerprint

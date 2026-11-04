@@ -7,12 +7,12 @@ is refused. Non-owners of an endpoint are mapped to its redacted
 
 | channel                    | allowed for                                       |
 |----------------------------|---------------------------------------------------|
-| ``generation:<uuid>``      | the job's creator or staff                        |
-| ``experiment:<uuid>``      | the experiment's creator or staff                 |
+| ``run:<uuid>``             | the run's creator, its study's creator, or staff  |
+| ``study:<uuid>``           | the study's creator or staff                      |
 | ``endpoint:<int>``         | ``can_use_endpoint``; non-owners get ``:public``  |
 | ``endpoint:<int>:public``  | ``can_use_endpoint``                              |
 | ``analysis:<uuid|int>``    | the analysis run's creator or staff               |
-| ``runtime:<uuid|int>``     | the container's creator, its job's owner, or staff|
+| ``runtime:<uuid|int>``     | the container's creator, its run's owner, or staff|
 | ``capacity``               | any authenticated user (aggregate payloads only)  |
 """
 
@@ -27,8 +27,8 @@ MAX_CHANNELS = 20
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 _UUID_RE = re.compile(rf"^{_UUID}$")
 _PATTERNS: dict[str, re.Pattern[str]] = {
-    "generation": re.compile(rf"^generation:({_UUID})$"),
-    "experiment": re.compile(rf"^experiment:({_UUID})$"),
+    "run": re.compile(rf"^run:({_UUID})$"),
+    "study": re.compile(rf"^study:({_UUID})$"),
     "endpoint": re.compile(r"^endpoint:([1-9][0-9]{0,18})(:public)?$"),
     "analysis": re.compile(rf"^analysis:({_UUID}|[1-9][0-9]{{0,18}})$"),
     "runtime": re.compile(rf"^runtime:({_UUID}|[1-9][0-9]{{0,18}})$"),
@@ -44,14 +44,10 @@ def _owned(model, object_id: str, user, owner_field: str = "created_by") -> bool
 
 def _owner_model(prefix: str):
     """The model whose ``created_by`` owns a ``<prefix>:<id>`` channel (all of them have UUID primary keys)."""
-    if prefix == "generation":
-        from backend.generation.models import GenerationJob
+    if prefix == "study":
+        from backend.generation.models import Study
 
-        return GenerationJob
-    if prefix == "experiment":
-        from backend.generation.models import Experiment
-
-        return Experiment
+        return Study
     if prefix == "analysis":
         from backend.analysis.models import AnalysisRun
 
@@ -68,7 +64,21 @@ def _may_see(prefix: str, object_id: str, user) -> bool:
         from backend.runtime.services.container_service import visible_containers
 
         return visible_containers(user).filter(pk=object_id).exists()
+    if prefix == "run":
+        return _may_see_run(object_id, user)
     return _owned(_owner_model(prefix), object_id, user)
+
+
+def _may_see_run(run_id: str, user) -> bool:
+    """A run is visible to staff, its creator and the creator of the study it belongs to."""
+    from django.db.models import Q
+
+    from backend.generation.models import GenerationRun
+
+    runs = GenerationRun.objects.filter(pk=run_id)
+    if not getattr(user, "is_staff", False):
+        runs = runs.filter(Q(created_by=user) | Q(study__created_by=user))
+    return runs.exists()
 
 
 def _endpoint_channel(user, endpoint_id: str, *, public: bool) -> str | None:

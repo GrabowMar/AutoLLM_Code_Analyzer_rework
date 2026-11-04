@@ -81,7 +81,7 @@
 		if (models.length < 2) return out;
 		const cols: [ScoreKey, (m: (typeof models)[number]) => number | null | undefined][] = [
 			['success', (m) => m.success_rate],
-			['smoke', (m) => m.smoke_pass_rate],
+			['smoke', (m) => m.pass_rate],
 			['empirical', (m) => m.empirical_quality],
 			['mss', (m) => m.mss],
 			['composite', (m) => m.composite],
@@ -268,7 +268,7 @@
 									<th class="whitespace-nowrap">Model</th>
 									<th class="num">Apps</th>
 									<th class="num" title="Share of finished generations (completed or failed) that completed; pending, running and cancelled jobs have no outcome yet">Success %</th>
-									<th class="num">Smoke pass</th>
+									<th class="num" title="Functional pass rate of the evaluation suite (not measured = blank)">Pass rate</th>
 									<th class="num" title="Measured quality over n trials">Empirical (measured)</th>
 									<th class="num">MSS (meta)</th>
 									<th class="num">Composite</th>
@@ -291,7 +291,7 @@
 										</td>
 										<td class="num text-xs">{m.apps}</td>
 										<ScoreCell value={m.success_rate == null ? null : m.success_rate / 100} best={isBest('success', m.success_rate)} />
-										<ScoreCell value={m.smoke_pass_rate} best={isBest('smoke', m.smoke_pass_rate)} />
+										<ScoreCell value={m.pass_rate} best={isBest('smoke', m.pass_rate)} />
 										<ScoreCell value={m.empirical_quality} strong best={isBest('empirical', m.empirical_quality)} sub={m.empirical_quality != null ? `n=${m.n_trials}` : undefined} />
 										<ScoreCell value={m.mss} best={isBest('mss', m.mss)} />
 										<ScoreCell value={m.composite} best={isBest('composite', m.composite)} />

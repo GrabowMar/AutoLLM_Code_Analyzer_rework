@@ -1,0 +1,9 @@
+name: Slot agent brief
+description: 'Brief of a restricted slot agent: the hole and the files it may change.'
+role: slot_agent_brief
+modes:
+- slot
+variables:
+- slot
+- stack
+- guidance

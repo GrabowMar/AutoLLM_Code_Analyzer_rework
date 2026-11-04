@@ -1,0 +1,10 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: gemini-cli (native)
+description: gemini-cli 0.66.0 with its native system prompt, tools and defaults. Archived until the adapter is
+  enabled.
+archived: true
+content:
+  harness: gemini-cli
+  harness_version: 0.66.0
+  tool_policy:
+    deny: [web_fetch, google_web_search]

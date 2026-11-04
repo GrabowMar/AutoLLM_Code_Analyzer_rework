@@ -1,0 +1,3 @@
+name: Generic security hint
+description: One sentence asking the model to follow security best practices.
+content: {security_hint: generic, fragment: guidance-security-generic@1}

@@ -177,7 +177,7 @@ def _requirements_block() -> dict[str, Any]:
             "app defect stops you from testing it (counts as not met). **Can't test**: you could not test it "
             "for another reason (excluded). Add a short note for anything that is not met."
         ),
-        "sources": ["backend", "frontend", "admin", "api", "admin_api"],
+        "sources": ["frontend", "api", "admin_api"],
         "custom": [],
         "note": "required_unless_met",
     }

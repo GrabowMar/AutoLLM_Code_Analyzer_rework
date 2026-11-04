@@ -1,0 +1,27 @@
+{
+  "maven": {
+    "repositories": [
+      {
+        "id": "maven-central",
+        "visibility": "PUBLIC",
+        "redeployment": false,
+        "preserveSnapshots": false,
+        "storageProvider": {"type": "fs", "quota": "100%", "mount": "", "maxResourceLockLifetimeInSeconds": 60},
+        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
+        "metadataMaxAge": 1800,
+        "proxied": [
+          {
+            "reference": "https://repo.maven.apache.org/maven2/",
+            "store": true,
+            "allowedGroups": [],
+            "allowedExtensions": [".jar", ".war", ".pom", ".xml", ".md5", ".sha1", ".sha256", ".sha512", ".asc", ".module"],
+            "connectTimeout": 5,
+            "readTimeout": 30,
+            "authorization": null,
+            "httpProxy": ""
+          }
+        ]
+      }
+    ]
+  }
+}

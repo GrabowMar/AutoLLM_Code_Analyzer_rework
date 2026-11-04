@@ -11,7 +11,6 @@ import pytest
 from django.utils import timezone
 
 from backend.analysis.tests.factories import FindingFactory
-from backend.generation.services.experiment_results import wilcoxon_p
 from backend.human_eval.models import Assignment
 from backend.human_eval.models import EvalItem
 from backend.human_eval.models import EvalTask
@@ -25,6 +24,7 @@ from backend.human_eval.services import stats
 from backend.human_eval.services.analysis import canonical_score
 from backend.human_eval.services.analysis import compute_results
 from backend.human_eval.services.errors import HumanEvalServiceError
+from backend.human_eval.services.stats import wilcoxon_p
 from backend.human_eval.tests.factories import AssignmentFactory
 from backend.human_eval.tests.factories import EvalTaskFactory
 from backend.human_eval.tests.factories import FindingVerdictFactory
@@ -77,7 +77,7 @@ RESULT_APP = {
     "model_name",
     "condition_label",
     "app_slug",
-    "job_id",
+    "run_id",
     "n_submitted",
     "n_unavailable",
 }
@@ -532,7 +532,7 @@ def test_rating_block_end_to_end(rated_task):
     assert all(group["n_apps_pool"] == 2 and group["n_apps_rated"] == 2 for group in results["groups"])
     assert [app["label"] for app in results["apps"]] == ["App 01", "App 02", "App 03", "App 04"]
     assert results["apps"][0]["n_submitted"] == 3
-    assert results["apps"][0]["job_id"] == str(apps[0].job_id)
+    assert results["apps"][0]["run_id"] == str(apps[0].job_id)
     assert results["apps"][0]["condition_label"] == "Condition 1"
 
     hva = by_app(results["human_vs_automated"], key="metric")
@@ -1019,7 +1019,7 @@ def test_pairwise_skip_blames_the_failed_slot():
 # ---------------------------------------------------------------------------
 
 REQUIREMENT_ITEMS = [
-    {"id": "b_0000000001", "source": "backend", "text": "Users can register and log in"},
+    {"id": "f_0000000001", "source": "frontend", "text": "Users can register and log in"},
     {"id": "ep_0000000001", "source": "api", "text": "GET /api/items — List the user's items"},
     {"id": "ep_0000000002", "source": "api", "text": "POST /api/items — Create an item"},
     {"id": "aep_000000001", "source": "admin_api", "text": "GET /api/admin/users — List all users"},
@@ -1049,7 +1049,7 @@ def requirements_task():
         "id": "requirements",
         "type": "requirements",
         "title": "Requirements",
-        "sources": ["backend", "api", "admin_api"],
+        "sources": ["frontend", "api", "admin_api"],
         "custom": [{"id": "footer", "text": "Has a footer"}],
         "note": "optional",
     }
@@ -1082,12 +1082,15 @@ def test_requirements_compliance_agreement_and_conformance(requirements_task):
     assert first["compliance_strict"] == round((0.8 + 3.5 / 5) / 2, 4)
     assert first["cannot_test"] == 1
     assert first["n_raters"] == 2
-    assert first["by_source"] == {"backend": 1.0, "api": round((0.5 + 0.75) / 2, 4), "admin_api": 1.0, "custom": 1.0}
+    assert first["by_source"] == {"frontend": 1.0, "api": round((0.5 + 0.75) / 2, 4), "admin_api": 1.0, "custom": 1.0}
     assert first["conformance_pass_rate"] == 1.0
     assert first["conformance_endpoint_pass_rate"] == 1.0
-    assert rows[str(apps[1].pk)]["conformance_endpoint_pass_rate"] == 0.75  # odd apps fail the admin check
+    assert rows[str(apps[1].pk)]["conformance_endpoint_pass_rate"] == round(
+        5 / 6,
+        4,
+    )  # odd apps fail the admin endpoint
     assert rows[str(apps[2].pk)]["blocked"] == 1
-    assert rows[str(apps[0].pk)]["conformance_status"] == "passed"
+    assert rows[str(apps[0].pk)]["conformance_status"] == "tested"
 
     per_requirement = by_app(block["per_requirement"], key="req_id")
     assert [row["req_id"] for row in block["per_requirement"]] == [item["id"] for item in REQUIREMENT_ITEMS]
@@ -1136,13 +1139,13 @@ def test_vs_conformance_keeps_the_modal_evaluator_version(requirements_task):
 
 
 def test_requirements_without_frozen_context_fall_back_to_answers():
-    block = {"id": "requirements", "type": "requirements", "title": "Requirements", "sources": ["backend"]}
+    block = {"id": "requirements", "type": "requirements", "title": "Requirements", "sources": ["frontend"]}
     task = make_open_task(n_apps=1, design=design_with([block], {"block_id": "requirements", "metric": "compliance"}))
     item = next(iter(single_items(task).values()))
-    submit(task, item, raters(task, 1)[0], {"requirements": {"items": {"b_x": {"verdict": "partial"}}}})
+    submit(task, item, raters(task, 1)[0], {"requirements": {"items": {"f_x": {"verdict": "partial"}}}})
     result = block_of(compute_results(task), "requirements")
     assert result["per_app"][0]["compliance"] == 0.5
-    assert result["per_requirement"][0]["source"] == "backend"
+    assert result["per_requirement"][0]["source"] == "frontend"
     assert result["endpoint_agreement"] is None
 
 
@@ -1619,11 +1622,11 @@ def _requirements_design(sources):
 
 def test_endpoint_pass_rate_covers_only_the_endpoint_sources_shown(monkeypatch):
     """C19: a block without admin_api compares public-endpoint compliance with the api checks only."""
-    task = make_open_task(n_apps=4, design=_requirements_design(["backend", "api"]))
+    task = make_open_task(n_apps=4, design=_requirements_design(["frontend", "api"]))
     items = single_items(task)
     apps = apps_of(task)
     person = raters(task, 1)[0]
-    shown = [item for item in REQUIREMENT_ITEMS if item["source"] in ("backend", "api")]
+    shown = [item for item in REQUIREMENT_ITEMS if item["source"] in ("frontend", "api")]
     context = {"blocks": {"requirements": {"requirements": {"single": copy.deepcopy(shown)}}}}
     for app in apps:
         answers = {"requirements": {"items": {item["id"]: {"verdict": "met"} for item in shown}}}
@@ -1644,12 +1647,12 @@ def test_endpoint_pass_rate_covers_only_the_endpoint_sources_shown(monkeypatch):
     assert "on the api checks" in endpoints["note"]
 
     admin = analysis._endpoint_categories({"sources": ["admin_api"]})
-    both = analysis._endpoint_categories({"sources": ["backend", "api", "admin_api"]})
+    both = analysis._endpoint_categories({"sources": ["frontend", "api", "admin_api"]})
     assert admin == {"admin"}
     assert both == {"api", "admin"}
     odd = apps[1].snapshot
     assert analysis._endpoint_pass_rate(odd, admin) == 0.0
-    assert analysis._endpoint_pass_rate(odd, both) == 0.75
+    assert analysis._endpoint_pass_rate(odd, both) == pytest.approx(5 / 6)
     assert analysis._endpoint_pass_rate(odd, frozenset()) is None
 
 

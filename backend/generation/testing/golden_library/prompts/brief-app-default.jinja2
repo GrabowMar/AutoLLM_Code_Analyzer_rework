@@ -1,0 +1,18 @@
+# Task: {{ task.title }}
+
+{{ task.prose }}
+
+{{ stack_fragment }}
+{% if style_fragment %}
+{{ style_fragment }}
+{% endif %}
+{{ auth_contract }}
+
+The app must start with the Dockerfile in the workspace root and listen on port {{ run_contract.port }}.
+{{ network.sentence }}
+{% if guidance_fragment %}
+{{ guidance_fragment }}
+{% endif %}
+{% if budget_neutral %}
+{{ budget_neutral }}
+{% endif %}

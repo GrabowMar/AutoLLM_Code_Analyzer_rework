@@ -1,0 +1,11 @@
+name: 'bcrypt password hashing (Python)'
+description: 'Passwords are hashed or verified with bcrypt (the bcrypt package or passlib''s bcrypt scheme).'
+content:
+  engine: regex
+  languages: [python]
+  rule: '\bbcrypt\.(?:hashpw|checkpw|gensalt|hash|verify|using)\s*\(|\bCryptContext\(\s*schemes\s*=\s*\[[^\]]*["'']bcrypt["'']'
+  tool: {name: re, version: py3.13}
+  feature_key: py-bcrypt-used
+  polarity: secure
+  cwe: [cwe-916]
+  description: 'bcrypt.hashpw/checkpw/gensalt (or passlib bcrypt) is called.'

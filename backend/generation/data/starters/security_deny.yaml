@@ -1,0 +1,10 @@
+# Security libraries that no `minimal` starter may preinstall (spec section 11.4, Appendix A #3).
+# Checked against every manifest and lockfile of a starter (build/starter_rules.py; library lint
+# lint_starter_security_library). Names are matched per ecosystem after normalization
+# (PyPI: PEP 503; npm: exact, lower case; Go: module path; Maven: groupId:artifactId or artifactId).
+version: 1
+packages:
+  pypi: [bcrypt, passlib, pwdlib, argon2, argon2-cffi, pyjwt, python-jose, flask-login, flask-wtf, django-axes]
+  npm: [bcrypt, bcryptjs, argon2, jsonwebtoken, passport, helmet, csurf, express-rate-limit]
+  go: [github.com/golang-jwt/jwt, github.com/golang-jwt/jwt/v4, github.com/golang-jwt/jwt/v5]
+  maven: [spring-security, spring-boot-starter-security, spring-security-core, spring-security-web]

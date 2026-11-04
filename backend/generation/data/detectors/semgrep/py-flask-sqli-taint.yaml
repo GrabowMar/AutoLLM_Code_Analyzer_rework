@@ -1,0 +1,32 @@
+name: Flask request data flows into SQL (taint)
+description: Data from flask.request reaches cursor/db execute() without being a bound parameter (taint mode).
+content:
+  engine: semgrep
+  languages: [python]
+  rule: |
+    rules:
+      - id: flask-request-to-sql
+        mode: taint
+        languages: [python]
+        severity: ERROR
+        message: Request data reaches an SQL execute() call
+        pattern-sources:
+          - pattern-either:
+              - pattern: flask.request.$ATTR
+              - pattern: request.$ATTR
+              - pattern: request.$ATTR.get(...)
+              - pattern: request.get_json(...)
+        pattern-sinks:
+          - patterns:
+              - pattern-either:
+                  - pattern: $DB.execute($QUERY, ...)
+                  - pattern: $DB.executemany($QUERY, ...)
+              - focus-metavariable: $QUERY
+        pattern-sanitizers:
+          - pattern: int(...)
+  tool: {name: semgrep, version: 1.x}
+  feature_key: py-flask-sqli-taint
+  polarity: insecure
+  cwe: [cwe-89]
+  description: Flask request data flows into the query string of an SQL execute() call.
+  taint: true

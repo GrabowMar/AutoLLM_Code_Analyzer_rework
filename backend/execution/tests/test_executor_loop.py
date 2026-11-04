@@ -1,4 +1,4 @@
-"""The executor process (spec §C.2) with synchronous pools: leadership, loop, heartbeat, shutdown, orchestration."""
+"""The executor process (spec §C.2) with synchronous pools: leadership, loop, heartbeat, shutdown, stage dispatch."""
 
 from __future__ import annotations
 
@@ -18,16 +18,17 @@ from backend.execution.executor import PoolFullError
 from backend.execution.models import ExecutorInstance
 from backend.execution.models import ExecutorSettings
 from backend.execution.tests.conftest import make_endpoint
-from backend.execution.tests.conftest import make_job
 from backend.execution.tests.conftest import make_model
-from backend.execution.tests.conftest import running_experiment
-from backend.generation.models import GenerationJob
-from backend.generation.services.agent.runner import AgentRunner
-from backend.inference.access import LLMAccessError
-from backend.inference.chat import ChatResult
+from backend.execution.tests.conftest import make_run
+from backend.execution.tests.conftest import running_study
+from backend.generation.models import GenerationRun
+from backend.generation.models import Study
+from backend.generation.models import StudyPostRun
+from backend.generation.models.choices import RunStatus
+from backend.generation.tests.factories import StudyCellFactory
 
 pytestmark = pytest.mark.django_db
-S = GenerationJob.Status
+S = RunStatus
 
 
 class FakeRedis:
@@ -61,23 +62,34 @@ def leader():
     executor.shutdown()
 
 
-def _response(content="hello"):
-    return {
-        "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5, "cost": 0.0},
-    }
-
-
 @pytest.fixture
-def fake_llm():
-    with (
-        mock.patch(
-            "backend.inference.access.resolve_access",
-            side_effect=lambda user, model: mock.Mock(is_openrouter=True, endpoint=None),
-        ),
-        mock.patch("backend.inference.chat.chat", return_value=ChatResult(_response(), {})) as chat,
-    ):
-        yield chat
+def fake_stages(monkeypatch):
+    """The generation stage (``agentic.dispatch.run_stage``, WP-08) and evaluation (``run_eval_stage``, WP-09).
+
+    Generation records the phase it ran in and hands the run to evaluation (sandbox lane) or ends it
+    (llm lane); evaluation records its phase and ends the run ``tested``.
+    """
+    seen: dict = {"generated": [], "evaluated": []}
+
+    def run_stage(run):
+        seen["phase_during_run"] = GenerationRun.objects.get(id=run.id).phase
+        seen["generated"].append(run.id)
+        run.result = {"termination": "completed"}
+        if run.lane == "sandbox":
+            transitions.finish_stage(run, transitions.OUTCOME_EVALUATE)
+        else:
+            run.outcome = "output_invalid"
+            transitions.finish_stage(run, transitions.OUTCOME_DONE)
+
+    def run_eval_stage(run):
+        seen["phase_during_eval"] = GenerationRun.objects.get(id=run.id).phase
+        seen["evaluated"].append(run.id)
+        run.outcome = "tested"
+        transitions.finish_stage(run, transitions.OUTCOME_DONE)
+
+    monkeypatch.setattr("backend.generation.agentic.dispatch.run_stage", run_stage)
+    monkeypatch.setattr("backend.generation.evaluation.suite.run_eval_stage", run_eval_stage)
+    return seen
 
 
 class TestLeadership:
@@ -87,7 +99,7 @@ class TestLeadership:
         assert second.run() == 1
 
     def test_losing_the_lock_stops_claiming(self, leader, user, system_ep):
-        make_job(user, make_model())
+        make_run(user, make_model())
         pid = leader.lock_conn.connection.info.backend_pid
         killer = connections.create_connection("default")
         with killer.cursor() as cursor:
@@ -96,7 +108,57 @@ class TestLeadership:
         assert leader.tick() is None
         assert leader.stop_event.is_set()
         assert leader.exit_code == 1
-        assert GenerationJob.objects.filter(status=S.RUNNING).count() == 0
+        assert GenerationRun.objects.filter(status=S.RUNNING).count() == 0
+
+
+class TestPreviewBuilds:
+    def test_preview_is_run_by_eval_pool_before_a_sandbox_in_small_daemon(self, leader, user, system_ep, settings):
+        from backend.execution.models import RuntimeBuildLease
+        from backend.runtime.models import ContainerAction
+        from backend.runtime.tests.factories import ContainerActionFactory
+
+        settings.APPS_DIND_MEM_LIMIT = "4g"
+        action = ContainerActionFactory(action_type=ContainerAction.ActionType.BUILD)
+        job = make_run(user, make_model(), lane="sandbox")
+
+        def execute(action_id, *, claimed, cancelled):
+            assert action_id == action.pk
+            assert claimed
+            assert not cancelled()
+            assert leader.pools["eval"].inflight == 1
+            assert RuntimeBuildLease.objects.filter(action=action).exists()
+            action.mark_completed()
+
+        with (
+            mock.patch("backend.runtime.services.container_service._execute", side_effect=execute) as build,
+            mock.patch("backend.execution.workers.run_job") as generation,
+        ):
+            leader.tick()
+        build.assert_called_once()
+        generation.assert_not_called()
+        job.refresh_from_db()
+        assert job.status == S.PENDING
+        assert not RuntimeBuildLease.objects.exists()
+
+    def test_pending_preview_prevents_stop_when_idle(self, leader):
+        from backend.runtime.models import ContainerAction
+        from backend.runtime.tests.factories import ContainerActionFactory
+
+        ContainerActionFactory(action_type=ContainerAction.ActionType.BUILD)
+        assert not leader._idle()
+
+    def test_heartbeat_renews_preview_worker_lease(self, leader):
+        from backend.execution import runtime_builds
+        from backend.execution.models import RuntimeBuildLease
+        from backend.runtime.models import ContainerAction
+        from backend.runtime.tests.factories import ContainerActionFactory
+
+        action = ContainerActionFactory(action_type=ContainerAction.ActionType.BUILD)
+        runtime_builds.claim(leader.executor_id, 1)
+        leader.registry.add(action.pk, 0, "preview")
+        RuntimeBuildLease.objects.filter(action=action).update(expires_at=timezone.now())
+        leader.heartbeat()
+        assert not runtime_builds.cancelled(action.pk, leader.executor_id)
 
     def test_a_proxy_that_cannot_bind_stops_the_executor(self, settings):
         # TEST-NET-3 address: not on any interface here -> EADDRNOTAVAIL, like a
@@ -128,95 +190,86 @@ def _crash_service(done):
 
 
 class TestLoop:
-    def test_custom_job_runs_to_completion(self, leader, user, system_ep, fake_llm):
-        job = make_job(user, make_model(), mode=GenerationJob.Mode.CUSTOM, custom_user_prompt="hi")
+    def test_an_llm_run_goes_through_the_dispatcher(self, leader, user, system_ep, fake_stages):
+        run = make_run(user, make_model())
         leader.tick()
-        job.refresh_from_db()
-        assert (job.status, job.phase, job.lease_owner) == (S.COMPLETED, "", "")
-        assert job.result_data["content"] == "hello"
-        assert fake_llm.call_args.kwargs["job"].id == job.id
+        run.refresh_from_db()
+        assert (run.status, run.phase, run.lease_owner, run.outcome, run.usable) == (
+            S.COMPLETED,
+            "",
+            "",
+            "output_invalid",
+            True,
+        )
+        assert fake_stages["generated"] == [run.id]
+        assert fake_stages["phase_during_run"] == "running"
         assert len(leader.registry) == 0
 
-    @pytest.fixture
-    def fake_agent(self, monkeypatch, settings):
-        settings.AGENT_AUTO_EVALUATE = True
-        seen: dict = {}
-
-        def run_stage(runner):
-            seen["phase_during_run"] = GenerationJob.objects.get(id=runner.job.id).phase
-            runner.job.result_data = {"agent": {"termination": "completed"}, "files": {}}
-            return transitions.OUTCOME_EVALUATE
-
-        def evaluate_job(job, save=None):
-            seen["phase_during_eval"] = GenerationJob.objects.get(id=job.id).phase
-            job.result_data = {**job.result_data, "evaluation": {"status": "passed"}}
-            save(job, ["result_data"])
-
-        monkeypatch.setattr(AgentRunner, "run_stage", run_stage)
-        monkeypatch.setattr("backend.generation.services.evaluation.runner.evaluate_job", evaluate_job)
-        return seen
-
-    def test_agent_job_releases_its_sandbox_before_evaluation(self, leader, user, system_ep, fake_agent, settings):
+    def test_agentic_run_releases_its_sandbox_before_evaluation(self, leader, user, system_ep, fake_stages, settings):
         settings.APPS_DIND_MEM_LIMIT = "16g"
         ExecutorSettings.objects.filter(pk=1).update(sandbox_slots=1, eval_slots=1)
-        seen = fake_agent
-        first, second = (make_job(user, make_model(), lane="sandbox") for _ in range(2))
+        first, second = (make_run(user, make_model(), lane="sandbox") for _ in range(2))
         leader.tick()
-        states = dict(GenerationJob.objects.values_list("id", "phase"))
+        states = dict(GenerationRun.objects.filter(id__in=[first.id, second.id]).values_list("id", "phase"))
         # One sandbox slot: the first ran and went to eval_queued, freeing the slot for nobody yet this tick.
         assert sorted(states.values()) == ["", "eval_queued"]
         leader.tick()  # evaluation of the first + sandbox run of the second
         leader.tick()  # evaluation of the second
-        rows = {j.id: j for j in GenerationJob.objects.all()}
+        rows = {r.id: r for r in GenerationRun.objects.filter(id__in=[first.id, second.id])}
         assert rows[first.id].status == rows[second.id].status == S.COMPLETED
-        assert rows[first.id].result_data["evaluation"]["status"] == "passed"
-        assert seen == {"phase_during_run": "running", "phase_during_eval": "evaluating"}
+        assert rows[first.id].outcome == rows[second.id].outcome == "tested"
+        assert (fake_stages["phase_during_run"], fake_stages["phase_during_eval"]) == ("running", "evaluating")
 
-    def test_evaluation_keeps_the_executor_validity_notes(self, leader, user, system_ep, fake_agent, settings):
-        settings.APPS_DIND_MEM_LIMIT = "16g"
-        # A second attempt: the eval stage's validity must still say so (not only the sandbox stage's).
-        job = make_job(user, make_model(), lane="sandbox", attempt=1)
+    def test_reference_runs_are_claimed_by_phase(self, leader, user, system_ep, fake_stages):
+        from backend.execution.api import enqueue_evaluation
+        from backend.generation.tests.factories import GenerationRunFactory
+
+        reference = GenerationRunFactory(reference=True, status=S.PENDING, phase="", created_by=user)
+        enqueue_evaluation([reference.id])
         leader.tick()
-        leader.tick()
-        job.refresh_from_db()
-        assert job.status == S.COMPLETED
-        assert job.result_data["evaluation"]["status"] == "passed"
-        codes = {n["code"] for n in job.result_data["agent"]["validity"]["notes"]}
-        assert {"infra_retried"} <= codes
+        reference.refresh_from_db()
+        assert (reference.status, reference.outcome) == (S.COMPLETED, "tested")
+        assert fake_stages["generated"] == []
+        assert fake_stages["evaluated"] == [reference.id]
 
     def test_sandbox_and_evaluation_take_turns_when_memory_is_short(
         self,
         leader,
         user,
         system_ep,
-        fake_agent,
+        fake_stages,
         settings,
     ):
         settings.APPS_DIND_MEM_LIMIT = "4g"
         ExecutorSettings.objects.filter(pk=1).update(sandbox_slots=1, eval_slots=1)
-        first, second = (make_job(user, make_model(), lane="sandbox") for _ in range(2))
+        first, second = (make_run(user, make_model(), lane="sandbox") for _ in range(2))
         leader.tick()
         assert leader.slots.exclusive_eval
         leader.tick()  # the evaluation of the first runs; the second sandbox waits for it
-        assert GenerationJob.objects.get(id=first.id).status == S.COMPLETED
-        assert GenerationJob.objects.get(id=second.id).status == S.PENDING
+        assert GenerationRun.objects.get(id=first.id).status == S.COMPLETED
+        assert GenerationRun.objects.get(id=second.id).status == S.PENDING
         leader.tick()
         leader.tick()
-        assert GenerationJob.objects.get(id=second.id).status == S.COMPLETED
+        assert GenerationRun.objects.get(id=second.id).status == S.COMPLETED
 
-    def test_scaffolding_experiment_completes_the_experiment(self, leader, user, system_ep, fake_llm, monkeypatch):
-        experiment = running_experiment(user, post_run={"evaluate": False})
-        monkeypatch.setattr(
-            "backend.generation.services.orchestrator.GenerationService._run_scaffolding",
-            lambda self, job: self._call_llm(job, job.model.model_id, [], stage="backend"),
-        )
-        job = make_job(user, make_model(), experiment=experiment, sequence=0)
-        with mock.patch("backend.generation.services.experiment_automation.on_experiment_completed") as done:
-            leader.tick()
-        job.refresh_from_db()
-        experiment.refresh_from_db()
-        assert (job.status, experiment.status) == (S.COMPLETED, "completed")
-        done.assert_called_once()
+    def test_the_last_run_completes_the_study(self, leader, user, system_ep, fake_stages):
+        study = running_study(user)
+        run = make_run(user, make_model(), study=study, sequence=0)
+        leader.tick()
+        run.refresh_from_db()
+        assert (run.status, Study.objects.get(pk=study.pk).status) == (S.COMPLETED, "completed")
+
+    def test_an_unimplemented_stage_leaves_the_run_to_the_lost_run_check(self, leader, user, system_ep, monkeypatch):
+        # A stage that raises (here NotImplementedError): the worker logs it and keeps the lease.
+        def unimplemented(_run):
+            raise NotImplementedError
+
+        monkeypatch.setattr("backend.generation.agentic.dispatch.run_stage", unimplemented)
+        run = make_run(user, make_model())
+        leader.tick()
+        run.refresh_from_db()
+        assert (run.status, run.lease_owner) == (S.RUNNING, leader.executor_id)
+        assert len(leader.registry) == 0
 
     def test_redis_errors_never_busy_spin(self):
         executor = _executor(redis_client=FakeRedis(fail=True), tick_seconds=0.2)
@@ -225,7 +278,7 @@ class TestLoop:
         assert time.monotonic() - started >= 0.19
 
     def test_failed_submit_is_an_infra_retry(self, leader, user, system_ep, monkeypatch):
-        job = make_job(user, make_model())
+        job = make_run(user, make_model())
 
         def refuse(*_a, **_kw):
             msg = "no threads"
@@ -238,30 +291,30 @@ class TestLoop:
         assert job.execution["attempts"][0]["reason"] == "submit_failed"
 
     def test_a_worker_that_dies_before_registering_is_found_lost(self, leader, user, system_ep, monkeypatch):
-        job = make_job(user, make_model())
+        job = make_run(user, make_model())
         monkeypatch.setattr("backend.execution.workers.run_job", lambda ctx, claimed: None)
         leader.tick()
         job.refresh_from_db()
         assert (job.status, job.lease_owner) == (S.RUNNING, leader.executor_id)
-        GenerationJob.objects.filter(id=job.id).update(stage_entered_at=timezone.now() - timedelta(minutes=1))
+        GenerationRun.objects.filter(id=job.id).update(stage_entered_at=timezone.now() - timedelta(minutes=1))
         leader.tick()
         job.refresh_from_db()
         assert (job.status, job.attempt) == (S.PENDING, 1)
         assert job.execution["attempts"][0]["reason"] == "executor_lost"
 
-    def test_stop_when_idle(self, user, system_ep, fake_llm):
-        make_job(user, make_model(), mode=GenerationJob.Mode.CUSTOM, custom_user_prompt="hi")
+    def test_stop_when_idle(self, user, system_ep, fake_stages):
+        run = make_run(user, make_model())
         executor = _executor(stop_when_idle=True)
         assert executor.run() == 0
-        assert GenerationJob.objects.get().status == S.COMPLETED
+        assert GenerationRun.objects.get(id=run.id).status == S.COMPLETED
         assert ExecutorInstance.objects.get(id=executor.executor_id).stopped_at is not None
 
 
 class TestHeartbeatAndShutdown:
     def test_heartbeat_renews_only_registered_jobs(self, leader, user, system_ep):
         soon = timezone.now() + timedelta(seconds=5)
-        owned = make_job(user, make_model(), status=S.RUNNING, lease_owner=leader.executor_id, lease_expires_at=soon)
-        orphan = make_job(user, make_model(), status=S.RUNNING, lease_owner=leader.executor_id, lease_expires_at=soon)
+        owned = make_run(user, make_model(), status=S.RUNNING, lease_owner=leader.executor_id, lease_expires_at=soon)
+        orphan = make_run(user, make_model(), status=S.RUNNING, lease_owner=leader.executor_id, lease_expires_at=soon)
         leader.registry.add(owned.id, 0, "llm")
         assert leader.heartbeat() == 1
         owned.refresh_from_db()
@@ -275,7 +328,7 @@ class TestHeartbeatAndShutdown:
         executor = _executor()
         assert executor.acquire_leadership()
         executor.startup()
-        job = make_job(
+        job = make_run(
             user,
             make_model(),
             status=S.RUNNING,
@@ -291,17 +344,14 @@ class TestHeartbeatAndShutdown:
 
 
 class TestAutomation:
-    def _post_run(self, user, **kw):
-        from backend.generation.models import ExperimentPostRun
-
-        return ExperimentPostRun.objects.create(experiment=running_experiment(user), trigger="manual", config={}, **kw)
+    def _post_run(self, user, *, study=None, **kw):
+        kw.setdefault("trigger", "manual")
+        return StudyPostRun.objects.create(study=study or running_study(user), config={}, **kw)
 
     def test_a_post_run_interrupted_by_a_restart_is_resumed(self, leader, user, system_ep):
-        from backend.generation.models import ExperimentPostRun
-
         self._post_run(
             user,
-            status=ExperimentPostRun.Status.RUNNING,
+            status="running",
             lease_owner="previous-executor",
             lease_expires_at=timezone.now() - timedelta(seconds=1),
         )
@@ -310,11 +360,9 @@ class TestAutomation:
         assert [c.args[0] for c in submit.call_args_list] == [leader_workers().run_post_run]
 
     def test_a_live_post_run_is_not_resubmitted(self, leader, user, system_ep):
-        from backend.generation.models import ExperimentPostRun
-
         self._post_run(
             user,
-            status=ExperimentPostRun.Status.RUNNING,
+            status="running",
             lease_owner="other",
             lease_expires_at=timezone.now() + timedelta(minutes=1),
         )
@@ -322,20 +370,39 @@ class TestAutomation:
             leader._automation()
         submit.assert_not_called()
 
-    def test_schedule_actions_never_queue_behind_a_post_run(self, leader, monkeypatch):
+    def test_a_completion_post_run_waits_for_its_study(self, user):
+        study = running_study(user)
+        post_run = self._post_run(user, study=study, trigger="completed")
+        assert not leader_workers().claimable_post_runs().filter(pk=post_run.pk).exists()
+        Study.objects.filter(pk=study.pk).update(status="completed")
+        assert leader_workers().claimable_post_runs().filter(pk=post_run.pk).exists()
+
+    def test_the_post_run_worker_leases_and_runs_one_post_run(self, leader, user, monkeypatch):
+        post_run = self._post_run(user)
+        ran = []
+        monkeypatch.setattr("backend.generation.study.automation.run_post_run", lambda p: ran.append(p.pk))
+        leader_workers().run_post_run(leader.ctx)
+        post_run.refresh_from_db()
+        assert ran == [post_run.pk]
+        assert (post_run.status, post_run.lease_owner) == ("running", leader.executor_id)
+        assert post_run.started_at is not None
+
+    def test_an_unimplemented_post_run_goes_back_to_pending(self, leader, user, monkeypatch):
+        def unimplemented(_post_run):
+            raise NotImplementedError
+
+        monkeypatch.setattr("backend.generation.study.automation.run_post_run", unimplemented)
+        post_run = self._post_run(user)
+        leader_workers().run_post_run(leader.ctx)
+        post_run.refresh_from_db()
+        assert (post_run.status, post_run.lease_owner) == ("pending", "")
+
+    def test_schedules_fire_on_their_own_pool_never_behind_a_post_run(self, leader, monkeypatch):
         fired = []
-
-        def due(now, submit):
-            submit(None, 42)
-            return [42]
-
-        monkeypatch.setattr("backend.generation.services.experiment_automation.run_due_schedules", due)
-        with (
-            mock.patch.object(leader.pools["post"], "submit") as post_submit,
-            mock.patch.object(leader.pools["schedule"], "submit", side_effect=lambda *a, **k: fired.append(a)),
-        ):
+        monkeypatch.setattr("backend.generation.study.automation.fire_due_schedules", fired.append)
+        with mock.patch.object(leader.pools["post"], "submit") as post_submit:
             leader._automation()
-        assert fired == [(leader_workers().run_schedule_action, 42)]
+        assert len(fired) == 1
         post_submit.assert_not_called()
 
 
@@ -380,25 +447,25 @@ class TestLiveEvents:
         ]
         assert publish.call_args.args[2]["loaded_count"] == 2
 
-    def test_tick_carries_current_attempt_rollups(self, leader, user, system_ep):
-        from backend.generation.tests.factories import AppRequirementTemplateFactory
-        from backend.generation.tests.factories import ExperimentConditionFactory
-
-        x = running_experiment(user, repeats=2)
-        app = AppRequirementTemplateFactory()
-        x.app_requirements.add(app)
-        first, _second = ExperimentConditionFactory(experiment=x), ExperimentConditionFactory(experiment=x)
-        cell = {"experiment": x, "condition": first, "app_requirement": app, "repeat_index": 0}
-        make_job(user, first.model, status=S.FAILED, phase="", queued_at=None, **cell)
-        make_job(user, first.model, status=S.COMPLETED, phase="", queued_at=None, **cell)  # the top-up retry
+    def test_tick_carries_current_run_rollups(self, leader, user, system_ep):
+        study = running_study(user)
+        cell = StudyCellFactory(condition__plan__study=study)
+        StudyCellFactory(condition__plan__study=study)  # no run yet: counted in the total only
+        common = {"study": study, "cell": cell, "queued_at": None, "phase": ""}
+        make_run(user, make_model(), status=S.FAILED, outcome="infra_error", cell_attempt=1, **common)
+        make_run(user, make_model(), status=S.COMPLETED, outcome="tested", cell_attempt=2, **common)  # the top-up
         result = leader.scheduler.tick(leader.slots, {name: p.free() for name, p in leader.pools.items()})
-        with mock.patch("backend.realtime.events.publish_experiment_event") as publish:
+        with mock.patch("backend.realtime.events.publish_study_event") as publish:
             leader._publish_ticks(result)
+        assert publish.call_args.args[0] == study.id
         event = publish.call_args.args[1]
         assert event["type"] == "tick"
-        # Current attempt per cell, like REST status: the superseded FAILED row is not counted.
-        assert (event["counts"]["completed"], event["counts"]["failed"]) == (1, 0)
-        assert event["cells"] == {"total": 4, "done": 1, "failed_final": 0, "in_flight": 0}
+        # The cell's current run (first usable attempt) only: the superseded FAILED row is not counted.
+        assert (event["counts"].get("completed"), event["counts"].get("failed", 0)) == (1, 0)
+        assert event["cells"] == {"total": 2, "done": 1, "failed_final": 0, "in_flight": 0}
+        from backend.generation.contracts.events import parse_study_event
+
+        parse_study_event(event)
 
     def test_capacity_event_reports_stale_code(self, leader, monkeypatch):
         result = leader.scheduler.tick(leader.slots, {name: p.free() for name, p in leader.pools.items()})
@@ -409,70 +476,6 @@ class TestLiveEvents:
             monkeypatch.setattr("backend.execution.capacity.code_version", lambda: "edited-on-disk")
             leader._publish_capacity(result)
             assert publish.call_args.args[0]["executor"]["code_stale"] is True
-
-
-class TestInfraClassification:
-    """GenerationService.execute(claimed=True) → finish_stage / infra_retry (spec §C.7)."""
-
-    def _claimed(self, user, model, **kw):
-        return make_job(
-            user,
-            model,
-            mode=GenerationJob.Mode.CUSTOM,
-            custom_user_prompt="hi",
-            status=S.RUNNING,
-            phase="running",
-            lease_owner="exec:1",
-            started_at=timezone.now(),
-            **kw,
-        )
-
-    def test_offline_endpoint_before_any_call_is_retried(self, user, system_ep):
-        from backend.generation.services.orchestrator import GenerationService
-
-        job = self._claimed(user, make_model())
-        error = LLMAccessError("endpoint_offline", "no relay")
-        with mock.patch.object(GenerationService, "_build_client_for", side_effect=error):
-            GenerationService().execute(job, claimed=True)
-        job.refresh_from_db()
-        assert (job.status, job.attempt) == (S.PENDING, 1)
-
-    def test_local_error_after_a_successful_call_is_an_interruption(self, user, system_ep):
-        from backend.generation.services.orchestrator import GenerationService
-
-        endpoint = make_endpoint(user)
-        job = self._claimed(user, make_model(endpoint, "qwen"))
-        client = mock.Mock()
-        client.chat_completion.side_effect = [_response(), LLMAccessError("timeout")]
-        service = GenerationService()
-
-        def build(j):
-            service._access = mock.Mock(is_openrouter=False, endpoint=endpoint, api_flavor="native")
-            return client
-
-        def run_twice(j):
-            service._call_llm(j, "m", [], stage="backend")
-            service._call_llm(j, "m", [], stage="frontend")
-
-        with (
-            mock.patch.object(service, "_build_client_for", side_effect=build),
-            mock.patch.object(service, "_run_custom", side_effect=run_twice),
-        ):
-            service.execute(job, claimed=True)
-        job.refresh_from_db()
-        assert (job.status, job.attempt) == (S.PENDING, 1)
-        assert job.execution["attempts"][0]["reason"] == "infra_interrupted"
-        assert job.artifacts.count() == 0  # the attempt's artifacts are gone
-
-    def test_model_errors_fail_the_job(self, user, system_ep):
-        from backend.generation.services.orchestrator import GenerationService
-
-        job = self._claimed(user, make_model())
-        error = LLMAccessError("upstream_error", "context too long", status_code=400)
-        with mock.patch.object(GenerationService, "_build_client_for", side_effect=error):
-            GenerationService().execute(job, claimed=True)
-        job.refresh_from_db()
-        assert (job.status, job.attempt, job.lease_owner) == (S.FAILED, 0, "")
 
 
 def test_bounded_pool_counts_real_free_threads():

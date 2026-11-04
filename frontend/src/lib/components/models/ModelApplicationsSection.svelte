@@ -1,4 +1,6 @@
 <script lang="ts">
+	// The generated apps (GenerationRuns) of one model: the caller's runs, newest first, with their
+	// outcome and runtime controls. GET /api/generation/runs/?model=<model id>.
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
@@ -7,10 +9,11 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import { TableToolbar, rowLink, tableFrame } from '$lib/components/table';
 	import AppWindow from '@lucide/svelte/icons/app-window';
-	import { getGenerationJobs, type GenerationJobList } from '$lib/api/generation';
+	import { listSamples } from '$lib/api/v3/samples';
+	import type { RunListOut } from '$lib/api/v3/types';
 	import { formatApiError } from '$lib/api/core';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
+	import { outcomeLabels, type RunOutcome } from '$lib/constants/colors';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -24,7 +27,21 @@
 
 	let { modelId, slug, onLoaded }: Props = $props();
 
-	let jobs = $state<GenerationJobList[]>([]);
+	let runs = $state<RunListOut[]>([]);
+
+	const KIND_LABELS: Record<string, string> = {
+		app_agentic: 'Agentic app',
+		slot_single_shot: 'Slot variant',
+		slot_agent: 'Slot variant (agent)',
+		reference: 'Reference',
+	};
+
+	/** The run's outcome once it has one; before that its phase or status. */
+	function runState(run: RunListOut): { status: string; label: string } {
+		if (run.outcome) return { status: run.outcome, label: outcomeLabels[run.outcome as RunOutcome] ?? run.outcome };
+		const status = run.phase || run.status;
+		return { status, label: status.replace(/_/g, ' ') };
+	}
 	let total = $state(0);
 	let loading = $state(true);
 	let error = $state('');
@@ -39,8 +56,8 @@
 		loading = true;
 		error = '';
 		try {
-			const res = await getGenerationJobs({ model_id: modelId, per_page: 100 });
-			jobs = res.items;
+			const res = await listSamples({ model: modelId, page_size: 100 });
+			runs = res.items;
 			total = res.total;
 			onLoaded?.(res.total);
 		} catch (e) {
@@ -61,7 +78,7 @@
 				<Card.Title class="text-base">Applications</Card.Title>
 				<Badge variant="outline" class="text-xs">{total}</Badge>
 			</div>
-			<Button size="sm" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}">
+			<Button size="sm" href="/experiments/new?mode=app" title="Generate apps with this model in an app experiment (pick {slug} as a model level)">
 				<Sparkles class="h-3.5 w-3.5 mr-1.5" />New
 			</Button>
 		</Card.Header>
@@ -70,11 +87,11 @@
 				<LoadingState label="loading applications" class="py-10" />
 			{:else if error}
 				<div class="p-4"><ErrorAlert message={error} onretry={load} /></div>
-			{:else if jobs.length === 0}
+			{:else if runs.length === 0}
 				<div class="p-4">
 					<EmptyState compact icon={AppWindow} title="No applications yet" description="No applications have been generated with this model.">
 						{#snippet action()}
-							<Button size="sm" variant="outline" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}">
+							<Button size="sm" variant="outline" href="/experiments/new?mode=app">
 								<Sparkles class="h-3.5 w-3.5 mr-1.5" />Generate the first one
 							</Button>
 						{/snippet}
@@ -83,7 +100,7 @@
 			{:else}
 				<TableToolbar>
 					{#snippet summary()}
-						{jobs.length === total ? `${total}` : `${jobs.length} of ${total}`} application{total === 1 ? '' : 's'} · click a row to open
+						{runs.length === total ? `${total}` : `${runs.length} of ${total}`} application{total === 1 ? '' : 's'} · click a row to open
 					{/snippet}
 				</TableToolbar>
 				<div class="table-frame" {@attach tableFrame}>
@@ -91,36 +108,39 @@
 						<thead>
 							<tr>
 								<th>Application</th>
-								<th>Template</th>
+								<th>Setup</th>
 								<th>Status</th>
 								<th class="num">Created</th>
 								<th class="text-right"><span class="sr-only">Actions</span></th>
 							</tr>
 						</thead>
 						<tbody>
-							{#each jobs as job (job.id)}
-								{@const href = `/applications/${job.id}`}
+							{#each runs as run (run.id)}
+								{@const href = `/samples/${run.id}`}
+								{@const state = runState(run)}
+								{@const setup = [run.labels?.stack_profile, run.labels?.prose_variant, run.labels?.auth_mode].filter(Boolean).join(' · ')}
 								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
 								<tr class="row-link" onclick={rowLink(href)}>
 									<td class="whitespace-nowrap">
-										<a {href} class="font-mono text-xs font-medium hover:text-primary" title="Open application {job.id}">{job.id.substring(0, 8)}</a>
+										<a {href} class="font-mono text-xs font-medium hover:text-primary" title="Open sample {run.id}">{run.id.substring(0, 8)}</a>
 										<span class="cell-sub block text-[11px] text-muted-foreground">
-											<span class="capitalize">{job.mode}</span>
-											{#if job.harness}<span class="mx-1 opacity-50">·</span><span class="font-mono" title="Harness">{job.harness}</span>{/if}
+											<span>{KIND_LABELS[run.kind] ?? run.kind}</span>
+											{#if run.labels?.harness_preset}<span class="mx-1 opacity-50">·</span><span class="font-mono" title="Harness preset">{run.labels.harness_preset}</span>{/if}
 										</span>
 									</td>
-									<td class="max-w-[240px] truncate text-muted-foreground" title={job.template_name ?? job.scaffolding_name ?? undefined}>
-										{job.template_name ?? job.scaffolding_name ?? '—'}
+									<td class="max-w-[240px] truncate text-muted-foreground" title={setup || undefined}>
+										{setup || '—'}
 									</td>
 									<td class="whitespace-nowrap">
-										<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
+										<StatusBadge status={state.status} label={state.label} />
+										{#if run.usable === false}<span class="cell-sub block text-[11px] text-muted-foreground" title="Not usable: attrition, never counted as a failure">not usable</span>{/if}
 									</td>
-									<td class="num text-xs text-muted-foreground">{fmtDate(job.created_at)}</td>
+									<td class="num text-xs text-muted-foreground">{fmtDate(run.created_at)}</td>
 									<td class="w-px whitespace-nowrap">
 										<div class="flex items-center justify-end gap-1">
 											<!-- Keep the runtime controls on one line; their root wraps by default. -->
 											<div class="[&>div]:flex-nowrap">
-												<AppRuntimeControls jobId={job.id} jobStatus={job.status} compact={true} showPorts={true} />
+												<AppRuntimeControls jobId={run.id} jobStatus={run.status} compact={true} showPorts={true} />
 											</div>
 											<Button variant="ghost" size="sm" class="size-8 p-0 text-muted-foreground hover:text-foreground" {href} title="View application" aria-label="View application">
 												<ChevronRight class="size-4" />

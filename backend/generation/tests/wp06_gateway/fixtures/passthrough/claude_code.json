@@ -1,0 +1,326 @@
+{
+ "harness": "claude-code",
+ "front_protocol": "anthropic_messages",
+ "request_class_source": "x-claude-code-request-class",
+ "note": "Recorded-shape Claude Code 2.1 session (stream-json, passthrough). WP-07 smoke fixtures in the same format are picked up from tests/wp07_harnesses/fixtures/gateway/.",
+ "calls": [
+  {
+   "path": "/v1/messages?beta=true",
+   "headers": {
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14",
+    "x-claude-code-session-id": "8f0c2a4e-sess",
+    "x-api-key": "dummy",
+    "x-claude-code-request-class": "main",
+    "x-claude-code-prompt-id": "p1"
+   },
+   "body": {
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 32000,
+    "system": [
+     {
+      "type": "text",
+      "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     },
+     {
+      "type": "text",
+      "text": "You are an interactive CLI tool that helps users with software engineering tasks.\n<env>\nWorking directory: /workspace\n</env>",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ],
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "Build the todo app described in the brief."
+       }
+      ]
+     }
+    ],
+    "tools": [
+     {
+      "name": "Bash",
+      "description": "Executes a given bash command",
+      "input_schema": {
+       "type": "object",
+       "properties": {
+        "command": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "command"
+       ]
+      }
+     },
+     {
+      "name": "Write",
+      "description": "Writes a file",
+      "input_schema": {
+       "type": "object",
+       "properties": {
+        "file_path": {
+         "type": "string"
+        },
+        "content": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "file_path",
+        "content"
+       ]
+      }
+     }
+    ],
+    "thinking": {
+     "type": "enabled",
+     "budget_tokens": 31999
+    },
+    "metadata": {
+     "user_id": "user_x_session_8f0c"
+    },
+    "stream": true
+   },
+   "upstream": {
+    "status": 200,
+    "content_type": "text/event-stream",
+    "events": [
+     "event: message_start\ndata: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_01\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"anthropic/claude-sonnet-4.6\", \"content\": [], \"stop_reason\": null, \"usage\": {\"input_tokens\": 12, \"cache_creation_input_tokens\": 2100, \"cache_read_input_tokens\": 0, \"output_tokens\": 1}}}\n\n",
+     "event: content_block_start\ndata: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"thinking\", \"thinking\": \"\", \"signature\": \"\"}}\n\n",
+     "event: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"thinking_delta\", \"thinking\": \"I should look at the workspace first.\"}}\n\n",
+     "event: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"signature_delta\", \"signature\": \"ErUBCkYIBxgCIkB3c2lnbmF0dXJlLWJsb2Itb25l\"}}\n\n",
+     "event: content_block_stop\ndata: {\"type\": \"content_block_stop\", \"index\": 0}\n\n",
+     "event: content_block_start\ndata: {\"type\": \"content_block_start\", \"index\": 1, \"content_block\": {\"type\": \"tool_use\", \"id\": \"toolu_01A\", \"name\": \"Bash\", \"input\": {}}}\n\n",
+     "event: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 1, \"delta\": {\"type\": \"input_json_delta\", \"partial_json\": \"{\\\"command\\\": \\\"ls -la\\\"}\"}}\n\n",
+     "event: content_block_stop\ndata: {\"type\": \"content_block_stop\", \"index\": 1}\n\n",
+     "event: message_delta\ndata: {\"type\": \"message_delta\", \"delta\": {\"stop_reason\": \"tool_use\", \"stop_sequence\": null}, \"usage\": {\"output_tokens\": 87, \"cost\": 0.0091}}\n\n",
+     "event: message_stop\ndata: {\"type\": \"message_stop\"}\n\n"
+    ]
+   },
+   "expect": {
+    "finish_reason": "tool_calls",
+    "prompt_tokens": 2112,
+    "completion_tokens": 87,
+    "request_class": "main",
+    "cost": 0.0091
+   }
+  },
+  {
+   "path": "/v1/messages?beta=true",
+   "headers": {
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14",
+    "x-claude-code-session-id": "8f0c2a4e-sess",
+    "x-api-key": "dummy",
+    "x-claude-code-request-class": "main",
+    "x-claude-code-prompt-id": "p1"
+   },
+   "body": {
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 32000,
+    "system": [
+     {
+      "type": "text",
+      "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     },
+     {
+      "type": "text",
+      "text": "You are an interactive CLI tool that helps users with software engineering tasks.\n<env>\nWorking directory: /workspace\n</env>",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ],
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "Build the todo app described in the brief."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "thinking",
+        "thinking": "I should look at the workspace first.",
+        "signature": "ErUBCkYIBxgCIkB3c2lnbmF0dXJlLWJsb2Itb25l"
+       },
+       {
+        "type": "tool_use",
+        "id": "toolu_01A",
+        "name": "Bash",
+        "input": {
+         "command": "ls -la"
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "tool_result",
+        "tool_use_id": "toolu_01A",
+        "content": "app\nREADME.md"
+       }
+      ]
+     }
+    ],
+    "tools": [
+     {
+      "name": "Bash",
+      "description": "Executes a given bash command",
+      "input_schema": {
+       "type": "object",
+       "properties": {
+        "command": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "command"
+       ]
+      }
+     },
+     {
+      "name": "Write",
+      "description": "Writes a file",
+      "input_schema": {
+       "type": "object",
+       "properties": {
+        "file_path": {
+         "type": "string"
+        },
+        "content": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "file_path",
+        "content"
+       ]
+      }
+     }
+    ],
+    "thinking": {
+     "type": "enabled",
+     "budget_tokens": 31999
+    },
+    "metadata": {
+     "user_id": "user_x_session_8f0c"
+    },
+    "stream": true
+   },
+   "upstream": {
+    "status": 200,
+    "content_type": "text/event-stream",
+    "events": [
+     "event: message_start\ndata: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_02\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"anthropic/claude-sonnet-4.6\", \"content\": [], \"stop_reason\": null, \"usage\": {\"input_tokens\": 40, \"cache_creation_input_tokens\": 0, \"cache_read_input_tokens\": 2100, \"output_tokens\": 1}}}\n\n",
+     "event: content_block_start\ndata: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}\n\n",
+     "event: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"The workspace has an app directory. Writing the backend now.\"}}\n\n",
+     "event: content_block_stop\ndata: {\"type\": \"content_block_stop\", \"index\": 0}\n\n",
+     "event: message_delta\ndata: {\"type\": \"message_delta\", \"delta\": {\"stop_reason\": \"end_turn\", \"stop_sequence\": null}, \"usage\": {\"output_tokens\": 15}}\n\n",
+     "event: message_stop\ndata: {\"type\": \"message_stop\"}\n\n"
+    ]
+   },
+   "expect": {
+    "finish_reason": "stop",
+    "prompt_tokens": 2140,
+    "completion_tokens": 15,
+    "request_class": "main",
+    "cost": null
+   }
+  },
+  {
+   "path": "/v1/messages",
+   "headers": {
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14",
+    "x-claude-code-session-id": "8f0c2a4e-sess",
+    "x-api-key": "dummy",
+    "x-claude-code-request-class": "compaction"
+   },
+   "body": {
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 20000,
+    "system": [
+     {
+      "type": "text",
+      "text": "Summarize the conversation."
+     }
+    ],
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "Build the todo app described in the brief."
+       }
+      ]
+     },
+     {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "ok"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": "Your task is to create a detailed summary."
+     }
+    ],
+    "stream": false
+   },
+   "upstream": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+     "id": "msg_03",
+     "type": "message",
+     "role": "assistant",
+     "model": "anthropic/claude-sonnet-4.6",
+     "content": [
+      {
+       "type": "text",
+       "text": "Summary: building a todo app."
+      }
+     ],
+     "stop_reason": "end_turn",
+     "stop_sequence": null,
+     "usage": {
+      "input_tokens": 300,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 9
+     }
+    }
+   },
+   "expect": {
+    "finish_reason": "stop",
+    "prompt_tokens": 300,
+    "completion_tokens": 9,
+    "request_class": "compaction",
+    "cost": null
+   }
+  }
+ ]
+}

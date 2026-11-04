@@ -4,7 +4,6 @@
 
 export * from "./applications";
 export * from "./credentials";
-export * from "./generation";
 export * from "./models";
 export * from "./rankings";
 export * from "./reports";

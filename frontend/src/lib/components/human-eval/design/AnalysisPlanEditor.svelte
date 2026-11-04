@@ -13,7 +13,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Label } from '$lib/components/ui/label';
 	import { Segmented } from '$lib/components/ui/segmented';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import type { AllocationStrategy, AnalysisPlan, Block } from '$lib/api/types/human-eval';
 	import { messageAt, messagesAt, messagesUnder, under, type FieldError } from './errors';
 	import { metricOptions, metricValue, parseMetricValue, plannedSampleField, primaryIsValid } from './plan';

@@ -1,0 +1,5 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: qwen-code (native)
+description: qwen-code 0.26.6 with its native system prompt, tools and defaults. Archived until the adapter is enabled.
+archived: true
+content: {harness: qwen-code, harness_version: 0.26.6, pin_system_prompt: true}

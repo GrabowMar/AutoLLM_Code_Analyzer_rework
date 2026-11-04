@@ -1,7 +1,7 @@
 """post_save receivers that turn terminal status changes into webhook deliveries.
 
 Transitions written with ``QuerySet.update()`` or raw SQL (the executor's
-``finish_stage`` / ``cancel_jobs`` / ``maybe_complete_experiment``) do not
+stage transitions, run cancellation and study completion) do not
 fire ``post_save``; ``tasks.sweep_webhook_events`` (Celery beat, every
 minute) catches those.
 """

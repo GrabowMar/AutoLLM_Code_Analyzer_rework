@@ -396,15 +396,15 @@ def covariate_row(
 def model_covariates(user: AbstractBaseUser | None, *, used_only: bool = True) -> dict[str, Any]:
     """Covariate rows for the models ``user`` may see (``used_only``: those with a job of theirs)."""
     authenticated = user is not None and getattr(user, "is_authenticated", False)
-    mine = Q(generation_jobs__created_by=user) if authenticated else Q(pk__in=[])
+    mine = Q(generation_runs__created_by=user) if authenticated else Q(pk__in=[])
     qs = (
         LLMModel.objects.visible_to(user)
         .select_related("endpoint")
         .annotate(
-            n_jobs=Count("generation_jobs", filter=mine, distinct=True),
+            n_jobs=Count("generation_runs", filter=mine, distinct=True),
             n_completed=Count(
-                "generation_jobs",
-                filter=mine & Q(generation_jobs__status="completed"),
+                "generation_runs",
+                filter=mine & Q(generation_runs__status="completed"),
                 distinct=True,
             ),
         )

@@ -1,0 +1,8 @@
+name: Model's choice, minimal tone
+description: No styling prescription, with the minimal visual tone.
+content:
+  system: model-choice
+  tone: minimal
+  tone_text: 'Minimal: generous white space, one accent colour, thin borders, no shadows or decoration.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

@@ -2,7 +2,7 @@
 
 Response schemas mirror the TS types in ``frontend/src/lib/api/types/human-eval.ts``
 field for field (``TaskListItem``, ``TaskDetail``, ``Preset``, ``DesignValidation``,
-``CandidateJob``, ``TaskApp``, ``Item``, ``PreviewSession``). The design and settings
+``CandidateRun``, ``TaskApp``, ``Item``, ``PreviewSession``). The design and settings
 documents are passed through as objects (``services/design.py`` validates them).
 
 Input schemas are deliberately loose (optional fields, plain strings for date-times):
@@ -25,7 +25,7 @@ from backend.human_eval.api.schemas.common import FieldErrorSchema  # noqa: TC00
 # ---------------------------------------------------------------------------
 
 
-class ExperimentRefSchema(Schema):
+class StudyRefSchema(Schema):
     id: str
     name: str
 
@@ -61,7 +61,7 @@ class TaskListItemSchema(Schema):
     status: str
     mode: str
     counts: TaskCountsSchema
-    experiment: ExperimentRefSchema | None = None
+    study: StudyRefSchema | None = None
     opens_at: datetime | None = None
     closes_at: datetime | None = None
     created_at: datetime
@@ -109,8 +109,8 @@ class TaskCreateIn(Schema):
     preset: str | None = None
     design: dict[str, Any] | None = None
     settings: dict[str, Any] | None = None
-    experiment_id: str | None = None
-    job_ids: list[str] | None = None
+    study_id: str | None = None
+    run_ids: list[str] | None = None
     opens_at: str | None = None
     closes_at: str | None = None
 
@@ -124,7 +124,7 @@ class TaskUpdateIn(Schema):
     mode: str | None = None
     design: dict[str, Any] | None = None
     settings: dict[str, Any] | None = None
-    experiment_id: str | None = None
+    study_id: str | None = None
     opens_at: str | None = None
     closes_at: str | None = None
 
@@ -161,7 +161,7 @@ class PreviewSessionSchema(Schema):
 
 
 # ---------------------------------------------------------------------------
-# Candidate jobs and the app pool
+# Candidate runs and the app pool
 # ---------------------------------------------------------------------------
 
 
@@ -170,16 +170,17 @@ class CandidateConditionSchema(Schema):
     label: str
 
 
-class CandidateJobSchema(Schema):
+class CandidateRunSchema(Schema):
     id: str
     model_name: str
     model_id: str
     app_name: str
     app_slug: str
-    experiment: ExperimentRefSchema | None = None
+    study: StudyRefSchema | None = None
     condition: CandidateConditionSchema | None = None
     repeat_index: int | None = None
-    mode: str
+    kind: str
+    stack: str | None = None
     created_at: datetime
     functional: FunctionalSummarySchema
     running: bool
@@ -209,7 +210,7 @@ class TaskAppStatsSchema(Schema):
 class TaskAppSchema(Schema):
     id: str
     label: str
-    job_id: str | None = None
+    run_id: str | None = None
     group_key: str
     position: int
     is_active: bool
@@ -227,8 +228,8 @@ class TaskAppSchema(Schema):
 class TaskAppsAddIn(Schema):
     """TS ``TaskAppsAddInput``."""
 
-    job_ids: list[str] | None = None
-    experiment_id: str | None = None
+    run_ids: list[str] | None = None
+    study_id: str | None = None
     current_only: bool = True
 
 

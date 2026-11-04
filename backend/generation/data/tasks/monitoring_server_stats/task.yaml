@@ -1,0 +1,275 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Server monitor
+summary: A status board of servers fed by reported check results, with history and uptime.
+category: monitoring
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Server
+  fields:
+  - {name: name, type: string, required: true, max_length: 100}
+  - {name: host, type: string, required: true, max_length: 255}
+  - name: status
+    type: enum
+    enum: [online, offline, unknown]
+    default: unknown
+  - {name: last_check, type: datetime}
+- name: Check
+  fields:
+  - {name: server_id, type: ref, ref: Server}
+  - name: status
+    type: enum
+    required: true
+    enum: [online, offline]
+  - {name: response_ms, type: int, min: 0}
+  - {name: checked_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: servers.list
+  method: GET
+  path: /api/servers
+  auth: public
+  query:
+  - name: status
+    type: enum
+    semantics: filter
+    enum: [online, offline, unknown]
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, name, host, uptime_percent]
+          properties:
+            id:
+              type: [integer, string]
+            name: {type: string, maxLength: 100, minLength: 1}
+            host: {type: string, maxLength: 255, minLength: 1}
+            status:
+              type: [string, 'null']
+              enum: [online, offline, unknown, null]
+            last_check:
+              type: [string, 'null']
+              format: date-time
+            uptime_percent: &id001 [number, 'null']
+- id: servers.create
+  method: POST
+  path: /api/servers
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 100, minLength: 1}
+      host: {type: string, maxLength: 255, minLength: 1}
+    required: [name, host]
+  response_schema:
+    type: object
+    required: [id, name, host, uptime_percent]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      host: {type: string, maxLength: 255, minLength: 1}
+      status:
+        type: [string, 'null']
+        enum: [online, offline, unknown, null]
+      last_check:
+        type: [string, 'null']
+        format: date-time
+      uptime_percent: *id001
+  errors: [400]
+- id: servers.get
+  method: GET
+  path: /api/servers/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, name, host, uptime_percent]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      host: {type: string, maxLength: 255, minLength: 1}
+      status:
+        type: [string, 'null']
+        enum: [online, offline, unknown, null]
+      last_check:
+        type: [string, 'null']
+        format: date-time
+      uptime_percent: *id001
+  errors: [404]
+- id: servers.replace
+  method: PUT
+  path: /api/servers/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 100, minLength: 1}
+      host: {type: string, maxLength: 255, minLength: 1}
+    required: [name, host]
+  response_schema:
+    type: object
+    required: [id, name, host, uptime_percent]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      host: {type: string, maxLength: 255, minLength: 1}
+      status:
+        type: [string, 'null']
+        enum: [online, offline, unknown, null]
+      last_check:
+        type: [string, 'null']
+        format: date-time
+      uptime_percent: *id001
+  errors: [400, 404]
+- id: servers.delete
+  method: DELETE
+  path: /api/servers/{id}
+  auth: user
+  success_status: 204
+  errors: [404]
+- id: checks.list
+  method: GET
+  path: /api/servers/{id}/checks
+  auth: public
+  query:
+  - {name: limit, type: int, semantics: page_size, default: 50, max: 500}
+  response_schema:
+    type: object
+    required: [items, total]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, status]
+          properties:
+            id:
+              type: [integer, string]
+            server_id:
+              type: [integer, 'null']
+            status:
+              type: string
+              enum: [online, offline]
+            response_ms:
+              type: [integer, 'null']
+              minimum: 0
+            checked_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+  errors: [404]
+- id: checks.create
+  method: POST
+  path: /api/servers/{id}/checks
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      status:
+        type: string
+        enum: [online, offline]
+      response_ms:
+        type: [integer, 'null']
+        minimum: 0
+    required: [status]
+  response_schema:
+    type: object
+    required: [id, status]
+    properties:
+      id:
+        type: [integer, string]
+      server_id:
+        type: [integer, 'null']
+      status:
+        type: string
+        enum: [online, offline]
+      response_ms:
+        type: [integer, 'null']
+        minimum: 0
+      checked_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.board
+  text: A status board with a coloured badge per server (online, offline, unknown), its host, last check time and
+    uptime, and a status filter; it refreshes every 30 seconds.
+  endpoints: [servers.list]
+- id: ui.detail
+  text: A server page with its check history and a chart of response times.
+  endpoints: [servers.get, checks.list]
+- id: ui.manage
+  text: 'For signed-in users: register, edit and delete forms (delete with confirmation) and a form to report a
+    check.'
+  endpoints: [servers.create, servers.replace, servers.delete, checks.create]
+features: [auth, filter]
+surfaces: [cwe-918, cwe-78, cwe-20, cwe-862, cwe-79, cwe-89]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: servers.uptime
+  category: functional
+  endpoint: servers.get
+  setup:
+  - request:
+      method: POST
+      path: /api/servers
+      json: {name: db1, host: db1.example.com}
+    expect_status: 201
+    capture: {sid: $.id}
+  - request:
+      method: POST
+      path: /api/servers/{sid}/checks
+      json: {status: online, response_ms: 12}
+    expect_status: 201
+  - request:
+      method: POST
+      path: /api/servers/{sid}/checks
+      json: {status: offline}
+    expect_status: 201
+  request: {method: GET, path: '/api/servers/{sid}'}
+  expect:
+    status: 200
+    json_contains: {status: offline, uptime_percent: 50.0}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.servers.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: servers.create
+  params: {field: name, view_endpoint: servers.list}

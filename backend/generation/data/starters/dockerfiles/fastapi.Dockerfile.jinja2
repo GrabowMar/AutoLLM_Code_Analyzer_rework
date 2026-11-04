@@ -1,0 +1,8 @@
+{% extends "dockerfiles/_python.Dockerfile.jinja2" %}
+{% block command %}
+{% if level == "bare" %}
+CMD ["python", "backend/main.py"]
+{% else %}
+CMD ["uvicorn", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "{{ run.port }}", "main:app"]
+{% endif %}
+{% endblock %}

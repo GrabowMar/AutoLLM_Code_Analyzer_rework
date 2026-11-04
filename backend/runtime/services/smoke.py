@@ -1,10 +1,12 @@
-"""Functional smoke test: probe a running generated app's declared endpoints.
+"""Preview smoke probe: does a running sample's container answer its task's GET endpoints?
 
-Static analysis can't tell whether a generated app actually works; this can.
-After a container boots, hit its health endpoint and every GET endpoint the
-app-requirement template declares, and record which respond. The result is
-persisted onto the generation job's metrics so model comparisons can weigh
-"does it run" alongside findings, even after the container is removed.
+After a preview container boots, hit its health endpoint and every GET endpoint
+the run's task declares (``TaskSpecContent.endpoints``, read through
+``RunView.task_dict()``), and record which respond. The result is stored on the
+container only (``ContainerInstance.metadata["smoke"]``): it is a preview
+diagnostic, never a measurement. The graded verdict is the run's
+``RunEvaluation`` (Appendix A #7: probes and smoke checks never overwrite
+metrics), so ``GenerationRun.metrics`` is not touched.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import requests
 from backend.runtime.proxy import _upstream_base
 
 if TYPE_CHECKING:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
     from backend.runtime.models import ContainerInstance
 
 logger = logging.getLogger(__name__)
@@ -34,18 +36,18 @@ _PASS_THRESHOLD = 0.8
 _PATH_PARAM_RE = re.compile(r":(\w+)|\{(\w+)\}")
 
 
-def run_smoke(job: GenerationJob | None, container: ContainerInstance) -> dict:
-    """Probe *container*'s health + declared GET endpoints; persist the result."""
+def run_smoke(run: GenerationRun | None, container: ContainerInstance) -> dict:
+    """Probe *container*'s health + the run's declared GET endpoints; store the result on the container."""
     base = _upstream_base(container)
     if base is None:
         result = {"passed": False, "error": "App routing not configured"}
-        _persist(job, container, result)
+        _persist(container, result)
         return result
 
     checks: list[dict] = []
     health_ok = _probe_health(base, checks)
-    if health_ok and job is not None:
-        for endpoint, is_admin in _declared_get_endpoints(job):
+    if health_ok and run is not None:
+        for endpoint, is_admin in _declared_get_endpoints(run):
             checks.append(_probe_endpoint(base, endpoint, is_admin=is_admin))
 
     endpoint_checks = [c for c in checks if c["path"] != HEALTH_PATH]
@@ -59,7 +61,7 @@ def run_smoke(job: GenerationJob | None, container: ContainerInstance) -> dict:
         "pass_rate": round(pass_rate, 3),
         "checks": checks,
     }
-    _persist(job, container, result)
+    _persist(container, result)
     return result
 
 
@@ -77,17 +79,17 @@ def _probe_health(base: str, checks: list[dict]) -> bool:
     return False
 
 
-def _declared_get_endpoints(job: GenerationJob) -> list[tuple[dict, bool]]:
-    app_req = job.app_requirement
-    if app_req is None:
+def _declared_get_endpoints(run: GenerationRun) -> list[tuple[dict, bool]]:
+    """``[(endpoint, is_admin)]`` for the GET endpoints of the run's task (none for slot or reference runs)."""
+    from backend.generation.runs.view import run_view
+
+    task = run_view(run).task_dict()
+    if task is None:
         return []
     out: list[tuple[dict, bool]] = []
-    for endpoint in app_req.api_endpoints or []:
+    for endpoint in (task.get("structured") or {}).get("endpoints") or []:
         if str(endpoint.get("method", "")).upper() == "GET":
-            out.append((endpoint, False))
-    for endpoint in app_req.admin_api_endpoints or []:
-        if str(endpoint.get("method", "")).upper() == "GET":
-            out.append((endpoint, True))
+            out.append((endpoint, endpoint.get("auth") == "admin"))
     return out
 
 
@@ -125,17 +127,6 @@ def _get_status(url: str) -> int | None:
         return None
 
 
-def _persist(job: GenerationJob | None, container: ContainerInstance, result: dict) -> None:
+def _persist(container: ContainerInstance, result: dict) -> None:
     container.metadata = {**(container.metadata or {}), "smoke": result}
     container.save(update_fields=["metadata", "updated_at"])
-    if job is not None:
-        # Keep the job copy lean — reports only need the summary numbers.
-        summary = {k: v for k, v in result.items() if k != "checks"}
-        metrics = {**(job.metrics or {}), "smoke": summary}
-        # The conformance suite is the graded verdict; a later smoke probe
-        # (container start) must never replace it.
-        functional = metrics.get("functional")
-        if not (isinstance(functional, dict) and functional.get("source") == "conformance"):
-            metrics["functional"] = summary
-        job.metrics = metrics
-        job.save(update_fields=["metrics", "updated_at"])

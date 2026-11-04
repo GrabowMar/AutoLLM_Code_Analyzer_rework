@@ -9,10 +9,8 @@ from backend.analysis.models import AnalysisRun
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import FindingFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import ExperimentConditionFactory
-from backend.generation.tests.factories import ExperimentFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.analysis.tests.factories import generation_run
+from backend.generation.testing import factories as gen_factories
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
 
@@ -27,19 +25,30 @@ FILES = {
     ".tmp/pkg/index.js": "module.exports = 1\n",
     "node_modules/x/index.js": "module.exports = 2\n",
 }
+# The starter wrote the frontend: it is in the app tree the tools read, not in the model's LOC.
+ORIGINS = {"frontend/src/App.jsx": "starter"}
+CFG = "c" * 64
 
 
-def _job(user, model, *, experiment=None, condition=None, app=None, repeat=0, files=None, **extra):
-    return GenerationJobFactory(
-        created_by=user,
-        status="completed",
-        mode=extra.pop("mode", "agent"),
+def _job(user, model, *, cell=None, repeat=0, files=None, origins=None, task_version=None, **extra):
+    """A tested generation run of *model*; with *cell*, the cell's planned run (attempt 1)."""
+    if cell is not None:
+        extra.update(
+            study=cell.study,
+            condition=cell.condition,
+            cell=cell,
+            cell_attempt=extra.pop("cell_attempt", 1),
+            stage=cell.stage,
+            task_version=cell.unit.task_version,
+        )
+    elif task_version is not None:
+        extra["task_version"] = task_version
+    return generation_run(
+        user,
+        files=files or {"app.py": "x = 1\n"},
+        origins=origins,
         model=model,
-        app_requirement=app or AppRequirementTemplateFactory(),
-        experiment=experiment,
-        condition=condition,
         repeat_index=repeat,
-        result_data={"files": files or {"app.py": "x = 1\n"}},
         **extra,
     )
 
@@ -54,36 +63,43 @@ def _result(run, tool, status="completed", skip_reason=None, findings=()):
 
 @pytest.fixture
 def corpus():
-    """An experiment of three apps (two of model A, one of model B), plus one more app of A outside it.
+    """A study of three apps (two of model A, one of model B), plus one more app of A outside it.
 
     J1 (A): bandit B101 in a test file and B105 in app.py; ruff F401.
     J2 (A): bandit B105; ruff failed but kept an F401 finding (not a measurement); an older run had B101.
-    J3 (B): bandit not applicable (a measured zero); ruff F401.
-    J4 (A, no experiment): bandit B105.
+    J3 (B): bandit not applicable (not measured); ruff F401.
+    J4 (A, no study): bandit B105.
+    J5 (A): a later attempt of J1's cell (not the cell's current run): bandit B105, never counted.
     Another user's app has B105 too.
     """
     user = UserFactory()
     model_a = LLMModelFactory(model_id="vendor/a", model_name="Model A")
     model_b = LLMModelFactory(model_id="vendor/b", model_name="Model B")
-    experiment = ExperimentFactory(created_by=user, name="Exp one", repeats=2)
-    cond_a = ExperimentConditionFactory(experiment=experiment, model=model_a, label="A arm")
-    cond_b = ExperimentConditionFactory(experiment=experiment, model=model_b, label="B arm")
-    app = AppRequirementTemplateFactory(name="Todo", slug="todo")
+    study = gen_factories.StudyFactory(created_by=user, name="Study one")
+    plan = gen_factories.StudyPlanFactory(study=study)
+    cond_a = gen_factories.StudyConditionFactory(plan=plan, model=model_a, label="A arm")
+    cond_b = gen_factories.StudyConditionFactory(plan=plan, model=model_b, label="B arm")
+    unit = gen_factories.StudyUnitFactory(plan=plan)
+
+    def cell(condition, repeat):
+        return gen_factories.StudyCellFactory(condition=condition, unit=unit, repeat_index=repeat)
+
+    harness = gen_factories.HarnessPresetFactory()
+    cell_a1 = cell(cond_a, 1)
     j1 = _job(
         user,
         model_a,
-        experiment=experiment,
-        condition=cond_a,
-        app=app,
+        cell=cell_a1,
         repeat=1,
         files=FILES,
-        bundle_key="agent:opencode@1.0",
-        agent_config={"harness": "opencode"},
-        resolved_bundle={"config_fingerprint": "cfg123"},
+        origins=ORIGINS,
+        harness_preset=harness,
+        config_fingerprint=CFG,
     )
-    j2 = _job(user, model_a, experiment=experiment, condition=cond_a, app=app, repeat=0)
-    j3 = _job(user, model_b, experiment=experiment, condition=cond_b, app=app, repeat=0)
-    j4 = _job(user, model_a)
+    j2 = _job(user, model_a, cell=cell(cond_a, 0), repeat=0)
+    j3 = _job(user, model_b, cell=cell(cond_b, 0), repeat=0)
+    j4 = _job(user, model_a, task_version=unit.task_version)
+    j5 = _job(user, model_a, cell=cell_a1, repeat=1, cell_attempt=2)
 
     run1 = AnalysisRunFactory(created_by=user, generation_job=j1, source_code=None, status="completed")
     _result(run1, "bandit", findings=[("B101", "tests/test_app.py"), ("B105", "app.py")])
@@ -106,6 +122,9 @@ def corpus():
     run4 = AnalysisRunFactory(created_by=user, generation_job=j4, source_code=None, status="completed")
     _result(run4, "bandit", findings=[("B105", "app.py")])
 
+    run5 = AnalysisRunFactory(created_by=user, generation_job=j5, source_code=None, status="completed")
+    _result(run5, "bandit", findings=[("B105", "app.py")])
+
     stranger = UserFactory()
     other = AnalysisRunFactory(
         created_by=stranger,
@@ -116,7 +135,16 @@ def corpus():
     _result(other, "bandit", findings=[("B105", "app.py")])
     client = Client()
     client.force_login(user)
-    return {"user": user, "client": client, "run1": run1, "experiment": experiment, "j1": j1, "run4": run4}
+    return {
+        "user": user,
+        "client": client,
+        "run1": run1,
+        "run5": run5,
+        "study": study,
+        "j1": j1,
+        "run4": run4,
+        "harness": harness,
+    }
 
 
 def _context(client, run, query=""):
@@ -130,30 +158,27 @@ def _rules(data):
 def test_setup_line_names_the_design_cell_and_method(corpus):
     data = _context(corpus["client"], corpus["run1"]).json()
     job = data["job"]
-    assert job["id"] == str(corpus["j1"].id)
-    assert (job["experiment_id"], job["experiment_name"]) == (str(corpus["experiment"].id), "Exp one")
+    j1 = corpus["j1"]
+    assert job["id"] == str(j1.id)
+    assert (job["study_id"], job["study_name"]) == (str(corpus["study"].id), "Study one")
     assert job["condition_label"] == "A arm"
-    # repeat_index is 0-based; N is the repeats planned at launch (the experiment's, without a launch batch).
+    # repeat_index is 0-based; N is the study's planned repeats.
     assert (job["repeat_index"], job["planned_repeats"]) == (1, 2)
-    assert (job["model_id"], job["model_name"], job["app_name"], job["app_slug"]) == (
-        "vendor/a",
-        "Model A",
-        "Todo",
-        "todo",
-    )
-    assert job["model_pk"] == corpus["j1"].model_id
-    assert (job["harness"], job["bundle_key"], job["config_fingerprint"]) == (
-        "opencode",
-        "agent:opencode@1.0",
-        "cfg123",
-    )
+    assert (job["model_id"], job["model_name"]) == ("vendor/a", "Model A")
+    assert (job["task_slug"], job["task_title"]) == (j1.task_version.slug, j1.task_version.content["title"])
+    assert job["model_pk"] == j1.model_id
+    assert (job["kind"], job["outcome"], job["usable"], job["stage"]) == ("app_agentic", "tested", True, "main")
+    assert job["harness"] == corpus["harness"].content["harness"]
+    assert job["config_fingerprint"] == CFG
 
 
 def test_source_loc_uses_the_study_definition_and_lists_excluded_paths(corpus):
     loc = _context(corpus["client"], corpus["run1"]).json()["source_loc"]
-    # app.py: 2 code lines (blank and comment left out); App.jsx: 3; the test file apart.
-    assert loc["by_layer"] == {"backend": 2, "frontend": 3, "tests": 2}
-    assert (loc["total"], loc["files"], loc["test_files"]) == (5, 2, 1)
+    # Model scope: app.py has 2 code lines (blank and comment left out), the test file apart; the starter's
+    # App.jsx (3 lines) is in the analyzed app tree only.
+    assert loc["scope"] == "model"
+    assert loc["by_layer"] == {"backend": 2, "frontend": 0, "tests": 2}
+    assert (loc["total"], loc["files"], loc["test_files"], loc["app_total"]) == (2, 1, 1, 5)
     # package-lock.json is stored but not source; .tmp/ and node_modules/ are never analyzed.
     assert loc["other_files"] == 1
     assert loc["excluded_paths"]["count"] == 3
@@ -179,17 +204,18 @@ def test_test_split_counts_findings_in_test_files_apart(corpus):
 
 def test_prevalence_denominators_are_the_apps_each_tool_measured(corpus):
     data = _context(corpus["client"], corpus["run1"]).json()
-    assert (data["scope"], data["scopes_available"]) == ("experiment", ["experiment", "mine"])
+    assert (data["scope"], data["scopes_available"]) == ("study", ["study", "mine"])
+    # The study's current runs: J1, J2, J3 (J5 is a later attempt of J1's cell).
     assert (data["n"], data["model_n"], data["self_in_corpus"]) == (3, 2, True)
     rules = _rules(data)
-    # bandit measured all three apps (J3: not applicable, a measured zero); B105 in J1 and J2.
+    # bandit measured two apps (J3: not applicable, so not measured, never a zero); B105 in J1 and J2.
     b105 = rules[("bandit", "B105")]
-    assert (b105["apps_with_rule"], b105["apps_measured"]) == (2, 3)
+    assert (b105["apps_with_rule"], b105["apps_measured"]) == (2, 2)
     assert (b105["model_apps_with_rule"], b105["model_apps_measured"]) == (2, 2)
     assert b105["count_in_run"] == 1
     # J2's older run had B101, but its latest bandit result does not.
     b101 = rules[("bandit", "B101")]
-    assert (b101["apps_with_rule"], b101["apps_measured"]) == (1, 3)
+    assert (b101["apps_with_rule"], b101["apps_measured"]) == (1, 2)
     # ruff failed on J2: not in the denominator, and its leftover finding is not counted either.
     f401 = rules[("ruff", "F401")]
     assert (f401["apps_with_rule"], f401["apps_measured"]) == (2, 2)
@@ -202,17 +228,24 @@ def test_mine_scope_counts_all_of_the_callers_apps_only(corpus):
     data = _context(corpus["client"], corpus["run1"], "?scope=mine").json()
     assert (data["scope"], data["n"], data["model_n"]) == ("mine", 4, 3)
     b105 = _rules(data)[("bandit", "B105")]
-    # J1, J2, J4 of the caller; the other user's app is never counted.
-    assert (b105["apps_with_rule"], b105["apps_measured"]) == (3, 4)
+    # J1, J2, J4 of the caller (J3 not measured, J5 not its cell's current run); never another user's app.
+    assert (b105["apps_with_rule"], b105["apps_measured"]) == (3, 3)
     assert (b105["model_apps_with_rule"], b105["model_apps_measured"]) == (3, 3)
 
 
-def test_experiment_scope_falls_back_for_an_app_outside_experiments(corpus):
-    data = _context(corpus["client"], corpus["run4"], "?scope=experiment").json()
+def test_study_scope_falls_back_for_an_app_outside_studies(corpus):
+    data = _context(corpus["client"], corpus["run4"], "?scope=study").json()
     assert (data["scope"], data["scopes_available"]) == ("mine", ["mine"])
     assert data["notes"]
-    assert data["job"]["experiment_id"] is None
+    assert data["job"]["study_id"] is None
     assert data["job"]["planned_repeats"] is None
+
+
+def test_a_later_attempt_of_a_cell_is_not_in_the_study_corpus(corpus):
+    """The current run of a cell is its first usable attempt, never a later one (statistics invariant)."""
+    data = _context(corpus["client"], corpus["run5"]).json()
+    assert data["self_in_corpus"] is False
+    assert any("not its cell's current run" in note for note in data["notes"])
 
 
 def test_unknown_scope_and_other_users_runs(corpus):
@@ -234,8 +267,9 @@ def test_pasted_code_has_no_setup_and_counts_rules_over_the_callers_apps(corpus)
     assert data["job"] is None
     assert (data["scope"], data["model_n"]) == ("mine", None)
     assert data["source_loc"]["by_layer"] == {"backend": 2, "frontend": 0, "tests": 1}
+    assert data["source_loc"]["scope"] == "code"
     b105 = _rules(data)[("bandit", "B105")]
-    assert (b105["apps_with_rule"], b105["apps_measured"], b105["model_apps_with_rule"]) == (3, 4, None)
+    assert (b105["apps_with_rule"], b105["apps_measured"], b105["model_apps_with_rule"]) == (3, 3, None)
     assert data["self_in_corpus"] is False
 
 
@@ -395,13 +429,13 @@ def test_a_failed_tool_result_of_this_run_is_flagged_as_not_counted(corpus):
     assert any("ruff result is not the one counted" in n for n in notes)
 
 
-def test_experiment_prevalence_is_interim_while_the_experiment_runs(corpus):
-    experiment = corpus["experiment"]
-    experiment.status = "running"
-    experiment.save(update_fields=["status"])
+def test_study_prevalence_is_interim_while_the_study_runs(corpus):
+    study = corpus["study"]
+    study.status = "running"
+    study.save(update_fields=["status"])
     assert _context(corpus["client"], corpus["run1"]).json()["interim"] is True
-    # The caller's whole corpus is not an experiment's sample: no interim flag.
+    # The caller's whole corpus is not a study's sample: no interim flag.
     assert _context(corpus["client"], corpus["run1"], "?scope=mine").json()["interim"] is False
-    experiment.status = "completed"
-    experiment.save(update_fields=["status"])
+    study.status = "completed"
+    study.save(update_fields=["status"])
     assert _context(corpus["client"], corpus["run1"]).json()["interim"] is False

@@ -2,7 +2,7 @@
 
 :func:`compute_results` returns TS ``TaskResults`` (``types/human-eval.ts``). It reads
 only frozen data: ``EvalTaskApp.snapshot`` / ``finding_frame``, ``Assignment.context``
-and the stored answers, never live job, finding or conformance rows. The
+and the stored answers, never live run, finding or conformance rows. The
 normalized ``Finding.severity`` is never read; automated findings are grouped by
 the tool's own label (``tool_severity``, "unrated" when blank).
 
@@ -40,7 +40,7 @@ Pairwise
 
 Contrasts (``group_by == "condition"``)
     Every block metric of the analysis-plan vocabulary, each non-baseline condition vs the
-    baseline (``pairing.baseline_condition_id`` or the experiment's): paired on common
+    baseline (``pairing.baseline_condition_id`` or the study's): paired on common
     (app_slug, repeat_index) cells when at least three exist (bootstrap CI of the mean
     delta, Wilcoxon signed-rank p), else unpaired (bootstrap CI of the difference, no p).
     Holm across all contrasts. Pairwise metrics use each app's preference share
@@ -77,7 +77,6 @@ from typing import Any
 from django.db.models import Count
 from django.utils import timezone
 
-from backend.generation.services.experiment_results import wilcoxon_p
 from backend.human_eval.models import Assignment
 from backend.human_eval.models import EvalItem
 from backend.human_eval.models import EvalTask
@@ -88,7 +87,9 @@ from backend.human_eval.models import Observation
 from backend.human_eval.models import Participant
 from backend.human_eval.models import Response
 from backend.human_eval.services import quality as quality_service
+from backend.human_eval.services import snapshot as snapshot_service
 from backend.human_eval.services import stats
+from backend.human_eval.services import studies
 from backend.human_eval.services.design import block_by_id
 from backend.human_eval.services.design import merged_settings
 from backend.human_eval.services.design import scale_values
@@ -121,7 +122,7 @@ REQUIREMENT_ORDINAL = {"met": 2, "partial": 1, "not_met": 0, "blocked": 0}
 REQUIREMENT_VERDICTS = ("met", "partial", "not_met", "blocked", "cannot_test")
 ENDPOINT_SOURCES = ("api", "admin_api")
 ENDPOINT_CHECK_CATEGORY = {"api": "api", "admin_api": "admin"}
-_SOURCE_PREFIXES = {"b": "backend", "f": "frontend", "a": "admin", "ep": "api", "aep": "admin_api", "c": "custom"}
+_SOURCE_PREFIXES = {"f": "frontend", "ep": "api", "aep": "admin_api", "c": "custom"}
 CHECKLIST_OUTCOMES = ("vulnerable", "not_vulnerable", "not_tested")
 SCENARIO_OUTCOMES = ("success", "partial", "failure", "not_attempted")
 FINDING_VOTES = ("tp", "fp", "unsure")
@@ -503,7 +504,7 @@ def compute_results(task: EvalTask, *, group_by: str = "condition", include_excl
                 "model_name": apps[app_id].snapshot.get("model_name") or "",
                 "condition_label": apps[app_id].snapshot.get("condition_label") or "",
                 "app_slug": apps[app_id].snapshot.get("app_slug") or "",
-                "job_id": str(apps[app_id].obj.job_id) if apps[app_id].obj.job_id else None,
+                "run_id": str(apps[app_id].obj.job_id) if apps[app_id].obj.job_id else None,
                 "n_submitted": len(records_by_app.get(app_id, [])),
                 "n_unavailable": unavailable[app_id],
             }
@@ -769,7 +770,7 @@ def _endpoint_pass_rate(snapshot: dict[str, Any], categories: Collection[str]) -
 
 def _conformance(snapshot: dict[str, Any]) -> dict[str, Any]:
     functional = _dict(snapshot.get("functional"))
-    return functional if functional.get("source") == "conformance" else {}
+    return functional if functional.get("source") == snapshot_service.EVAL_SOURCE else {}
 
 
 def _conformance_version(snapshot: dict[str, Any]) -> tuple[str, str] | None:
@@ -778,7 +779,7 @@ def _conformance_version(snapshot: dict[str, Any]) -> tuple[str, str] | None:
         return None
     return (
         str(snapshot.get("evaluator_version") or functional.get("evaluator_version") or ""),
-        str(snapshot.get("tester_sha256") or functional.get("tester_sha256") or ""),
+        str(snapshot.get("tester_version") or functional.get("tester_version") or ""),
     )
 
 
@@ -1887,9 +1888,8 @@ _BLOCK_ANALYZERS: dict[str, Callable[[_Context, dict[str, Any]], dict[str, Any]]
 
 def _baseline_key(ctx: _Context) -> str | None:
     baseline = _dict(ctx.settings.get("pairing")).get("baseline_condition_id")
-    if baseline is None and ctx.task.experiment_id is not None:
-        experiment = ctx.task.experiment
-        baseline = experiment.baseline_condition_id if experiment is not None else None
+    if baseline is None:
+        baseline = studies.baseline_condition_id(ctx.task.study_id)
     return None if baseline is None else str(baseline)
 
 
@@ -1925,7 +1925,7 @@ def _contrasts(ctx: _Context) -> list[dict[str, Any]]:
     groups = {group.key: group for group in ctx.groups}
     if baseline is None or baseline not in groups:
         message = (
-            "No baseline condition is set (pairing.baseline_condition_id or the experiment's baseline): "
+            "No baseline condition is set (pairing.baseline_condition_id or the study's baseline): "
             "between-condition contrasts are not computed."
             if baseline is None
             else "The baseline condition has no apps in this task: between-condition contrasts are not computed."
@@ -1951,7 +1951,7 @@ def _contrasts(ctx: _Context) -> list[dict[str, Any]]:
                 deltas = _paired_deltas(group_cells, base_cells, common)
                 diff = stats.mean(deltas)
                 ci = stats.cluster_bootstrap_mean_ci(deltas, seed)
-                p_value = wilcoxon_p(deltas)
+                p_value = stats.wilcoxon_p(deltas)
                 paired = True
             else:
                 group_values = [values[app_id] for app_id in group.apps if app_id in values]
@@ -2329,7 +2329,7 @@ def _review_item_warnings(ctx: _Context) -> None:
     """``review_items_differ``: raters of one app saw different requirement / finding lists.
 
     Each assignment's list is built when it is first opened; content deleted or changed after the
-    task opened (a deleted analysis run or job) gives later raters a different or shorter list,
+    task opened (a deleted analysis run or generation run) gives later raters a different or shorter list,
     so agreement and per-app values mix item sets. Finding lists are also checked against the
     app's frozen sample (``finding_sample``): fewer shown findings than sampled means the
     sampling frame's weights describe findings no rater could review.

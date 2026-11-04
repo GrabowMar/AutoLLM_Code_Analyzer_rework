@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
 	 * Results tab: everything this platform measured for the model (the caller's
-	 * jobs) — outcomes with Wilson 95% intervals, the rankings scores and
-	 * positions, resource use, code findings and per-template results.
+	 * runs) — outcomes with Wilson 95% intervals, the rankings scores and
+	 * positions, resource use, code findings and per-task results.
 	 * Findings counts by level are the normalized (heuristic) levels, labelled
 	 * so, with findings of unrated tools apart; a rule shows the level its tool
 	 * printed.
@@ -44,7 +44,7 @@
 	const kpis = $derived.by(() => {
 		if (!gen || !res) return [];
 		return [
-			{ label: 'Apps', value: String(gen.jobs_total), sub: Object.entries(gen.by_mode).map(([m, n]) => `${n} ${m}`).join(' · ') },
+			{ label: 'Apps', value: String(gen.runs_total), sub: Object.entries(gen.by_kind).map(([m, n]) => `${n} ${m}`).join(' · ') },
 			{ label: 'Build success', value: fmtRate(gen.success.rate), sub: gen.success.n ? `${fmtCI(gen.success.ci_low, gen.success.ci_high)} · ${gen.success.successes}/${gen.success.n}` : 'nothing finished' },
 			{
 				label: 'Conformance',
@@ -81,8 +81,6 @@
 			{ label: 'Prompt cache hits', value: fmtRate(res.cache_hit_ratio) },
 			{ label: 'LLM calls / app', value: res.mean_llm_calls != null ? res.mean_llm_calls.toFixed(1) : '—' },
 			{ label: 'Output speed', value: res.median_output_tps != null ? `${res.median_output_tps.toFixed(0)} tok/s` : '—', title: 'Median completion tokens per second of wall time (includes tool and build time)' },
-			{ label: 'Repair round used', value: fmtRate(gen.repair_rate) },
-			{ label: 'Continuations', value: String(gen.continuations_used) },
 		];
 	});
 
@@ -132,12 +130,12 @@
 	<ErrorAlert message={error} onretry={onRetry} />
 {:else if !insights || !gen || !res}
 	<LoadingState label="loading results" />
-{:else if gen.jobs_total === 0}
+{:else if gen.runs_total === 0}
 	<EmptyState icon={FlaskConical} title="No measurements yet" description="Generate apps with this model — or add it to an experiment — to see build success, conformance, code findings and its ranking here.">
 		{#snippet action()}
 			<div class="flex flex-wrap justify-center gap-2">
 				<Button size="sm" variant="outline" href="/experiments/new">New experiment</Button>
-				<Button size="sm" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}"><Sparkles class="size-3.5" />Generate an app</Button>
+				<Button size="sm" href="/generate?model={encodeURIComponent(slug)}"><Sparkles class="size-3.5" />Generate an app</Button>
 			</div>
 		{/snippet}
 	</EmptyState>
@@ -153,7 +151,7 @@
 			{/each}
 		</div>
 		<p class="text-[11px] text-muted-foreground">
-			Rates show Wilson 95% intervals. Your jobs only{gen.first_job_at ? `, ${gen.first_job_at.slice(0, 10)} – ${gen.last_job_at?.slice(0, 10)}` : ''}.
+			Rates show Wilson 95% intervals. Your runs only{gen.first_run_at ? `, ${gen.first_run_at.slice(0, 10)} – ${gen.last_run_at?.slice(0, 10)}` : ''}.
 		</p>
 
 		<div class="grid gap-4 lg:grid-cols-2">
@@ -221,7 +219,7 @@
 						{/each}
 					</dl>
 					<div class="grid gap-4 sm:grid-cols-3">
-						{@render breakdown('Harness', gen.engines, 'apps')}
+						{@render breakdown('Harness', gen.harnesses, 'apps')}
 						{@render breakdown('Served by', gen.providers, 'LLM calls')}
 						{@render breakdown('Termination', gen.terminations, 'apps')}
 					</div>
@@ -233,11 +231,11 @@
 			<Card.Header class="border-b border-border py-3">
 				<Card.Title class="text-sm font-medium">Code findings</Card.Title>
 				<Card.Description class="text-xs">
-					Latest analysis run of each app · {analysis?.analyzed_jobs ?? 0} of {gen.jobs_total} apps analyzed
+					Latest analysis run of each app · {analysis?.analyzed_runs ?? 0} of {gen.runs_total} apps analyzed
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="p-0">
-				{#if !analysis || analysis.analyzed_jobs === 0}
+				{#if !analysis || analysis.analyzed_runs === 0}
 					<div class="p-4">
 						<EmptyState compact icon={ScanSearch} title="No analyzed apps" description="Run the analyzers on this model's apps to compare findings density with other models.">
 							{#snippet action()}<Button size="sm" variant="outline" href="/analysis/create">Analyze apps</Button>{/snippet}
@@ -328,21 +326,21 @@
 		<div class="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
 			<Card.Root class="gap-0 overflow-clip py-0">
 				<Card.Header class="border-b border-border py-3">
-					<Card.Title class="text-sm font-medium">By app spec</Card.Title>
+					<Card.Title class="text-sm font-medium">By task</Card.Title>
 					<Card.Description class="text-xs">Conformance = the hidden API suite passed</Card.Description>
 				</Card.Header>
 				<Card.Content class="p-0">
-					{#if insights.templates.length === 0}
-						<p class="p-4 text-sm text-muted-foreground">No app-spec runs (custom prompts only).</p>
+					{#if insights.tasks.length === 0}
+						<p class="p-4 text-sm text-muted-foreground">No task runs yet.</p>
 					{:else}
 						<div class="overflow-x-auto">
 							<table>
-								<thead><tr><th>App spec</th><th class="num">Apps</th><th class="num">Completed</th><th class="num">Conformance</th></tr></thead>
+								<thead><tr><th>Task</th><th class="num">Apps</th><th class="num">Completed</th><th class="num">Conformance</th></tr></thead>
 								<tbody>
-									{#each insights.templates as t (t.slug)}
+									{#each insights.tasks as t (t.slug)}
 										<tr>
 											<td>{t.name}<span class="cell-sub block font-mono text-[11px] text-muted-foreground">{t.slug}</span></td>
-											<td class="num">{t.jobs}</td>
+											<td class="num">{t.runs}</td>
 											<td class="num">{t.completed}</td>
 											<td class="num">
 												{#if t.functional.n}
@@ -362,19 +360,19 @@
 			<Card.Root class="gap-0 overflow-clip py-0">
 				<Card.Header class="border-b border-border py-3">
 					<Card.Title class="text-sm font-medium">Experiments</Card.Title>
-					<Card.Description class="text-xs">Designed experiments this model ran in</Card.Description>
+					<Card.Description class="text-xs">Experiments this model ran in</Card.Description>
 				</Card.Header>
 				<Card.Content class="p-0">
-					{#if insights.experiments.length === 0}
+					{#if insights.studies.length === 0}
 						<p class="p-4 text-sm text-muted-foreground">Not part of an experiment yet.</p>
 					{:else}
 						<ul class="divide-y divide-border">
-							{#each insights.experiments as e (e.id)}
+							{#each insights.studies as e (e.id)}
 								<li>
 									<a href="/experiments/{e.id}" class="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-muted/40">
 										<span class="min-w-0 truncate">{e.name}</span>
 										<span class="flex shrink-0 items-center gap-2">
-											<span class="font-mono text-xs tabular-nums text-muted-foreground">{e.jobs} apps</span>
+											<span class="font-mono text-xs tabular-nums text-muted-foreground">{e.runs} apps</span>
 											<StatusBadge status={e.status} />
 										</span>
 									</a>

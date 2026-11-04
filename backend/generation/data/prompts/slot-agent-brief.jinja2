@@ -1,0 +1,15 @@
+The application in this workspace is missing {{ slot.label }} in `{{ slot.path }}`; its place is marked with `{{ slot.hole_marker }}`.{% if slot.endpoint %} The missing code handles `{{ slot.endpoint.method }} {{ slot.endpoint.path }}`.{% endif %} Implement it so that the application works as before.
+
+Change only these files: {{ slot.allowlist | join(", ") }}.
+{% if slot.spec_excerpt %}
+
+What the application does:
+
+{{ slot.spec_excerpt }}
+{% endif %}
+
+The application uses this stack: {{ stack.fragment_text }}
+{% if guidance.fragment_text %}
+
+{{ guidance.fragment_text }}
+{% endif %}

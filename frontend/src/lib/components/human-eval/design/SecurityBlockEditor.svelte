@@ -13,7 +13,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import type { HumanEvalEnvironment, SecurityBlock } from '$lib/api/types/human-eval';
 	import { messageAt, messagesAt, messagesUnder, under, type FieldError } from './errors';
 	import { FINDING_CATEGORIES, clonePlain, newChecklistItem } from './factories';

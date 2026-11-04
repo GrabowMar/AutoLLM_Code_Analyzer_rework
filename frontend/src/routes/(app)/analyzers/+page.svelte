@@ -163,7 +163,7 @@
 	// before and after the update are not directly comparable (each result
 	// records the tool version it ran with).
 	const comparabilityNote =
-		'A new version can find more, fewer or different issues. Runs analyzed before and after the update are not directly comparable, so finish a study on one version first. Each result records the tool version it ran with.';
+		'A new version can find more, fewer or different issues. Runs analyzed before and after the update are not directly comparable, so finish an experiment on one version first. Each result records the tool version it ran with.';
 
 	function confirmUpdate(it: InstalledTool) {
 		if (!it.update_available) {

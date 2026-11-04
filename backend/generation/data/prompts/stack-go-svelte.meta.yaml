@@ -1,0 +1,5 @@
+name: Stack fragment, Go + Svelte (SQLite)
+role: fragment
+modes: [app, slot]
+variables: []
+tags: [stack]

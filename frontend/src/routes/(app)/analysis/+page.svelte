@@ -2,8 +2,8 @@
 	/**
 	 * Analysis runs: every run of the user's analyzer workspace with live
 	 * progress (SSE for the active runs on screen, polling fallback), status
-	 * filter with counts, server-side search, sorting, batch / app / tool scopes
-	 * from the URL (`?batch=`, `?job=`, `?tool=`), selection with bulk cancel and
+	 * filter with counts, server-side search, sorting, launch / app / tool scopes
+	 * from the URL (`?launch=`, `?job=`, `?tool=`), selection with bulk cancel and
 	 * delete, and per-row re-run.
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
@@ -67,7 +67,7 @@
 	let status = $state(q.get('status') ?? '');
 	let search = $state(q.get('q') ?? '');
 	let searchText = $state(q.get('q') ?? '');
-	let batch = $state(q.get('batch') ?? '');
+	let launch = $state(q.get('launch') ?? '');
 	let job = $state(q.get('job') ?? '');
 	let toolFilter = $state(q.get('tool') ?? '');
 	let sortBy = $state<SortField>((q.get('sort')?.split(':')[0] as SortField) ?? 'created');
@@ -81,7 +81,7 @@
 		const set = (k: string, v: string) => (v ? p.set(k, v) : p.delete(k));
 		set('status', status);
 		set('q', search);
-		set('batch', batch);
+		set('launch', launch);
 		set('job', job);
 		set('tool', toolFilter);
 		set('sort', sortBy === 'created' && sortDir === 'desc' ? '' : `${sortBy}:${sortDir}`);
@@ -110,7 +110,7 @@
 			per_page: PER_PAGE,
 			status: status || undefined,
 			search: search || undefined,
-			batch_id: batch || undefined,
+			launch_id: launch || undefined,
 			generation_job_id: job || undefined,
 			tool_slug: toolFilter || undefined,
 			sort: SORTS[`${sortBy}:${sortDir}`] ?? 'created_desc',
@@ -226,7 +226,7 @@
 
 	const scopeTags = $derived(
 		[
-			batch && { key: 'batch', label: `Batch ${batch.slice(0, 8)}`, clear: () => (batch = '') },
+			launch && { key: 'launch', label: `Launch ${launch.slice(0, 8)}`, clear: () => (launch = '') },
 			job && { key: 'job', label: `App ${job.slice(0, 8)}`, clear: () => (job = '') },
 			toolFilter && { key: 'tool', label: `Tool: ${tools.get(toolFilter)?.name ?? toolFilter}`, clear: () => (toolFilter = '') },
 		].filter(Boolean) as { key: string; label: string; clear: () => void }[]
@@ -237,7 +237,7 @@
 		status = '';
 		search = '';
 		searchText = '';
-		batch = '';
+		launch = '';
 		job = '';
 		toolFilter = '';
 		pageNo = 1;
@@ -446,7 +446,7 @@
 										{#if run.name !== run.target.label}
 											<span class="cell-sub block truncate text-xs text-muted-foreground" title={run.target.label}>{t.title}{t.sub ? ` · ${t.sub}` : ''}</span>
 										{:else if t.sub}
-											<span class="cell-sub block truncate text-xs text-muted-foreground">{run.target.stack_slug}</span>
+											<span class="cell-sub block truncate text-xs text-muted-foreground">{run.target.stack_ref}</span>
 										{/if}
 									</td>
 									<td><RunStatusCell {run} {toolName} /></td>
@@ -510,7 +510,7 @@
 <ConfirmDialog
 	bind:open={confirmOpen}
 	title="Delete {selected.size - selectedActive} analysis run{selected.size - selectedActive === 1 ? '' : 's'}?"
-	description="Their tool results and findings are removed permanently; study tables and reports that counted them will change. Active runs in the selection are skipped."
+	description="Their tool results and findings are removed permanently; experiment tables and reports that counted them will change. Active runs in the selection are skipped."
 	confirmLabel="Delete"
 	destructive
 	busy={bulkBusy}

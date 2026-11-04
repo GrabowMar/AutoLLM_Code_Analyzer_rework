@@ -1,0 +1,45 @@
+title: Todo list
+summary: Users register, log in and keep a private list of todos.
+category: productivity
+entities:
+  - name: User
+    fields:
+      - {name: username, type: string, required: true, unique: true, max_length: 50}
+      - {name: password, type: string, required: true, secret: true}
+  - name: Todo
+    owned_by_user: true
+    fields:
+      - {name: title, type: string, required: true, max_length: 200}
+      - {name: done, type: bool, default: false}
+endpoints:
+  - {id: auth.register, method: POST, path: /api/auth/register, auth: public, success_status: 201, errors: [400, 409]}
+  - {id: auth.login, method: POST, path: /api/auth/login, auth: public, errors: [401]}
+  - id: todos.list
+    method: GET
+    path: /api/todos
+    auth: user
+    query:
+      - {name: q, type: string, semantics: search}
+  - {id: todos.create, method: POST, path: /api/todos, auth: user, success_status: 201, errors: [400]}
+  - {id: todos.update, method: PATCH, path: "/api/todos/{id}", auth: owner, owner_entity: Todo, errors: [400, 403, 404]}
+  - {id: todos.delete, method: DELETE, path: "/api/todos/{id}", auth: owner, owner_entity: Todo, success_status: 204, errors: [403, 404]}
+ui:
+  - {id: ui.login, text: A login and registration form., endpoints: [auth.register, auth.login]}
+  - {id: ui.list, text: The user's todos with a search box., endpoints: [todos.list]}
+  - {id: ui.edit, text: Add todos and mark them done., endpoints: [todos.create, todos.update]}
+features: [auth, ownership, search]
+surfaces: [cwe-89, cwe-639]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+  - id: todos.search.matches
+    category: functional
+    endpoint: todos.list
+    setup:
+      - request: {method: POST, path: /api/todos, json: {title: buy milk}}
+        expect_status: 201
+    request: {method: GET, path: /api/todos, query: {q: milk}}
+    expect: {status: 200, json_contains: {items: [{title: buy milk}]}}
+    stated_in: [standard, exhaustive]
+probes:
+  - {id: probe.todos.sqli, cwe: cwe-89, kind: sqli_boolean, endpoint: todos.list, params: {param: q}}
+  - {id: probe.todos.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: todos.update}

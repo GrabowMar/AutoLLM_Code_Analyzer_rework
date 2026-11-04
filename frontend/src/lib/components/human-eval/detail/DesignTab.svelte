@@ -32,7 +32,7 @@
 	import { Segmented } from '$lib/components/ui/segmented';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { getExperiment } from '$lib/api/experiments';
+	import { getStudyResults } from '$lib/api/v3/studies';
 	import {
 		humanEvalErrorBody,
 		updateTask,
@@ -217,20 +217,26 @@
 	});
 
 	// ── baseline options (vs_baseline pairing) ──────────────────────
+	// The linked study's StudyConditions (the results leaderboard lists every condition of the
+	// active plan with its id and the pre-registered `is_baseline` flag). Without them the
+	// pairing falls back to the study's baseline condition on the server.
 	let baselineOptions = $state<{ id: number; label: string }[]>([]);
 	$effect(() => {
-		const experimentId = task.experiment?.id;
-		if (!experimentId) {
+		const studyId = task.study?.id;
+		if (!studyId) {
 			baselineOptions = [];
 			return;
 		}
 		untrack(() => {
-			getExperiment(experimentId)
-				.then((exp) => {
-					baselineOptions = exp.conditions.map((c) => ({
-						id: c.id,
-						label: c.label || c.display_label || `Condition #${c.id}`,
-					}));
+			getStudyResults(studyId)
+				.then((res) => {
+					if (task.study?.id !== studyId) return;
+					baselineOptions = [...res.leaderboard]
+						.sort((x, y) => x.index - y.index)
+						.map((c) => ({
+							id: c.condition_id,
+							label: `${c.label || `Condition #${c.condition_id}`}${c.is_baseline ? ' (pre-registered baseline)' : ''}`,
+						}));
 				})
 				.catch(() => (baselineOptions = []));
 		});

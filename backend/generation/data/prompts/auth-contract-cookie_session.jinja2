@@ -1,0 +1,5 @@
+{% if "auth" in task.features %}
+`POST /api/auth/register` with the JSON body `{"username": ..., "password": ...}` creates an account and answers 201. `POST /api/auth/login` with the same fields answers 200 and starts a session: it sets an HttpOnly session cookie and a `csrf_token` cookie that the page can read. `POST /api/auth/logout` ends the session. Every state-changing request (POST, PUT, PATCH, DELETE) of a signed-in user carries the header `X-CSRF-Token` with the value of the `csrf_token` cookie; a missing or wrong value answers 403. Requests that need a signed-in user answer 401 without a valid session.
+{% if "admin" in task.features %}
+There is one admin account, named `admin`. Its password is read from the environment variable `ADMIN_PASSWORD` when the app starts; when the variable is unset or empty, admin sign-in is disabled. There is no built-in admin password.
+{% endif %}{% endif %}

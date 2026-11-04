@@ -78,7 +78,7 @@ def test_missing_models_become_unavailable(endpoint):
 def test_digest_change_records_history_and_pauses(endpoint, django_capture_on_commit_callbacks):
     apply_inventory(endpoint, None, _payload(("a:1", D1)))
     with (
-        mock.patch("backend.generation.services.experiment_automation.pause_for_digest_drift") as pause,
+        mock.patch("backend.inference.inventory._pause_for_drift") as pause,
         django_capture_on_commit_callbacks(execute=True),
     ):
         result = apply_inventory(endpoint, None, _payload(("a:1", D2)))
@@ -86,8 +86,69 @@ def test_digest_change_records_history_and_pauses(endpoint, django_capture_on_co
     assert result.digest_changed == [row.pk]
     assert row.digest == D2
     assert row.metadata["digest_history"][0]["digest"] == D1
-    pause.assert_called_once()
-    assert pause.call_args.args[0].pk == row.pk
+    pause.assert_called_once_with([row.pk])
+
+
+def _study_on(model, status, *, active=True):
+    from backend.generation.testing.factories import StudyConditionFactory
+
+    condition = StudyConditionFactory(model=model)
+    study = condition.study
+    study.status = status
+    study.active_plan = condition.plan if active else None
+    study.save(update_fields=["status", "active_plan"])
+    return study
+
+
+def test_digest_drift_pauses_active_studies_using_the_model(endpoint, django_capture_on_commit_callbacks):
+    from backend.generation.models.choices import StudyStatus
+
+    apply_inventory(endpoint, None, _payload(("a:1", D1)))
+    model = LLMModel.objects.get(endpoint=endpoint, served_model_name="a:1")
+    running = _study_on(model, StudyStatus.RUNNING)
+    piloting = _study_on(model, StudyStatus.PILOTING, active=False)
+    draft = _study_on(model, StudyStatus.DRAFT)
+    unrelated = _study_on(LLMModelFactory(), StudyStatus.RUNNING)
+    with (
+        mock.patch("backend.realtime.events.publish_study_event") as publish,
+        django_capture_on_commit_callbacks(execute=True),
+    ):
+        # The real on_commit hook (not patched): a changed digest must pause the studies on this model.
+        apply_inventory(endpoint, None, _payload(("a:1", D2)))
+    for study in (running, piloting, draft, unrelated):
+        study.refresh_from_db()
+    assert (running.status, running.pause_reason) == (StudyStatus.PAUSED, "rule:digest_drift")
+    assert (piloting.status, piloting.pause_reason) == (StudyStatus.PAUSED, "rule:digest_drift")
+    assert draft.status == StudyStatus.DRAFT
+    assert unrelated.status == StudyStatus.RUNNING
+    published = {call.args[0]: call.args[1] for call in publish.call_args_list}
+    assert published == {
+        sid: {"type": "state", "status": "paused", "pause_reason": "rule:digest_drift"}
+        for sid in (running.pk, piloting.pk)
+    }
+
+
+def test_digest_drift_ignores_conditions_of_an_inactive_plan(endpoint):
+    from backend.generation.models.choices import StudyStatus
+    from backend.generation.testing.factories import StudyPlanFactory
+    from backend.inference.inventory import _pause_for_drift
+
+    apply_inventory(endpoint, None, _payload(("a:1", D1)))
+    model = LLMModel.objects.get(endpoint=endpoint, served_model_name="a:1")
+    study = _study_on(model, StudyStatus.RUNNING)
+    study.active_plan = StudyPlanFactory(study=study)
+    study.save(update_fields=["active_plan"])
+    _pause_for_drift([model.pk])
+    study.refresh_from_db()
+    assert study.status == StudyStatus.RUNNING
+
+
+def test_digest_drift_pause_failure_is_logged_not_raised(endpoint, caplog):
+    from backend.inference.inventory import _pause_for_drift
+
+    with mock.patch("backend.inference.inventory.pause_studies_for_digest_drift", side_effect=RuntimeError("db")):
+        _pause_for_drift([1])
+    assert any(r.levelname == "ERROR" and "digest change" in r.getMessage() for r in caplog.records)
 
 
 def test_standby_session_only_updates_its_models(endpoint):

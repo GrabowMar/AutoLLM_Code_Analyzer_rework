@@ -1,0 +1,12 @@
+name: eval / exec call (Python)
+description: Python's eval() or exec() builtin is called.
+content:
+  engine: ts_query
+  languages: [python]
+  rule: |
+    (call function: (identifier) @fn (#match? @fn "^(eval|exec)$")) @match
+  tool: {name: tree-sitter, version: 0.26.0}
+  feature_key: py-eval-exec
+  polarity: insecure
+  cwe: [cwe-95]
+  description: The code calls the eval or exec builtin.

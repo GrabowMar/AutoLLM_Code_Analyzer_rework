@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-csrf_missing",
+      "cwe": "cwe-352",
+      "kind": "csrf_missing",
+      "status": "exploited",
+      "evidence": "fixture"
+    },
+    {
+      "id": "p-other",
+      "cwe": "cwe-611",
+      "kind": "xxe",
+      "status": "not_exploited"
+    }
+  ]
+}

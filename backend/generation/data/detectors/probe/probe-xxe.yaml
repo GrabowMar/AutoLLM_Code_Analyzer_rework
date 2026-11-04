@@ -1,0 +1,11 @@
+name: XML external entity probe exploited
+description: Maps the evaluation's xxe probes (CWE-611) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:xxe'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-xxe
+  polarity: insecure
+  cwe: [cwe-611]
+  description: A xxe probe was exploited against the assembled app.

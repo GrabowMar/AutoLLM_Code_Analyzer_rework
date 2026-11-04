@@ -3,7 +3,8 @@ import type { Component } from "svelte";
 import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
 import Boxes from "@lucide/svelte/icons/boxes";
 import Library from "@lucide/svelte/icons/library";
-import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
+import Scissors from "@lucide/svelte/icons/scissors";
+import Wallet from "@lucide/svelte/icons/wallet";
 import FlaskConical from "@lucide/svelte/icons/flask-conical";
 import Server from "@lucide/svelte/icons/server";
 import AppWindow from "@lucide/svelte/icons/app-window";
@@ -16,6 +17,7 @@ import FileText from "@lucide/svelte/icons/file-text";
 import BookOpen from "@lucide/svelte/icons/book-open";
 import Activity from "@lucide/svelte/icons/activity";
 import ClipboardCheck from "@lucide/svelte/icons/clipboard-check";
+import Sparkles from "@lucide/svelte/icons/sparkles";
 
 export interface NavItem {
   label: string;
@@ -40,13 +42,11 @@ export const navSections: NavSection[] = [
     items: [
       { label: "Models", href: "/models", icon: Boxes },
       { label: "Endpoints", href: "/endpoints", icon: Server },
-      { label: "Library", href: "/templates", icon: Library },
-      {
-        label: "Sample Generator",
-        href: "/sample-generator",
-        icon: WandSparkles,
-      },
+      { label: "Library", href: "/library", icon: Library },
+      { label: "Generate app", href: "/generate", icon: Sparkles },
       { label: "Experiments", href: "/experiments", icon: FlaskConical },
+      { label: "Slots", href: "/slots/new", icon: Scissors },
+      { label: "Budget", href: "/budget", icon: Wallet },
     ],
   },
   {
@@ -88,7 +88,21 @@ const extraLabels: Record<string, string> = {
   "/analysis/create": "New analysis",
   "/experiments/new": "New experiment",
   "/endpoints/new": "New endpoint",
-  "/sample-generator/batches": "Batches",
+  "/slots": "Slots",
+  "/samples": "Samples",
+  "/library/prompts/playground": "Prompt playground",
+  "/library/tasks": "Tasks",
+  "/library/stacks": "Stacks",
+  "/library/starters": "Starters",
+  "/library/styles": "Styles",
+  "/library/guidance": "Guidance",
+  "/library/prompts": "Prompt templates",
+  "/library/prompt-sets": "Prompt sets",
+  "/library/harness-presets": "Harness presets",
+  "/library/sampling-presets": "Sampling presets",
+  "/library/resource-policies": "Budget presets",
+  "/library/eval-suites": "Eval suites",
+  "/library/detectors": "Detectors",
   "/reports/create": "New report",
   "/human-eval/new": "New task",
 };

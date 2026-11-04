@@ -1,7 +1,7 @@
 import { apiFetch } from "./core";
 
 /**
- * Per-call LLM telemetry (`GenerationArtifact.telemetry`): provider performance
+ * Per-call LLM telemetry (`GenerationArtifact.telemetry` of GenerationRuns): provider performance
  * per model and the per-call CSV dataset. Descriptive only; every value that
  * was not measured is `null` (shown as "—"/"n/a"), never 0.
  */
@@ -32,9 +32,9 @@ export interface CallCoverage {
 
 export interface CallSummary {
   n_calls: number;
-  n_jobs: number;
-  /** Calls per generation mode (agent / scaffolding / custom). */
-  modes: Record<string, number>;
+  n_runs: number;
+  /** Calls per run kind (`app_agentic`, `slot_single_shot`, ...). */
+  kinds: Record<string, number>;
   /** OpenRouter-measured time to first token (ms), incl. provider queueing/prefill. */
   ttft_ms: CallQuantiles;
   generation_time_ms: CallQuantiles;
@@ -62,7 +62,8 @@ export interface ProviderCallSummary extends CallSummary {
 export interface ModelCallTelemetry {
   model_id: number;
   model: string;
-  mode: string | null;
+  /** The run-kind filter that was applied, or null for every kind. */
+  kind: string | null;
   overall: CallSummary;
   providers: ProviderCallSummary[];
   notes: string[];
@@ -70,9 +71,9 @@ export interface ModelCallTelemetry {
 
 export async function getModelCallTelemetry(
   modelId: number,
-  opts: { mode?: string; signal?: AbortSignal } = {},
+  opts: { kind?: string; signal?: AbortSignal } = {},
 ): Promise<ModelCallTelemetry> {
-  const query = opts.mode ? `?mode=${encodeURIComponent(opts.mode)}` : "";
+  const query = opts.kind ? `?kind=${encodeURIComponent(opts.kind)}` : "";
   const res = await apiFetch(
     `/generation/models/${modelId}/call-telemetry/${query}`,
     { signal: opts.signal },
@@ -80,15 +81,18 @@ export async function getModelCallTelemetry(
   return res.json();
 }
 
-/** Download URL of the per-call CSV (one row per LLM call; never message content). */
+/**
+ * Download URL of the per-call CSV (one row per LLM call; never message content). Filters
+ * combine; at least one is required.
+ */
 export function callsCsvUrl(filter: {
-  experiment?: string;
-  job?: string;
+  study?: string;
+  run?: string;
   model?: number;
 }): string {
   const params = new URLSearchParams();
-  if (filter.experiment) params.set("experiment", filter.experiment);
-  if (filter.job) params.set("job", filter.job);
+  if (filter.study) params.set("study", filter.study);
+  if (filter.run) params.set("run", filter.run);
   if (filter.model !== undefined) params.set("model", String(filter.model));
   return `/api/generation/calls.csv?${params.toString()}`;
 }

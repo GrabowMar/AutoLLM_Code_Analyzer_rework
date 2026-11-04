@@ -44,16 +44,16 @@ The catalog is not seeded; it syncs from OpenRouter on demand. Sync is staff-onl
 
 Free models are rate-limited upstream and often answer 429. Agent runs then make no progress until they hit their wall-clock budget. Use a paid model for anything you need to finish.
 
-## Generation and experiments
+## Generation and studies
 
-### Jobs stay pending
+### Runs stay pending
 
-Generation jobs only run in the `executor` service. Check, in order:
+Generation runs only run in the `executor` service. Check, in order:
 
 1. It is running: `docker compose ps executor`, `just logs executor`.
 2. It is not drained: `just manage executor status` shows `"draining": false`; otherwise `just manage executor resume`.
 3. It is not waiting for migrations: its log says "Waiting for N migration(s)" until django's `migrate` finishes. In the devcontainer, django's `/start` (and so `migrate`) only runs once an editor attaches.
-4. Capacity is free: the capacity strip on Experiments shows the executor state (online, draining, offline, on old code) and used versus total slots per lane. Slots are also limited by the apps-dind memory rule ([Execution engine](/docs/EXECUTION#slots-and-the-memory-rule)).
+4. Capacity is free: the capacity strip on a study's Operations tab shows the executor state (online, draining, offline, on old code) and used versus total slots per lane. Slots are also limited by the apps-dind memory rule ([Execution engine](/docs/EXECUTION#slots-and-the-memory-rule)).
 
 ### The executor keeps restarting
 
@@ -65,15 +65,15 @@ The executor does not autoreload. Drain it, wait for `safe_to_restart`, restart,
 
 ### Local-model agent runs fail but OpenRouter runs work
 
-Agent sandboxes reach a local model through the executor's LLM proxy via apps-dind's `llmproxy` attachment and firewall exception. An `apps-dind` container created before that network existed lacks both; recreate it (`docker compose up -d --force-recreate apps-dind`), which stops every sample app running inside it. In the production compose stack there is no apps-dind, so these runs are refused by design (`LLM_LOCAL_AGENT_RUNS` is off). Scaffolding runs on local models work in both.
+Agent sandboxes reach a local model through the executor's LLM proxy via apps-dind's `llmproxy` attachment and firewall exception. An `apps-dind` container created before that network existed lacks both; recreate it (`docker compose up -d --force-recreate apps-dind`), which stops every sample app running inside it. In the production compose stack there is no apps-dind, so these runs are refused by design (`LLM_LOCAL_AGENT_RUNS` is off). Single-shot slot runs on local models work in both.
 
 ### Generation library looks empty
 
-Library data seeds after every migrate. If the UI is still empty, look for "Generation template seeding failed" or "Run preset seeding failed" in `just logs django`: malformed YAML or JSON under `backend/generation/data/` is logged, not raised, so `migrate` still succeeds. Validate with `just manage lint_generation_data`, fix the file, then `just manage seed_generation_templates`.
+The library is seeded by `just manage seed_library`, or after every migrate when `GENERATION_SEED_ON_MIGRATE=true` is set ([Quickstart](/docs/QUICKSTART)). If the UI is still empty after a migrate with seeding on, look for "Generation library seeding failed" in `just logs django`: malformed YAML under `backend/generation/data/` is logged, not raised, so `migrate` still succeeds. Validate with `just manage lint_library`, fix the file, then `just manage seed_library`. See [The generation library](/docs/LIBRARY).
 
-### Experiment schedules never fire
+### Study schedules never fire
 
-Schedules fire inside the executor (checked every 30 s), not through Celery beat. They do not fire while the executor is drained or down, they skip a fire while the experiment still has active jobs (when "skip if active" is on), and missed fires are not replayed in a burst. Cron expressions must be at least 15 minutes apart. See [Experiments](/docs/EXPERIMENTS#automation).
+Schedules fire inside the executor (checked every 30 s), not through Celery beat. They do not fire while the executor is drained or down, they skip a fire while the study still has active runs (when "skip if active" is on), and missed fires are not replayed in a burst. Cron expressions must be at least 15 minutes apart. See [Studies](/docs/STUDIES#clone-ad-hoc-schedules-and-post-runs).
 
 ## Analysis and apps
 

@@ -11,7 +11,7 @@ Threads:
 - main loop: ``BLPOP executor:wake`` (≤ tick seconds) → lost-job check →
   ``Scheduler.tick`` → submit claims to pools; ``reconcile`` every 15 s;
   schedules and post-runs every 30 s; LLM request purge daily;
-- heartbeat: instance ``last_seen_at``; renews leases of registered jobs only;
+- heartbeat: instance ``last_seen_at``; renews leases of registered runs only;
 - pools: sandbox, eval, llm-jobs, post-run (:class:`BoundedPool`);
 - the internal LLM proxy and the direct-endpoint pumps (``backend.inference``).
 """
@@ -44,6 +44,7 @@ from django.utils import timezone
 
 from backend.execution import capacity
 from backend.execution import reconciler
+from backend.execution import runtime_builds
 from backend.execution import transitions
 from backend.execution import workers
 from backend.execution.api import WAKE_KEY
@@ -53,20 +54,26 @@ from backend.execution.models import ExecutorSettings
 from backend.execution.registry import JobRegistry
 from backend.execution.scheduler import Scheduler
 from backend.execution.scheduler import TickResult
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models import StudyPostRun
+from backend.generation.models.choices import RunPhase
+from backend.generation.models.choices import RunStatus
+from backend.generation.models.choices import WorkStatus
 
 logger = logging.getLogger(__name__)
 
 RECONCILE_EVERY_S = 15.0
 AUTOMATION_EVERY_S = 30.0
 PURGE_EVERY_S = 86400.0
+STOP_RULES_EVERY_S = 60.0  # spec 4.6: stop rules after every run completion and every 60 s
 TICK_EVENT_EVERY_S = 2.0
 SCHEDULE_THREADS = 1  # schedule actions (top up / replicates / clone): short DB work, own pool
 CAPACITY_EVENT_EVERY_S = 5.0
 SHUTDOWN_LLM_GRACE_S = 20.0
 ORPHAN_EVERY_N_RECONCILES = 4
+SAMPLE_CACHE_GC_EVERY_S = 3600.0
 
-S = GenerationJob.Status
+S = RunStatus
 
 
 class PoolFullError(RuntimeError):
@@ -306,7 +313,9 @@ class Executor:
         )
         logger.info("Executor %s is leader (code %s)", self.executor_id, self.code_version[:12])
         report = reconciler.reconcile(self.executor_id, self.registry, docker_factory=self._docker_factory)
+        runtime_builds.recover(self.executor_id, [])
         self._last["reconcile"] = time.monotonic()
+        self._last["sample_cache_gc"] = time.monotonic()
         if report.expired or report.lost:
             logger.info("Startup reconcile: %s expired, %s lost", report.expired, report.lost)
         self._start_thread("heartbeat", self._heartbeat_loop)
@@ -373,14 +382,15 @@ class Executor:
         logger.info("Executor %s stopped (%s)", self.executor_id, self.stop_reason or "done")
 
     def expire_own_leases(self) -> None:
-        """One transaction: every job, post-run and pump lease of this instance expires now; ``stopped_at``."""
-        from backend.generation.models import ExperimentPostRun
+        """One transaction: every run, post-run and pump lease of this instance expires now; ``stopped_at``."""
+        from backend.execution.models import RuntimeBuildLease
         from backend.inference.models import LLMRequest
 
         now = timezone.now()
         with transaction.atomic():
-            GenerationJob.objects.filter(lease_owner=self.executor_id).update(lease_expires_at=now)
-            ExperimentPostRun.objects.filter(lease_owner=self.executor_id).update(lease_expires_at=now)
+            GenerationRun.objects.filter(lease_owner=self.executor_id).update(lease_expires_at=now)
+            RuntimeBuildLease.objects.filter(owner=self.executor_id).update(expires_at=now)
+            StudyPostRun.objects.filter(lease_owner=self.executor_id).update(lease_expires_at=now)
             LLMRequest.objects.filter(status=LLMRequest.Status.LEASED, pump_owner=self.executor_id).update(
                 lease_expires_at=now,
             )
@@ -441,10 +451,20 @@ class Executor:
         self.slots = capacity.effective_slots(ExecutorSettings.get())
         self._resize_pools(self.slots)
         reconciler.requeue_lost(self.executor_id, self.registry)
+        runtime_builds.recover(
+            self.executor_id,
+            [entry.job_id for entry in self.registry.entries() if entry.lane == "preview"],
+        )
         free = {name: pool.free() for name, pool in self.pools.items()}
         result = self.scheduler.tick(self.slots, free)
         for claimed in result.claimed:
             self._submit(claimed)
+        for action_id in result.preview_builds:
+            try:
+                self.pools["eval"].submit(workers.run_preview_build, self.ctx, action_id)
+            except Exception as exc:
+                logger.exception("Submitting preview build %s failed", action_id)
+                runtime_builds.submission_failed(action_id, self.executor_id, str(exc))
         now = time.monotonic()
         if now - self._last.get("reconcile", 0) >= RECONCILE_EVERY_S:
             self._last["reconcile"] = now
@@ -458,9 +478,20 @@ class Executor:
         if now - self._last.get("automation", -AUTOMATION_EVERY_S) >= AUTOMATION_EVERY_S:
             self._last["automation"] = now
             self._automation()
+        if now - self._last.get("stop_rules", 0) >= STOP_RULES_EVERY_S:
+            self._last["stop_rules"] = now
+            self._evaluate_stop_rules()
         if now - self._last.get("purge", 0) >= PURGE_EVERY_S:
             self._last["purge"] = now
             self._purge()
+        if (
+            now - self._last.get("sample_cache_gc", now) >= SAMPLE_CACHE_GC_EVERY_S
+            and self.pools["eval"].idle()
+            and self.pools["sandbox"].idle()
+            and self.pools["schedule"].free()
+        ):
+            self._last["sample_cache_gc"] = now
+            self.pools["schedule"].submit(workers.cleanup_sample_images)
         self._publish(result)
         return result
 
@@ -476,72 +507,64 @@ class Executor:
         try:
             pool.submit(workers.run_job, self.ctx, claimed)
         except Exception as exc:
-            logger.exception("Submitting job %s to the %s pool failed", claimed.job_id, pool.name)
-            job = GenerationJob.objects.filter(id=claimed.job_id, attempt=claimed.attempt).first()
-            if job is None:
+            logger.exception("Submitting run %s to the %s pool failed", claimed.run_id, pool.name)
+            run = GenerationRun.objects.filter(id=claimed.run_id, attempt=claimed.attempt).first()
+            if run is None:
                 return
             if claimed.lane == "eval":
-                reconciler.requeue_evaluation(job)
+                reconciler.requeue_evaluation(run)
             else:
-                transitions.infra_retry(job, transitions.REASON_SUBMIT_FAILED, str(exc))
+                transitions.infra_retry(run, transitions.REASON_SUBMIT_FAILED, str(exc))
 
     @staticmethod
     def _publish_claim(claimed) -> None:
-        """The ``job`` event of a claim (running / evaluating), from the claim's RETURNING row."""
-        job = GenerationJob(
-            id=claimed.job_id,
+        """The ``run`` events of a claim (running / evaluating), from the claim's RETURNING row."""
+        run = GenerationRun(
+            id=claimed.run_id,
             status=S.RUNNING,
-            phase=GenerationJob.Phase.EVALUATING if claimed.lane == "eval" else GenerationJob.Phase.RUNNING,
+            phase=RunPhase.EVALUATING if claimed.lane == "eval" else RunPhase.RUNNING,
             attempt=claimed.attempt,
-            experiment_id=claimed.experiment_id,
+            study_id=claimed.study_id,
             condition_id=claimed.condition_id,
-            app_requirement_id=claimed.app_id,
+            cell_id=claimed.cell_id,
             repeat_index=claimed.repeat_index,
             endpoint_id=claimed.endpoint_id,
             started_at=timezone.now(),
         )
-        transitions.publish_job(job)
+        transitions.publish_run(run)
 
     def _automation(self) -> None:
         """Schedules fire on their own pool and post-runs start on the post-run pool, never on this loop.
 
-        Schedule actions are short DB work; sharing the single post-run thread would queue a due
-        fire behind a multi-hour analysis (and drop it on restart, its ``next_run_at`` already advanced).
+        Firing schedules is short DB work; sharing a post-run thread would queue a due fire behind a
+        multi-hour analysis.
         """
         if self.slots is None or self.slots.draining:
             return
         post = self.pools["post"]
         schedule_pool = self.pools["schedule"]
-        try:
-            from backend.generation.services.experiment_automation import run_due_schedules
-
-            run_due_schedules(
-                timezone.now(),
-                submit=lambda fn, schedule_id: schedule_pool.submit(
-                    workers.run_schedule_action,
-                    schedule_id,
-                    force=True,
-                ),
-            )
-        except NotImplementedError:
-            pass
-        except Exception:
-            logger.exception("run_due_schedules failed")
-        from backend.generation.services.experiment_automation import claimable_post_runs
-
-        # Pending post-runs and running ones whose lease expired (an executor restart mid-analysis).
-        if post.free() <= 0 or not claimable_post_runs().exists():
+        if schedule_pool.free() > 0:
+            with contextlib.suppress(PoolFullError):
+                schedule_pool.submit(workers.run_due_schedules)
+        # Pending post-runs that are due and running ones whose lease expired (an executor restart mid-analysis).
+        if post.free() <= 0 or not workers.claimable_post_runs().exists():
             return
         if self.slots.defer_post_runs:
-            snap_busy = (
-                self.pools["sandbox"].free() == 0
-                and self.pools["eval"].free() == 0
-                and (self.slots.sandbox_slots + self.slots.eval_slots) > 0
-            )
+            snap_busy = not self.pools["sandbox"].idle() or not self.pools["eval"].idle()
             if snap_busy:
                 return
         with contextlib.suppress(PoolFullError):
             post.submit(workers.run_post_run, self.ctx)
+
+    @staticmethod
+    def _evaluate_stop_rules() -> None:
+        """Spec 4.6: every 60 s, the stop rules of every piloting or running study (never fatal)."""
+        try:
+            from backend.generation.budget import stop_rules
+
+            stop_rules.evaluate_active()
+        except Exception:
+            logger.exception("Evaluating the study stop rules failed")
 
     def _purge(self) -> None:
         try:
@@ -556,13 +579,21 @@ class Executor:
     def _idle(self) -> bool:
         if any(not pool.idle() for pool in self.pools.values()):
             return False
-        from backend.generation.models import ExperimentPostRun
+        from backend.runtime.models import ContainerAction
 
-        if GenerationJob.objects.filter(queued_at__isnull=False, status__in=[S.PENDING, S.RUNNING]).exists():
+        if ContainerAction.objects.filter(
+            action_type=ContainerAction.ActionType.BUILD,
+            status__in=[ContainerAction.Status.PENDING, ContainerAction.Status.RUNNING],
+        ).exists():
             return False
-        return not ExperimentPostRun.objects.filter(
-            status__in=[ExperimentPostRun.Status.PENDING, ExperimentPostRun.Status.RUNNING],
-        ).exists()
+        if GenerationRun.objects.filter(queued_at__isnull=False, status__in=[S.PENDING, S.RUNNING]).exists():
+            return False
+        return (
+            not workers.claimable_post_runs().exists()
+            and not StudyPostRun.objects.filter(
+                status=WorkStatus.RUNNING,
+            ).exists()
+        )
 
     # ── heartbeat ──────────────────────────────────────────────────────
 
@@ -577,9 +608,7 @@ class Executor:
                 workers.close_db()
 
     def heartbeat(self) -> int:
-        """``last_seen_at`` + lease renewal for registered jobs only (rows locked in id order, SKIP LOCKED)."""
-        from backend.generation.models import ExperimentPostRun
-
+        """``last_seen_at`` + lease renewal for registered runs only (rows locked in id order, SKIP LOCKED)."""
         now = timezone.now()
         lease = timedelta(seconds=settings.EXECUTOR_LEASE_SECONDS)
         ExecutorInstance.objects.filter(id=self.executor_id).update(
@@ -593,12 +622,12 @@ class Executor:
                 try:
                     with transaction.atomic():
                         locked = list(
-                            GenerationJob.objects.select_for_update(skip_locked=True)
+                            GenerationRun.objects.select_for_update(skip_locked=True)
                             .filter(id__in=ids, lease_owner=self.executor_id)
                             .order_by("id")
                             .values_list("id", flat=True),
                         )
-                        renewed = GenerationJob.objects.filter(id__in=locked).update(
+                        renewed = GenerationRun.objects.filter(id__in=locked).update(
                             lease_expires_at=now + lease,
                             heartbeat_at=now,
                         )
@@ -607,10 +636,14 @@ class Executor:
                     if "deadlock" not in str(exc).lower() or attempt == 2:
                         raise
         if self.pools.get("post") and not self.pools["post"].idle():
-            ExperimentPostRun.objects.filter(
+            StudyPostRun.objects.filter(
                 lease_owner=self.executor_id,
-                status=ExperimentPostRun.Status.RUNNING,
+                status=WorkStatus.RUNNING,
             ).update(lease_expires_at=now + lease)
+        runtime_builds.renew(
+            self.executor_id,
+            [entry.job_id for entry in self.registry.entries() if entry.lane == "preview"],
+        )
         return renewed
 
     def _status_config(self) -> dict[str, Any]:
@@ -686,26 +719,20 @@ class Executor:
             self._last_endpoints.pop(gone, None)
 
     def _publish_ticks(self, result: TickResult) -> None:
-        """``tick`` events (spec §F.6): rollups of the **current attempt per cell**, like REST status.
+        """``tick`` events (spec §F.6) on ``study:<id>``: rollups of the **current run per cell**, like REST status.
 
-        Fields the executor cannot compute cheaply every tick (``throughput``,
-        ``eta_seconds``, ``cells.retried``, per-endpoint ``tokens_per_s`` /
-        ``loaded``) are left out; the client keeps its last REST values for them.
+        The current run is the cell's first usable attempt, else its latest (``runs.view.current_runs``);
+        ``beyond_plan`` runs are excluded. Fields the executor cannot compute cheaply every tick
+        (``throughput``, ``eta_seconds``, per-endpoint ``tokens_per_s`` / ``loaded``) are left out; the
+        client keeps its last REST values for them.
         """
-        from backend.generation.models import Experiment
-        from backend.generation.services.experiments import _progress_for
+        from backend.generation.models import Study
         from backend.inference.models import LLMRequest
-        from backend.realtime.events import publish_experiment_event
+        from backend.realtime.events import publish_study_event
 
-        experiments = list(
-            Experiment.objects.filter(status__in=[Experiment.Status.RUNNING, Experiment.Status.PAUSED])
-            .annotate(
-                n_conditions=Count("conditions", distinct=True),
-                n_apps=Count("app_requirements", distinct=True),
-            )
-            .values_list("id", "repeats", "n_conditions", "n_apps"),
+        studies = list(
+            Study.objects.filter(status__in=["piloting", "running", "paused"]).values_list("id", "status"),
         )
-        progress = _progress_for([row[0] for row in experiments])
         snap = result.snapshot
         system_ep = snap.system_ep if snap is not None else None
         leased = dict(
@@ -715,21 +742,22 @@ class Executor:
             .annotate(n=Count("id"))
             .values_list("endpoint_id", "n"),
         )
-        lanes_by_exp: dict[str, list] = {}
+        lanes_by_study: dict[str, list] = {}
         for state in result.lanes.values():
-            lanes_by_exp.setdefault(str(state.experiment_id), []).append(state)
+            lanes_by_study.setdefault(str(state.study_id), []).append(state)
         open_circuits = set(self.breaker.open_endpoints())
         live: set[str] = set()
-        for experiment_id, repeats, n_conditions, n_apps in experiments:
-            live.add(str(experiment_id))
-            counts = progress.get(experiment_id) or {}
+        for study_id, status in studies:
+            live.add(str(study_id))
+            stage = "pilot" if status == "piloting" else "main"
+            counts, total = study_progress(study_id, stage)
             endpoints = []
-            for state in lanes_by_exp.get(str(experiment_id), []):
+            for state in lanes_by_study.get(str(study_id), []):
                 active = snap.ep_active.get(state.endpoint_id, 0) if snap else 0
                 endpoints.append(
                     {
                         "id": state.endpoint_id,
-                        # Same meaning as REST ``slots.used``: jobs on the OpenRouter row, leased requests locally.
+                        # Same meaning as REST ``slots.used``: runs on the OpenRouter row, leased requests locally.
                         "slots_used": active if state.endpoint_id == system_ep else leased.get(state.endpoint_id, 0),
                         "active": active,
                         "queued": state.pending_in_window,
@@ -742,7 +770,7 @@ class Executor:
                 "type": "tick",
                 "counts": counts,
                 "cells": {
-                    "total": int(n_conditions) * int(n_apps) * int(repeats or 0),
+                    "total": total,
                     "done": counts.get("completed", 0),
                     "failed_final": counts.get("failed", 0) + counts.get("cancelled", 0),
                     "in_flight": counts.get("running", 0) + counts.get("eval_queued", 0) + counts.get("evaluating", 0),
@@ -750,9 +778,31 @@ class Executor:
                 "endpoints": endpoints,
                 "bottleneck": reasons[0] if reasons else None,
             }
-            if self._last_ticks.get(str(experiment_id)) == event:
+            if self._last_ticks.get(str(study_id)) == event:
                 continue
-            self._last_ticks[str(experiment_id)] = event
-            publish_experiment_event(experiment_id, event)
+            self._last_ticks[str(study_id)] = event
+            publish_study_event(study_id, event)
         for stale in set(self._last_ticks) - live:
             self._last_ticks.pop(stale, None)
+
+
+def study_progress(study_id: Any, stage: str = "main") -> tuple[dict[str, int], int]:
+    """``({status or phase: n}, planned cells)`` over the current run of every cell of ``study_id`` at ``stage``.
+
+    Running runs count under their phase (``running`` / ``eval_queued`` / ``evaluating``); a cell
+    without any run yet counts only in the total. Both sides cover the planned cells of the active plan
+    (replicate cells and ``beyond_plan`` runs are left out, as in ``runs.queries``).
+    """
+    from backend.generation.models import Study
+    from backend.generation.runs.queries import cells_for_stage
+    from backend.generation.runs.view import current_runs
+
+    study = Study.objects.filter(pk=study_id).only("pk", "active_plan_id").first()
+    if study is None:
+        return {}, 0
+    counts: dict[str, int] = {}
+    for status, phase in current_runs(study, stage).order_by().values_list("status", "phase"):
+        key = (phase or "running") if status == S.RUNNING else status
+        counts[key] = counts.get(key, 0) + 1
+    total = cells_for_stage(study, stage).count()
+    return counts, total

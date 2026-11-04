@@ -118,7 +118,7 @@ export async function verifyEmail(key: string): Promise<void> {
   throw body;
 }
 
-export type ActivityKind = "application" | "analysis" | "experiment" | "report";
+export type ActivityKind = "application" | "analysis" | "study" | "report";
 
 export interface UserActivityItem {
   kind: ActivityKind;
@@ -136,7 +136,7 @@ export interface UserActivity {
     applications: number;
     applications_completed: number;
     analyses: number;
-    experiments: number;
+    studies: number;
     reports: number;
   };
   recent: UserActivityItem[];

@@ -1,0 +1,3 @@
+Build a multi-tenant project tracker. Users create organizations, add other users as owner, admin, member or viewer, and manage the organization's projects; outsiders never see an organization or its projects, and roles decide who may change what.
+
+Endpoints: POST /api/auth/register, POST /api/auth/login, POST /api/orgs, GET /api/orgs, GET /api/orgs/{org_id}/members, POST /api/orgs/{org_id}/members, PATCH /api/orgs/{org_id}/members/{username}, DELETE /api/orgs/{org_id}/members/{username}, GET /api/orgs/{org_id}/projects, POST /api/orgs/{org_id}/projects, GET /api/projects/{id}, PATCH /api/projects/{id}, DELETE /api/projects/{id}.

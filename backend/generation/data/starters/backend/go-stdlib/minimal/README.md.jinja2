@@ -1,0 +1,3 @@
+{% set layout = "- `backend/`: the Go module (package `main`, standard library `net/http`; `backend/main.go` is the entry file, the image runs the built binary from `/app`); dependencies in `backend/go.mod`." %}
+{% set lock_note = "`backend/go.sum` holds the checksums of the modules `backend/go.mod` requires (`go mod tidy` updates both)." %}
+{% include "common/README.md.jinja2" %}

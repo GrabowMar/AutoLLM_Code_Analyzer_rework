@@ -1,0 +1,3 @@
+name: Provider default
+description: Sends no sampling parameters; the provider's defaults apply (default for app studies).
+content: {policy: provider_default}

@@ -1,0 +1,353 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Incident center
+summary: Coordinate production incidents, their timelines and resolution targets.
+category: operations
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Incident
+  fields:
+  - {name: title, type: string, required: true, max_length: 200}
+  - {name: service, type: string, required: true, max_length: 100}
+  - name: severity
+    type: enum
+    required: true
+    enum: [sev1, sev2, sev3, sev4]
+  - name: status
+    type: enum
+    enum: [investigating, mitigated, monitoring, resolved]
+    default: investigating
+  - {name: commander, type: string, max_length: 50}
+  - {name: impact_summary, type: text, max_length: 2000}
+  - {name: opened_at, type: datetime}
+  - {name: resolved_at, type: datetime}
+  - {name: reopen_count, type: int, default: 0}
+- name: TimelineEvent
+  fields:
+  - name: type
+    type: enum
+    required: true
+    enum: [acknowledgement, mitigation, escalation, recovery, customer_update, note, status_change]
+  - {name: message, type: text, required: true, max_length: 2000}
+  - {name: created_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: incidents.list
+  method: GET
+  path: /api/incidents
+  auth: user
+  query:
+  - name: severity
+    type: enum
+    semantics: filter
+    enum: [sev1, sev2, sev3, sev4]
+  - name: status
+    type: enum
+    semantics: filter
+    enum: [investigating, mitigated, monitoring, resolved]
+  - {name: open, type: bool, semantics: filter}
+  - {name: q, type: string, semantics: search}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, title, service, severity, opened_by, sla_due_at, sla_breached]
+          properties:
+            id:
+              type: [integer, string]
+            title: {type: string, maxLength: 200, minLength: 1}
+            service: {type: string, maxLength: 100, minLength: 1}
+            severity:
+              type: string
+              enum: [sev1, sev2, sev3, sev4]
+            status:
+              type: [string, 'null']
+              enum: [investigating, mitigated, monitoring, resolved, null]
+            commander:
+              type: [string, 'null']
+              maxLength: 50
+            impact_summary:
+              type: [string, 'null']
+              maxLength: 2000
+            opened_at:
+              type: [string, 'null']
+              format: date-time
+            resolved_at:
+              type: [string, 'null']
+              format: date-time
+            reopen_count:
+              type: [integer, 'null']
+            opened_by: {type: string}
+            sla_due_at: {type: string}
+            sla_breached: {type: boolean}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: incidents.create
+  method: POST
+  path: /api/incidents
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 200, minLength: 1}
+      service: {type: string, maxLength: 100, minLength: 1}
+      severity:
+        type: string
+        enum: [sev1, sev2, sev3, sev4]
+      commander:
+        type: [string, 'null']
+        maxLength: 50
+      impact_summary:
+        type: [string, 'null']
+        maxLength: 2000
+    required: [title, service, severity]
+  response_schema:
+    type: object
+    required: [id, title, service, severity, opened_by, sla_due_at, sla_breached]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      service: {type: string, maxLength: 100, minLength: 1}
+      severity:
+        type: string
+        enum: [sev1, sev2, sev3, sev4]
+      status:
+        type: [string, 'null']
+        enum: [investigating, mitigated, monitoring, resolved, null]
+      commander:
+        type: [string, 'null']
+        maxLength: 50
+      impact_summary:
+        type: [string, 'null']
+        maxLength: 2000
+      opened_at:
+        type: [string, 'null']
+        format: date-time
+      resolved_at:
+        type: [string, 'null']
+        format: date-time
+      reopen_count:
+        type: [integer, 'null']
+      opened_by: {type: string}
+      sla_due_at: {type: string}
+      sla_breached: {type: boolean}
+  errors: [400]
+- id: incidents.get
+  method: GET
+  path: /api/incidents/{id}
+  auth: user
+  response_schema:
+    type: object
+    required: [id, title, service, severity, opened_by, sla_due_at, sla_breached]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      service: {type: string, maxLength: 100, minLength: 1}
+      severity:
+        type: string
+        enum: [sev1, sev2, sev3, sev4]
+      status:
+        type: [string, 'null']
+        enum: [investigating, mitigated, monitoring, resolved, null]
+      commander:
+        type: [string, 'null']
+        maxLength: 50
+      impact_summary:
+        type: [string, 'null']
+        maxLength: 2000
+      opened_at:
+        type: [string, 'null']
+        format: date-time
+      resolved_at:
+        type: [string, 'null']
+        format: date-time
+      reopen_count:
+        type: [integer, 'null']
+      opened_by: {type: string}
+      sla_due_at: {type: string}
+      sla_breached: {type: boolean}
+  errors: [404]
+- id: incidents.update
+  method: PATCH
+  path: /api/incidents/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 200, minLength: 1}
+      service: {type: string, maxLength: 100, minLength: 1}
+      severity:
+        type: string
+        enum: [sev1, sev2, sev3, sev4]
+      status:
+        type: [string, 'null']
+        enum: [investigating, mitigated, monitoring, resolved, null]
+      commander:
+        type: [string, 'null']
+        maxLength: 50
+      impact_summary:
+        type: [string, 'null']
+        maxLength: 2000
+  response_schema:
+    type: object
+    required: [id, title, service, severity, opened_by, sla_due_at, sla_breached]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      service: {type: string, maxLength: 100, minLength: 1}
+      severity:
+        type: string
+        enum: [sev1, sev2, sev3, sev4]
+      status:
+        type: [string, 'null']
+        enum: [investigating, mitigated, monitoring, resolved, null]
+      commander:
+        type: [string, 'null']
+        maxLength: 50
+      impact_summary:
+        type: [string, 'null']
+        maxLength: 2000
+      opened_at:
+        type: [string, 'null']
+        format: date-time
+      resolved_at:
+        type: [string, 'null']
+        format: date-time
+      reopen_count:
+        type: [integer, 'null']
+      opened_by: {type: string}
+      sla_due_at: {type: string}
+      sla_breached: {type: boolean}
+  errors: [400, 404]
+- id: timeline.list
+  method: GET
+  path: /api/incidents/{id}/timeline
+  auth: user
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, type, message, author]
+          properties:
+            id:
+              type: [integer, string]
+            type:
+              type: string
+              enum: [acknowledgement, mitigation, escalation, recovery, customer_update, note, status_change]
+            message: {type: string, maxLength: 2000, minLength: 1}
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            author: {type: string}
+  errors: [404]
+- id: timeline.create
+  method: POST
+  path: /api/incidents/{id}/timeline
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      type:
+        type: string
+        enum: [acknowledgement, mitigation, escalation, recovery, customer_update, note, status_change]
+      message: {type: string, maxLength: 2000, minLength: 1}
+    required: [type, message]
+  response_schema:
+    type: object
+    required: [id, type, message, author]
+    properties:
+      id:
+        type: [integer, string]
+      type:
+        type: string
+        enum: [acknowledgement, mitigation, escalation, recovery, customer_update, note, status_change]
+      message: {type: string, maxLength: 2000, minLength: 1}
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      author: {type: string}
+  errors: [400, 404]
+- id: stats.public
+  method: GET
+  path: /api/public/stats
+  auth: public
+  response_schema:
+    type: object
+    properties:
+      open_total: {type: integer}
+      open_by_severity: {type: object}
+      sla_breached_open: {type: integer}
+      resolved_last_30_days: {type: integer}
+    required: [open_total, open_by_severity, sla_breached_open, resolved_last_30_days]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.public
+  text: A public page with the open counts per severity and the number of open incidents past their target.
+  endpoints: [stats.public]
+- id: ui.list
+  text: An incident list with severity and status filters, an 'open only' switch, a search box and paging; breached
+    incidents are flagged.
+  endpoints: [incidents.list]
+- id: ui.detail
+  text: An incident page with its fields, status buttons, the timeline and a form to post an event.
+  endpoints: [incidents.get, incidents.update, timeline.list, timeline.create]
+- id: ui.open
+  text: An 'Open incident' form showing the API's validation messages.
+  endpoints: [incidents.create]
+features: [auth, search, filter, pagination, scheduling]
+surfaces: [cwe-862, cwe-89, cwe-79, cwe-20, cwe-915, cwe-117]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+probes:
+- id: probe.incidents.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: incidents.list
+  params: {param: q}
+- id: probe.timeline.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: timeline.create
+  params: {field: message, view_endpoint: timeline.list}

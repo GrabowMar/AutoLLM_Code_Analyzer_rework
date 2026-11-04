@@ -229,16 +229,16 @@
 						<ErrorAlert message={insightsError} onretry={onRetryInsights} />
 					{:else if !insights || !gen}
 						<LoadingState label="loading measurements" class="py-6" />
-					{:else if gen.jobs_total === 0}
-						<p class="text-sm text-muted-foreground">Not generated with yet. Run it on a template to measure build success, conformance and code findings.</p>
-						<Button size="sm" variant="outline" class="mt-3" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}">
+					{:else if gen.runs_total === 0}
+						<p class="text-sm text-muted-foreground">Not generated with yet. Run it on a task to measure build success, conformance and code findings.</p>
+						<Button size="sm" variant="outline" class="mt-3" href="/generate?model={encodeURIComponent(slug)}">
 							<Sparkles class="size-3.5" />Generate an app
 						</Button>
 					{:else}
 						<dl class="grid grid-cols-2 gap-x-4 gap-y-3">
 							<div>
 								<dt class="kpi-label">Apps</dt>
-								<dd class="font-mono text-xl font-medium tabular-nums">{gen.jobs_total}</dd>
+								<dd class="font-mono text-xl font-medium tabular-nums">{gen.runs_total}</dd>
 								<dd class="text-[11px] text-muted-foreground">{gen.completed} completed</dd>
 							</div>
 							<div>

@@ -1,0 +1,12 @@
+name: daisyUI
+description: daisyUI component classes on Tailwind CSS, for any built frontend.
+content:
+  system: component-library
+  library:
+    name: daisyUI
+    packages: [tailwindcss, daisyui]
+    frameworks: [react, vue, svelte]
+  fragment: style-daisyui@1
+  adherence:
+    required_markers: [daisyui]
+  compatible_frontends: [react, vue, svelte, free]

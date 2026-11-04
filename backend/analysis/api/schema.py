@@ -129,6 +129,7 @@ class TestResultSchema(Schema):
 class RunCreateSchema(Schema):
     name: str = ""
     tool_slugs: list[str]
+    # A generation run (``GenerationRun`` id; the field keeps the AnalysisRun FK name).
     generation_job_id: str | None = None
     source_code: dict[str, str] | None = None
     auto_start: bool = True
@@ -141,7 +142,8 @@ class BatchCreateSchema(Schema):
 
 
 class BatchCreatedSchema(Schema):
-    batch_id: str
+    # Shared by the runs launched together (``GET runs/?launch_id=``).
+    launch_id: str
     run_ids: list[str]
 
 
@@ -244,20 +246,26 @@ class FindingSchema(Schema):
     # A code finding located in test code (reports.services.loc.is_test_path):
     # the study counts it apart from the app's own code issues.
     in_tests: bool = False
+    # RunFile origin of the finding's file (starter | authored | modified | slot | parent); "" when the
+    # path is not a file of the analyzed tree (pasted code, a URL, a package-only advisory).
+    file_origin: str = ""
 
 
 class RunTargetSchema(Schema):
-    kind: str  # "job" | "code"
+    kind: str  # "run" (a generation run) | "code" | "deleted"
     label: str
+    # The generation run (GenerationRun id) and its status, outcome and kind.
     job_id: str | None = None
     job_status: str = ""
-    mode: str = ""
+    outcome: str = ""
+    run_kind: str = ""
     model_name: str = ""
     model_id: str = ""
-    app_name: str = ""
-    app_slug: str = ""
-    stack_slug: str = ""
-    experiment_id: str | None = None
+    task_title: str = ""
+    task_slug: str = ""
+    task_ref: str = ""
+    stack_ref: str = ""
+    study_id: str | None = None
     file_count: int | None = None
 
 
@@ -271,6 +279,8 @@ class RunProgressSchema(Schema):
 class SourceFileSchema(Schema):
     path: str
     lines: int
+    # RunFile origin of a generated app's file (starter | authored | modified | slot | parent); "" for pasted code.
+    origin: str = ""
 
 
 class AnalysisRunListSchema(Schema):
@@ -281,7 +291,11 @@ class AnalysisRunListSchema(Schema):
     summary: dict[str, Any]
     error_message: str = ""
     generation_job_id: str | None = None
-    batch_id: str | None = None
+    launch_id: str | None = None
+    # "app" for a generation run (the whole app tree, spec v3 section 8.8); "" for pasted code.
+    code_scope: str = ""
+    # H(sorted analyzed paths).
+    code_scope_paths_sha: str = ""
     target: RunTargetSchema
     created_at: str
     started_at: str | None = None
@@ -362,31 +376,36 @@ class FindingFacetsSchema(Schema):
 
 
 class RunSetupSchema(Schema):
-    """The generation setup behind the analyzed app: its design cell and method."""
+    """The generation setup behind the analyzed app (read through ``RunView``): its study cell and treatment."""
 
     id: str
-    mode: str
+    kind: str
     status: str = ""
+    outcome: str = ""
+    usable: bool | None = None
     # LLMModel primary key (model pages), its id string, display name and URL slug.
     model_pk: int | None = None
     model_id: str = ""
     model_name: str = ""
     model_slug: str = ""
-    app_id: int | None = None
-    app_slug: str = ""
-    app_name: str = ""
-    stack_slug: str = ""
-    batch_id: str | None = None
-    experiment_id: str | None = None
-    experiment_name: str = ""
+    task_ref: str = ""
+    task_slug: str = ""
+    task_title: str = ""
+    prose_variant: str = ""
+    unit_key: str = ""
+    stack_ref: str = ""
+    study_id: str | None = None
+    study_name: str = ""
     condition_id: int | None = None
     condition_label: str = ""
-    # 0-based trial within the (condition, app) cell, and the repeats planned at launch.
+    stage: str = ""
+    # 0-based repeat within the (condition, unit) cell, and the study's planned repeats.
     repeat_index: int | None = None
     planned_repeats: int | None = None
     harness: str | None = None
-    bundle_key: str = ""
+    harness_version: str = ""
     config_fingerprint: str | None = None
+    run_fingerprint: str | None = None
 
 
 class ExcludedPathsSchema(Schema):
@@ -404,13 +423,19 @@ class ExcludedPathsSchema(Schema):
 
 
 class SourceLocSchema(Schema):
-    """Source size by the study's definition (reports.services.loc): non-empty, non-comment lines of source files."""
+    """Source size by the study's definition (reports.services.loc): non-empty, non-comment lines of source files.
 
+    For a generation run the counted scope is ``model`` (what the model wrote); ``app_total`` is the source
+    LOC of the whole app tree the tools read (starter included). Pasted code: scope ``code``.
+    """
+
+    scope: str = "model"
     total: int
     files: int
-    # {"backend", "frontend", "tests"}; tests is None when the code has no paths (unknown, not zero).
+    # {"backend", "frontend", "tests"}.
     by_layer: dict[str, int | None]
     test_files: int | None = None
+    app_total: int | None = None
     # Stored files that are not source (manifests, lockfiles, docs, configs); None without paths.
     other_files: int | None = None
     excluded_paths: ExcludedPathsSchema
@@ -436,8 +461,9 @@ class RulePrevalenceSchema(Schema):
     # code | dependencies | runtime (runner.tool_scope; advisories by category).
     scope: str = "code"
     count_in_run: int
-    # Analyzed apps (generation jobs) of the corpus whose latest result of this tool measured
-    # the code (completed or not applicable), and those of them with at least one finding of the rule.
+    # Analyzed apps (generation runs) of the corpus whose latest result of this tool measured
+    # the code (completed; not applicable is not measured), and those of them with at least one finding
+    # of the rule.
     apps_with_rule: int
     apps_measured: int
     # The same, restricted to apps of the analyzed app's model; None without a model.
@@ -447,16 +473,16 @@ class RulePrevalenceSchema(Schema):
 
 class RunContextSchema(Schema):
     run_id: str
-    # The corpus the prevalence is counted over: experiment | mine; None when there is none.
+    # The corpus the prevalence is counted over: study | mine; None when there is none.
     scope: str | None = None
     scopes_available: list[str] = []
     scope_label: str = ""
-    # Analyzed apps (jobs with a finished tool result) in the corpus, and those of this model.
+    # Analyzed apps (generation runs with a finished tool result) in the corpus, and those of this model.
     n: int = 0
     model_n: int | None = None
-    # Whether the analyzed app itself is one of the corpus apps (a superseded attempt is not).
+    # Whether the analyzed app itself is one of the corpus apps (a run that is not its cell's current run is not).
     self_in_corpus: bool = False
-    # The experiment corpus while the experiment is still running: counts are interim.
+    # The study corpus while the study is still running: counts are interim.
     interim: bool = False
     job: RunSetupSchema | None = None
     source_loc: SourceLocSchema | None = None

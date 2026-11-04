@@ -1,0 +1,8 @@
+name: Model's choice, playful tone
+description: No styling prescription, with the playful visual tone.
+content:
+  system: model-choice
+  tone: playful
+  tone_text: 'Playful: rounded shapes, bright friendly colours, gentle animations and a casual tone in labels.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

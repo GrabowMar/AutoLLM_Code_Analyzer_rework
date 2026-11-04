@@ -1,0 +1,1111 @@
+{
+  "$defs": {
+    "AuthFlow": {
+      "additionalProperties": false,
+      "description": "Used only by auth_mode ``spec_defined``; values are endpoint ids.",
+      "properties": {
+        "credential": {
+          "enum": [
+            "bearer",
+            "cookie"
+          ],
+          "title": "Credential",
+          "type": "string"
+        },
+        "csrf": {
+          "default": "none",
+          "enum": [
+            "none",
+            "double_submit_cookie",
+            "header_from_endpoint"
+          ],
+          "title": "Csrf",
+          "type": "string"
+        },
+        "csrf_endpoint": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Csrf Endpoint"
+        },
+        "login": {
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+          "title": "Login",
+          "type": "string"
+        },
+        "logout": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logout"
+        },
+        "register": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Register"
+        },
+        "token_json_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Json Path"
+        }
+      },
+      "required": [
+        "login",
+        "credential"
+      ],
+      "title": "AuthFlow",
+      "type": "object"
+    },
+    "CheckExpect": {
+      "additionalProperties": false,
+      "properties": {
+        "header_contains": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Header Contains"
+        },
+        "json_contains": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Contains"
+        },
+        "json_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Schema"
+        },
+        "max_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Ms"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "items": {
+                "maximum": 599,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          ],
+          "title": "Status"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "CheckExpect",
+      "type": "object"
+    },
+    "CheckRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Files"
+        },
+        "form": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Form"
+        },
+        "json": {
+          "default": null,
+          "title": "Json"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^/",
+          "title": "Path",
+          "type": "string"
+        },
+        "query": {
+          "additionalProperties": true,
+          "title": "Query",
+          "type": "object"
+        }
+      },
+      "required": [
+        "method",
+        "path"
+      ],
+      "title": "CheckRequest",
+      "type": "object"
+    },
+    "CheckSpec": {
+      "additionalProperties": false,
+      "description": "A functional check (hand-written in ``TaskSpecContent.acceptance`` or compiler output).",
+      "properties": {
+        "actor": {
+          "default": "user_a",
+          "enum": [
+            "anon",
+            "user_a",
+            "user_b",
+            "admin"
+          ],
+          "title": "Actor",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "infra",
+            "functional",
+            "auth",
+            "ownership",
+            "validation",
+            "negative",
+            "persistence",
+            "pagination",
+            "filter"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "expect": {
+          "$ref": "#/$defs/CheckExpect"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/CheckRequest"
+        },
+        "restart_before": {
+          "default": false,
+          "title": "Restart Before",
+          "type": "boolean"
+        },
+        "setup": {
+          "items": {
+            "$ref": "#/$defs/SetupStep"
+          },
+          "title": "Setup",
+          "type": "array"
+        },
+        "stated_in": {
+          "items": {
+            "enum": [
+              "minimal",
+              "standard",
+              "exhaustive"
+            ],
+            "type": "string"
+          },
+          "title": "Stated In",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "request",
+        "expect"
+      ],
+      "title": "CheckSpec",
+      "type": "object"
+    },
+    "CompiledRequest": {
+      "additionalProperties": false,
+      "description": "A fully resolved request (probe positive controls, compiled setup steps).",
+      "properties": {
+        "actor": {
+          "default": "user_a",
+          "enum": [
+            "anon",
+            "user_a",
+            "user_b",
+            "admin"
+          ],
+          "title": "Actor",
+          "type": "string"
+        },
+        "expect_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "items": {
+                "maximum": 599,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expect Status"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Files"
+        },
+        "form": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Form"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Headers",
+          "type": "object"
+        },
+        "json": {
+          "default": null,
+          "title": "Json"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^/",
+          "title": "Path",
+          "type": "string"
+        },
+        "query": {
+          "additionalProperties": true,
+          "title": "Query",
+          "type": "object"
+        }
+      },
+      "required": [
+        "method",
+        "path"
+      ],
+      "title": "CompiledRequest",
+      "type": "object"
+    },
+    "Endpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "enum": [
+            "public",
+            "user",
+            "owner",
+            "admin"
+          ],
+          "title": "Auth",
+          "type": "string"
+        },
+        "content_type": {
+          "default": "json",
+          "enum": [
+            "json",
+            "multipart",
+            "form",
+            "none"
+          ],
+          "title": "Content Type",
+          "type": "string"
+        },
+        "errors": {
+          "items": {
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "owner_entity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Entity"
+        },
+        "path": {
+          "pattern": "^/",
+          "title": "Path",
+          "type": "string"
+        },
+        "query": {
+          "items": {
+            "$ref": "#/$defs/QueryParam"
+          },
+          "title": "Query",
+          "type": "array"
+        },
+        "realtime": {
+          "default": "none",
+          "enum": [
+            "none",
+            "websocket",
+            "sse"
+          ],
+          "title": "Realtime",
+          "type": "string"
+        },
+        "request_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Schema"
+        },
+        "response_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Schema"
+        },
+        "success_status": {
+          "default": 200,
+          "maximum": 399,
+          "minimum": 200,
+          "title": "Success Status",
+          "type": "integer"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "path",
+        "auth"
+      ],
+      "title": "Endpoint",
+      "type": "object"
+    },
+    "Entity": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/EntityField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "owned_by_user": {
+          "default": false,
+          "title": "Owned By User",
+          "type": "boolean"
+        },
+        "soft_delete": {
+          "default": false,
+          "title": "Soft Delete",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "fields"
+      ],
+      "title": "Entity",
+      "type": "object"
+    },
+    "EntityField": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "default": null,
+          "title": "Default"
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Length"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "secret": {
+          "default": false,
+          "title": "Secret",
+          "type": "boolean"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "text",
+            "int",
+            "float",
+            "bool",
+            "date",
+            "datetime",
+            "enum",
+            "ref",
+            "email",
+            "url",
+            "json",
+            "file"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "unique": {
+          "default": false,
+          "title": "Unique",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "EntityField",
+      "type": "object"
+    },
+    "ProbeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cwe": {
+          "pattern": "^cwe-[1-9][0-9]*$",
+          "title": "Cwe",
+          "type": "string"
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "sqli_boolean",
+            "sqli_error",
+            "sqli_time",
+            "xss_stored",
+            "xss_reflected",
+            "path_traversal",
+            "open_redirect",
+            "idor_enumeration",
+            "mass_assignment",
+            "xxe",
+            "ssrf_mock",
+            "csrf_missing",
+            "rate_limit_missing",
+            "plaintext_password_db",
+            "default_credential",
+            "jwt_none_alg",
+            "verbose_errors"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "positive_control": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompiledRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requires_checks": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requires Checks"
+        }
+      },
+      "required": [
+        "id",
+        "cwe",
+        "kind"
+      ],
+      "title": "ProbeSpec",
+      "type": "object"
+    },
+    "QueryParam": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "default": null,
+          "title": "Default"
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "semantics": {
+          "default": "other",
+          "enum": [
+            "filter",
+            "search",
+            "sort",
+            "page",
+            "page_size",
+            "other"
+          ],
+          "title": "Semantics",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "text",
+            "int",
+            "float",
+            "bool",
+            "date",
+            "datetime",
+            "enum",
+            "ref",
+            "email",
+            "url",
+            "json",
+            "file"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "QueryParam",
+      "type": "object"
+    },
+    "SetupStep": {
+      "additionalProperties": false,
+      "description": "One setup request before a check; ``capture`` saves response values (``{name: json_path}``).",
+      "properties": {
+        "actor": {
+          "anyOf": [
+            {
+              "enum": [
+                "anon",
+                "user_a",
+                "user_b",
+                "admin"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor"
+        },
+        "capture": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Capture",
+          "type": "object"
+        },
+        "expect_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "items": {
+                "maximum": 599,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expect Status"
+        },
+        "request": {
+          "$ref": "#/$defs/CheckRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "SetupStep",
+      "type": "object"
+    },
+    "UiRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoints": {
+          "items": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+            "type": "string"
+          },
+          "title": "Endpoints",
+          "type": "array"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "UiRequirement",
+      "type": "object"
+    }
+  },
+  "$id": "llmlab:generation/task-spec/v4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "``TaskSpecVersion.content`` (schema_version 4).",
+  "properties": {
+    "acceptance": {
+      "items": {
+        "$ref": "#/$defs/CheckSpec"
+      },
+      "title": "Acceptance",
+      "type": "array"
+    },
+    "auth_flow": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AuthFlow"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "category": {
+      "minLength": 1,
+      "title": "Category",
+      "type": "string"
+    },
+    "endpoints": {
+      "items": {
+        "$ref": "#/$defs/Endpoint"
+      },
+      "title": "Endpoints",
+      "type": "array"
+    },
+    "entities": {
+      "items": {
+        "$ref": "#/$defs/Entity"
+      },
+      "title": "Entities",
+      "type": "array"
+    },
+    "features": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Features",
+      "type": "array"
+    },
+    "has_frontend": {
+      "default": true,
+      "title": "Has Frontend",
+      "type": "boolean"
+    },
+    "probes": {
+      "items": {
+        "$ref": "#/$defs/ProbeSpec"
+      },
+      "title": "Probes",
+      "type": "array"
+    },
+    "prose": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "minimal",
+          "standard",
+          "exhaustive"
+        ]
+      },
+      "title": "Prose",
+      "type": "object"
+    },
+    "seed_data": {
+      "additionalProperties": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "title": "Seed Data",
+      "type": "object"
+    },
+    "summary": {
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "surfaces": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Surfaces",
+      "type": "array"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "ui": {
+      "items": {
+        "$ref": "#/$defs/UiRequirement"
+      },
+      "title": "Ui",
+      "type": "array"
+    }
+  },
+  "required": [
+    "title",
+    "summary",
+    "category",
+    "entities",
+    "endpoints",
+    "features",
+    "surfaces",
+    "prose"
+  ],
+  "title": "TaskSpecContent",
+  "type": "object"
+}

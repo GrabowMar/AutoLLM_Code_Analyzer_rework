@@ -38,7 +38,7 @@ class RankingRow(Schema):
     apps_failed: int = 0
     # Mean generation time of completed apps; None when none completed.
     avg_duration: float | None = None
-    # Experiment conditions this row pools (several = arms mixed; see pooling_note).
+    # Study conditions this row pools (several = arms mixed; see pooling_note).
     conditions_pooled: int = 0
     pooling_note: str | None = None
     # Code issues the empirical score counts (common tools, no advisories, no

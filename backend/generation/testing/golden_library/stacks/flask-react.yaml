@@ -1,0 +1,13 @@
+name: Flask + React (SQLite)
+description: Python 3.13 Flask API serving a Vite React build.
+content:
+  choice_mode: fixed
+  backend: {language: python, framework: flask, runtime: python3.13}
+  frontend: {framework: react, language: js, build_tool: vite}
+  database: sqlite
+  run_contract: {port: 8000, static_serving: backend}
+  brief_fragment: stack-flask-react@1
+  adherence:
+    backend_markers: [flask]
+    frontend_markers: [react]
+    db_markers: [sqlite3]

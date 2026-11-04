@@ -20,10 +20,16 @@ BlockedReason = Literal[
     "model_not_served",
     "residency_wait",
     "warming_model",
-    "experiment_cap",
+    "study_cap",
     "circuit_open",
     "draining",
     "retry_backoff",
+    "condition_paused",
+    # Per-study concurrency knobs (scheduler.STUDY_*_CAP); missing here made /queue/ answer 500 (E2E-27).
+    "study_endpoint_cap",
+    "study_model_cap",
+    "study_provider_cap",
+    "budget",
 ]
 
 
@@ -47,7 +53,7 @@ class ExecutorLeader(Schema):
 
 
 class DrainingRemaining(Schema):
-    jobs: int = 0
+    runs: int = 0
     post_runs: int = 0
 
 
@@ -83,7 +89,7 @@ class EndpointCapacity(Schema):
     online: bool = False
     status: Literal["online", "offline", "degraded", "disabled"] = "offline"
     slots: UsedTotal = UsedTotal()  # in-flight upstream requests / max_concurrency
-    jobs: UsedTotal = UsedTotal()  # active jobs / job cap
+    jobs: UsedTotal = UsedTotal()  # active runs / the endpoint's job cap (max_active_jobs)
     held_by_others: int = 0
     queued_requests: int = 0
     resident_models: list[str] = []  # caller's own models
@@ -94,7 +100,7 @@ class EndpointCapacity(Schema):
     blocked_reason: str | None = None
 
 
-class ExperimentCapacityRow(Schema):
+class StudyCapacityRow(Schema):
     id: UUID
     name: str
     status: str
@@ -110,13 +116,15 @@ class CapacityOut(Schema):
     limits: CapacityLimits
     lanes: Lanes
     endpoints: list[EndpointCapacity] = []
-    experiments: list[ExperimentCapacityRow] = []
+    studies: list[StudyCapacityRow] = []
 
 
 class QueueItem(Schema):
-    job_id: UUID
-    experiment_id: UUID | None = None
+    run_id: UUID
+    kind: str
+    study_id: UUID | None = None
     condition_id: int | None = None
+    cell_id: int | None = None
     model_name: str = ""
     endpoint_slug: str
     lane: Literal["sandbox", "llm"]
@@ -130,7 +138,7 @@ class QueueItem(Schema):
 
 class QueueOut(Schema):
     items: list[QueueItem] = []
-    others_ahead: dict[str, int] = {}  # endpoint slug -> count of other users' jobs ahead
+    others_ahead: dict[str, int] = {}  # endpoint slug -> count of other users' runs ahead
 
 
 class ExecutorSettingsOut(Schema):
@@ -145,7 +153,7 @@ class ExecutorSettingsPatch(Schema):
     sandbox_slots: int | None = Field(None, ge=0, le=8)
     eval_slots: int | None = Field(None, ge=0, le=4)
     llm_job_threads: int | None = Field(None, ge=1, le=32)
-    post_run_slots: int | None = Field(None, ge=0, le=1)
+    post_run_slots: int | None = Field(None, ge=0, le=2)
     draining: bool | None = None
 
 

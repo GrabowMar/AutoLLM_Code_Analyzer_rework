@@ -1,0 +1,14 @@
+name: Spring Boot (server-rendered, SQLite)
+description: Spring Boot 4 (Java 21) app with server-rendered pages (Thymeleaf); no separate frontend build.
+content:
+  choice_mode: fixed
+  backend: {language: java, framework: spring-boot, runtime: temurin21}
+  frontend: {framework: none, language: none, build_tool: none}
+  database: sqlite
+  run_contract: {port: 8000, api_prefix: /api, health_path: /api/health, static_serving: backend, data_dir: ./data, start: dockerfile}
+  brief_fragment: stack-spring-boot-none@1
+  adherence:
+    backend_markers: [spring-boot-starter-webmvc]
+    frontend_markers: []
+    db_markers: [sqlite-jdbc]
+  resources: {min_memory: 3g, min_cpus: 2.0}

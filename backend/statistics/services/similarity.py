@@ -1,31 +1,24 @@
-"""Run-to-run similarity: generated code, finding sets and LLM call sequences of two jobs.
+"""Run-to-run similarity: generated code, finding sets and LLM call sequences of two runs.
 
 Descriptive *diversity* measures for repeats of one setup, never quality:
 
-* **Code.** Each job's *agent-written source*: ``result_data.files`` filtered
-  by the LOC source rules (``reports.services.loc.is_source_file``: no
-  manifests, lockfiles, docs, minified bundles or dependency/cache dirs),
-  without test code (``is_test_path``) and without files the stack scaffold
-  supplied unchanged (agent runs: ``agent.workspace.manifest`` origin
-  ``scaffold``; template modes: files identical to the pinned stack
-  skeleton; when neither is available the map is marked ``approximate``).
-  Pairwise: path Jaccard, identical files (manifest sha256, else a content
-  hash), normalized-line Jaccard, token 5-gram shingle Jaccard (regex
-  tokens, per file) and, for Python, an ``ast`` node-type 3-gram Jaccard.
-  A legacy single-blob result has no paths: its path measures are None.
-  Results are cached per (job_a, job_b, :data:`ALGO_VERSION`): a finished
-  job's code never changes.
-* **Findings.** Per tool, the Jaccard of ``(rule_id, normalized path)``
-  signatures of each job's latest result for that tool
-  (``ToolResult.latest_ids_per_job``), only for tools that *measured* both
-  jobs (completed, or skipped as not applicable), with code issues and
-  dependency advisories (``is_dependency_advisory``) apart. Findings in test
-  code or non-source dirs and runtime (DAST) findings are left out. A pair
-  no common tool measured is None, never 0.
-* **Calls (determinism probe).** For exact replays (same ``run_fingerprint``):
-  the first call whose response (content, tool name + arguments, status)
-  differs, from the stored ``agent_call_NNNN`` artifacts (content truncated
-  at 8 000 chars there, so equality is judged on what was stored).
+* **Code.** Each run's *model-written source*: its **model** scope (``RunView``: authored, modified and slot
+  files; starter files, artifacts and excluded rows are not in it), filtered by the LOC source rules
+  (``reports.services.loc.is_source_file``: no manifests, lockfiles, docs, minified bundles or
+  dependency/cache dirs) and without test code (``is_test_path``). Read in bulk with
+  ``run_views_code(runs, "model")``. Pairwise: path Jaccard, identical files (content hash),
+  normalized-line Jaccard, token 5-gram shingle Jaccard (regex tokens, per file) and, for Python, an
+  ``ast`` node-type 3-gram Jaccard. Results are cached per (run_a, run_b, :data:`ALGO_VERSION`): a finished
+  run's code never changes.
+* **Findings.** Per tool, the Jaccard of ``(rule_id, normalized path)`` signatures of each run's latest
+  result for that tool (``ToolResult.latest_ids_per_job``), only for tools that *measured* both runs
+  (completed; a not-applicable tool measured nothing), with code issues and dependency advisories
+  (``is_dependency_advisory``) apart. Findings in test code or non-source dirs and runtime (DAST) findings
+  are left out. A pair no common tool measured is None, never 0.
+* **Calls (determinism probe).** For exact replays (same ``run_fingerprint``): the first call whose
+  response (content, tool name + arguments, status) differs, from the stored ``agent_call_NNNN`` /
+  ``slot_call_NNNN`` artifacts (content truncated at 8 000 chars there, so equality is judged on what was
+  stored).
 
 Jaccard of two empty sets is None (nothing to compare), not 1.
 """
@@ -49,15 +42,16 @@ from backend.analysis.services.base import is_dependency_advisory
 from backend.analysis.services.base import is_non_source_path
 from backend.reports.services.loc import is_source_file
 from backend.reports.services.loc import is_test_path
-from backend.reports.services.loc import loc_from_result_data
+from backend.statistics.services.runs import code_loc
+from backend.statistics.services.runs import normalize_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
-# Bump when any pairwise measure changes: it keys the pair cache.
-ALGO_VERSION = 1
+# Bump when any pairwise measure changes: it keys the pair cache (2: v3 model scope).
+ALGO_VERSION = 2
 SHINGLE_K = 5
 AST_N = 3
 _PAIR_CACHE_SECONDS = 30 * 24 * 3600
@@ -68,7 +62,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*|\d+(?:\.\d+)?|[^\sA-Za-z0-9_$]
 _WS_RE = re.compile(r"\s+")
 # Lines that carry no content of their own (closing brackets, separators).
 _TRIVIAL_LINE_RE = re.compile(r"^[\s{}()\[\];,:<>/]*$")
-_PATH_PREFIXES = ("/work/", "/app/", "/workspace/", "./")
+_CALL_STAGE_RE = re.compile(r"^(agent|slot)_call_\d{4}$")
 
 
 # ── pure measures ─────────────────────────────────────────────────────
@@ -128,234 +122,129 @@ def ast_ngrams(text: str, n: int = AST_N) -> set[tuple[str, ...]] | None:
     return {tuple(names[i : i + n]) for i in range(len(names) - n + 1)}
 
 
-def normalize_path(path: str) -> str:
-    """A finding's file path relative to the app root (container prefixes and ``./`` stripped)."""
-    p = (path or "").replace("\\", "/")
-    for prefix in _PATH_PREFIXES:
-        if p.startswith(prefix):
-            p = p[len(prefix) :]
-    return p.lstrip("/")
-
-
-# ── agent-written source ──────────────────────────────────────────────
+# ── model-written source ──────────────────────────────────────────────
 
 
 def _content_sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
-def agent_source_map(
-    result_data: Any,
-    *,
-    skeleton: dict[str, Any] | None = None,
-) -> tuple[dict[str, str], dict[str, Any]]:
-    """The agent-written source files of a job (``{path: text}``) and how they were selected.
-
-    *skeleton* is the stack scaffold's ``{path: text}`` for template-mode
-    jobs (no workspace manifest): files identical to it are subtracted.
-    The info dict has ``origin`` (``manifest`` | ``skeleton`` | ``unfiltered``
-    | ``blob`` | ``none``), ``approximate``, ``has_paths``,
-    ``scaffold_excluded`` and ``sha`` (``{path: sha256}``).
-    """
-    data = result_data if isinstance(result_data, dict) else {}
-    files = data.get("files")
-    if isinstance(files, dict) and files:
-        agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
-        workspace = agent.get("workspace") if isinstance(agent.get("workspace"), dict) else {}
-        manifest = workspace.get("manifest") if isinstance(workspace.get("manifest"), dict) else None
-        out: dict[str, str] = {}
-        sha: dict[str, str] = {}
-        excluded = 0
-        for path, text in files.items():
-            if not isinstance(text, str) or not is_source_file(path) or is_test_path(path):
-                continue
-            entry = manifest.get(path) if manifest is not None else None
-            if isinstance(entry, dict) and entry.get("origin") == "scaffold":
-                excluded += 1
-                continue
-            if manifest is None and skeleton and isinstance(skeleton.get(path), str):
-                if skeleton[path].strip() == text.strip():
-                    excluded += 1
-                    continue
-            out[path] = text
-            recorded = entry.get("sha256") if isinstance(entry, dict) else None
-            sha[path] = recorded if isinstance(recorded, str) and recorded else _content_sha(text)
-        if manifest is not None:
-            origin = "manifest"
-        elif skeleton:
-            origin = "skeleton"
-        else:
-            origin = "unfiltered"
-        return out, {
-            "origin": origin,
-            "approximate": origin == "unfiltered",
-            "has_paths": True,
-            "scaffold_excluded": excluded,
-            "sha": sha,
-        }
-    blob: dict[str, str] = {}
-    for keys, name in ((("backend_code", "backend"), "backend"), (("frontend_code", "frontend"), "frontend")):
-        text = next((data.get(k) for k in keys if isinstance(data.get(k), str) and data.get(k)), None)
-        if text:
-            blob[name] = text
-    return blob, {
-        "origin": "blob" if blob else "none",
-        "approximate": True,
-        "has_paths": False,
-        "scaffold_excluded": 0,
-        "sha": {name: _content_sha(text) for name, text in blob.items()},
+def model_source_map(files: dict[str, str] | None) -> dict[str, str]:
+    """The model-written, non-test source files (``{path: text}``) of a run's model-scope code."""
+    return {
+        path: text
+        for path, text in (files or {}).items()
+        if isinstance(text, str) and is_source_file(path) and not is_test_path(path)
     }
 
 
 @dataclass
 class SourceFeatures:
-    """What the pairwise code measures need from one job (sets of hashes, no text)."""
+    """What the pairwise code measures need from one run (sets of hashes, no text)."""
 
     paths: frozenset[str]
     sha: dict[str, str]
-    has_paths: bool
-    approximate: bool
-    origin: str
     lines: frozenset[int]
     shingles: frozenset[int]
     ast: frozenset[tuple[str, ...]] | None
     n_files: int
 
 
-def source_features(result_data: Any, *, skeleton: dict[str, Any] | None = None) -> SourceFeatures:
-    files, info = agent_source_map(result_data, skeleton=skeleton)
+def source_features(files: dict[str, str] | None) -> SourceFeatures:
+    """:class:`SourceFeatures` of a run's model-scope code (``{path: text}``)."""
+    source = model_source_map(files)
     lines: set[int] = set()
     shingle_set: set[int] = set()
     ast_set: set[tuple[str, ...]] = set()
     parsed_python = False
-    for path, text in files.items():
+    for path, text in source.items():
         lines |= normalized_lines(text)
         shingle_set |= shingles(text)
-        if path.endswith(".py") or (path == "backend" and not info["has_paths"]):
+        if path.endswith(".py"):
             grams = ast_ngrams(text)
             if grams is not None:
                 parsed_python = True
                 ast_set |= grams
     return SourceFeatures(
-        paths=frozenset(files) if info["has_paths"] else frozenset(),
-        sha=info["sha"],
-        has_paths=info["has_paths"],
-        approximate=info["approximate"],
-        origin=info["origin"],
+        paths=frozenset(source),
+        sha={path: _content_sha(text) for path, text in source.items()},
         lines=frozenset(lines),
         shingles=frozenset(shingle_set),
         ast=frozenset(ast_set) if parsed_python else None,
-        n_files=len(files),
+        n_files=len(source),
     )
 
 
 def compare_sources(a: SourceFeatures, b: SourceFeatures) -> dict[str, Any]:
-    """The pairwise code measures of two jobs (see the module docstring)."""
-    both_paths = a.has_paths and b.has_paths
-    common = a.paths & b.paths if both_paths else frozenset()
+    """The pairwise code measures of two runs (see the module docstring)."""
+    common = a.paths & b.paths
     return {
-        "path_jaccard": jaccard(a.paths, b.paths) if both_paths else None,
-        "identical_files": sum(1 for p in common if a.sha.get(p) and a.sha.get(p) == b.sha.get(p))
-        if both_paths
-        else None,
+        "path_jaccard": jaccard(a.paths, b.paths),
+        "identical_files": sum(1 for p in common if a.sha.get(p) and a.sha.get(p) == b.sha.get(p)),
         "line_jaccard": jaccard(a.lines, b.lines),
         "shingle_jaccard": jaccard(a.shingles, b.shingles),
         "ast_jaccard": jaccard(a.ast, b.ast) if a.ast is not None and b.ast is not None else None,
         "files_a": a.n_files,
         "files_b": b.n_files,
-        "approximate": a.approximate or b.approximate,
     }
 
 
 # ── loading (Django) ──────────────────────────────────────────────────
 
-_SOURCE_FIELDS = (
-    "id",
-    "mode",
-    "status",
-    "stack_slug",
-    "resolved_bundle__stack",
-    "result_data__files",
-    "result_data__agent__workspace__manifest",
-    "result_data__backend_code",
-    "result_data__frontend_code",
-    "result_data__backend",
-    "result_data__frontend",
-)
-
-
-def _result_data_of(row: dict[str, Any]) -> dict[str, Any]:
-    """A minimal ``result_data`` from a ``values(*_SOURCE_FIELDS)`` row (what the source rules read)."""
-    data: dict[str, Any] = {}
-    for key in ("files", "backend_code", "frontend_code", "backend", "frontend"):
-        value = row.get(f"result_data__{key}")
-        if value is not None:
-            data[key] = value
-    manifest = row.get("result_data__agent__workspace__manifest")
-    if isinstance(manifest, dict):
-        data["agent"] = {"workspace": {"manifest": manifest}}
-    return data
-
 
 class SourceStore:
-    """Loads jobs' source features (and source LOC) on demand, keeping a bounded LRU of features.
+    """Loads runs' source features (and model-scope source LOC) on demand, keeping a bounded LRU of features.
 
-    A job's files are read from the database once per load; features (sets of
-    hashes) of at most ``capacity`` jobs are kept, so a large experiment never
-    holds every job's shingles at once. ``loc`` keeps every loaded job's
-    ``loc_from_result_data`` (small dicts). Template-mode jobs subtract their
-    pinned stack skeleton, read once per (slug, version).
+    A run's model-scope files are read once per load (``run_views_code``, one query per chunk); features (sets
+    of hashes) of at most ``capacity`` runs are kept, so a large study never holds every run's shingles at
+    once. ``loc`` keeps every loaded run's :func:`~backend.statistics.services.runs.code_loc` (small dicts;
+    ``None`` values for a run whose tree was never collected).
     """
 
     def __init__(self, capacity: int = 24) -> None:
         self.capacity = capacity
         self._features: OrderedDict[str, SourceFeatures] = OrderedDict()
         self.loc: dict[str, dict[str, Any]] = {}
-        self._skeletons: dict[tuple, dict[str, Any] | None] = {}
 
-    def _skeleton(self, row: dict[str, Any]) -> dict[str, Any] | None:
-        if row.get("result_data__agent__workspace__manifest"):
-            return None
-        stack = row.get("resolved_bundle__stack") if isinstance(row.get("resolved_bundle__stack"), dict) else {}
-        key = (stack.get("slug") or row.get("stack_slug") or "", stack.get("version"))
-        if key not in self._skeletons:
-            from backend.runtime.services.scaffolding import get_stack_row
+    def load(self, run_ids: Iterable[str], *, features: bool = True) -> None:
+        """Read the runs not loaded yet (one query per chunk); compute LOC and, with *features*, features."""
+        from backend.generation.models import GenerationRun
+        from backend.generation.runs.view import run_views_code
 
-            stack_row = get_stack_row(key[0], key[1]) if key[0] else None
-            files = getattr(stack_row, "files", None) if stack_row is not None else None
-            self._skeletons[key] = files if isinstance(files, dict) and files else None
-        return self._skeletons[key]
-
-    def load(self, job_ids: Iterable[str], *, features: bool = True) -> None:
-        """Read the jobs not loaded yet (one query per chunk); compute LOC and, with *features*, features."""
-        from backend.generation.models import GenerationJob
-
-        wanted = [str(j) for j in job_ids if str(j) not in self.loc or (features and str(j) not in self._features)]
+        wanted = [str(r) for r in run_ids if str(r) not in self.loc or (features and str(r) not in self._features)]
         for start in range(0, len(wanted), 20):
-            chunk = wanted[start : start + 20]
-            for row in GenerationJob.objects.filter(id__in=chunk).values(*_SOURCE_FIELDS):
-                job_id = str(row["id"])
-                data = _result_data_of(row)
-                self.loc[job_id] = loc_from_result_data(data)
+            runs = list(
+                GenerationRun.objects.filter(id__in=wanted[start : start + 20]).only(
+                    "id",
+                    "kind",
+                    "parent_run",
+                    "tree_hash",
+                ),
+            )
+            code = run_views_code(runs, "model")
+            for run in runs:
+                run_id = str(run.pk)
+                files = code.get(run_id) or {}
+                self.loc[run_id] = code_loc(files, has_tree=bool(run.tree_hash) or bool(files))
                 if features:
-                    self._put(job_id, source_features(data, skeleton=self._skeleton(row)))
+                    self._put(run_id, source_features(files))
 
-    def _put(self, job_id: str, value: SourceFeatures) -> None:
-        self._features[job_id] = value
-        self._features.move_to_end(job_id)
+    def _put(self, run_id: str, value: SourceFeatures) -> None:
+        self._features[run_id] = value
+        self._features.move_to_end(run_id)
         while len(self._features) > self.capacity:
             self._features.popitem(last=False)
 
-    def features(self, job_id: str) -> SourceFeatures:
-        job_id = str(job_id)
-        if job_id not in self._features:
-            self.load([job_id], features=True)
-        value = self._features.get(job_id)
-        if value is None:  # the job does not exist (deleted mid-request)
+    def features(self, run_id: str) -> SourceFeatures:
+        run_id = str(run_id)
+        if run_id not in self._features:
+            self.load([run_id], features=True)
+        value = self._features.get(run_id)
+        if value is None:  # the run does not exist (deleted mid-request)
             value = source_features({})
-            self._put(job_id, value)
+            self._put(run_id, value)
         else:
-            self._features.move_to_end(job_id)
+            self._features.move_to_end(run_id)
         return value
 
 
@@ -383,11 +272,11 @@ def pair_similarities(
     pairs: Iterable[tuple[str, str]],
     store: SourceStore | None = None,
 ) -> dict[tuple[str, str], dict[str, Any]]:
-    """Code similarity of each ``(job_a, job_b)`` pair, cached; the keys are the pairs as given.
+    """Code similarity of each ``(run_a, run_b)`` pair, cached; the keys are the pairs as given.
 
     Pairs are computed in the order given, so callers that list pairs grouped
-    by job (cell by cell) keep the store's working set small. Only finished
-    jobs should be passed: the cache assumes the code never changes.
+    by run (cell by cell) keep the store's working set small. Only finished
+    runs should be passed: the cache assumes the code never changes.
     """
     pairs = [(str(a), str(b)) for a, b in pairs if str(a) != str(b)]
     keys = {pair: _pair_key(*pair) for pair in pairs}
@@ -395,15 +284,15 @@ def pair_similarities(
     missing = [p for p in pairs if keys[p] not in cached]
     if missing:
         store = store or SourceStore()
-        # Windows of pairs whose jobs fit the store: one query per window.
+        # Windows of pairs whose runs fit the store: one query per window.
         window: list[tuple[str, str]] = []
-        jobs: set[str] = set()
+        runs: set[str] = set()
         for pair in [*missing, None]:
-            if pair is not None and (len(jobs | set(pair)) <= max(2, store.capacity) or not window):
+            if pair is not None and (len(runs | set(pair)) <= max(2, store.capacity) or not window):
                 window.append(pair)
-                jobs |= set(pair)
+                runs |= set(pair)
                 continue
-            store.load(sorted(jobs))
+            store.load(sorted(runs))
             for a, b in window:
                 key = keys[(a, b)]
                 if key in cached:
@@ -412,7 +301,7 @@ def pair_similarities(
                 cached[key] = value
                 _cache_set(key, value, _PAIR_CACHE_SECONDS)
             if pair is not None:
-                window, jobs = [pair], set(pair)
+                window, runs = [pair], set(pair)
     return {pair: cached[keys[pair]] for pair in pairs}
 
 
@@ -421,22 +310,22 @@ def pair_similarities(
 
 @dataclass
 class FindingSets:
-    """Per job and tool: the signatures of the latest result, and which tools measured the job."""
+    """Per run and tool: the signatures of the latest result, and which tools measured the run."""
 
     measured: dict[str, set[str]]
     code: dict[str, dict[str, set[tuple[str, str]]]]
     dependency: dict[str, dict[str, set[tuple[str, str]]]]
 
 
-def finding_sets(job_ids: Iterable[str]) -> FindingSets:
-    """Finding signatures of each job's latest result per tool (AI reviewers left out)."""
+def finding_sets(run_ids: Iterable[str]) -> FindingSets:
+    """Finding signatures of each run's latest result per tool (AI reviewers left out)."""
     from backend.analysis.models import AnalysisMode
     from backend.analysis.models import AnalyzerTool
     from backend.analysis.models import Finding
     from backend.analysis.models import ToolResult
-    from backend.analysis.services.runner import SKIP_NOT_APPLICABLE
+    from backend.statistics.services.study import tool_measured
 
-    ids = [str(j) for j in job_ids]
+    ids = [str(j) for j in run_ids]
     measured: dict[str, set[str]] = defaultdict(set)
     code: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
     dependency: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
@@ -445,29 +334,26 @@ def finding_sets(job_ids: Iterable[str]) -> FindingSets:
     ai = AnalyzerTool.ai_slugs()
     dynamic = set(AnalyzerTool.objects.filter(analysis_mode=AnalysisMode.DYNAMIC).values_list("slug", flat=True))
     result_to: dict[str, tuple[str, str]] = {}
-    for result_id, job_id, slug, status, summary in ToolResult.objects.filter(
+    for result_id, run_id, slug, status, summary in ToolResult.objects.filter(
         id__in=ToolResult.latest_ids_per_job(ids),
     ).values_list("id", "run__generation_job_id", "tool_slug", "status", "summary"):
         if slug in ai:
             continue
-        skip_reason = summary.get("skip_reason") if isinstance(summary, dict) else None
-        if status == ToolResult.Status.COMPLETED or (
-            status == ToolResult.Status.SKIPPED and skip_reason == SKIP_NOT_APPLICABLE
-        ):
-            measured[str(job_id)].add(slug)
-            result_to[str(result_id)] = (str(job_id), slug)
+        if tool_measured(status, summary):
+            measured[str(run_id)].add(slug)
+            result_to[str(result_id)] = (str(run_id), slug)
     for result_id, rule_id, file_path, category in Finding.objects.filter(
         result_id__in=list(result_to),
     ).values_list("result_id", "rule_id", "file_path", "category"):
-        job_id, slug = result_to[str(result_id)]
+        run_id, slug = result_to[str(result_id)]
         path = normalize_path(file_path)
         if is_dependency_advisory(slug, category or "", rule_id or ""):
             # One project, several manifests: an advisory is matched within its directory.
-            dependency[job_id][slug].add((rule_id or "", posixpath.dirname(path)))
+            dependency[run_id][slug].add((rule_id or "", posixpath.dirname(path)))
             continue
         if slug in dynamic or (path and (is_test_path(path) or is_non_source_path(path))):
             continue  # runtime issues and test code are counted apart, not as code issues
-        code[job_id][slug].add((rule_id or "", path))
+        code[run_id][slug].add((rule_id or "", path))
     return FindingSets(
         measured={k: set(v) for k, v in measured.items()},
         code={k: dict(v) for k, v in code.items()},
@@ -475,10 +361,10 @@ def finding_sets(job_ids: Iterable[str]) -> FindingSets:
     )
 
 
-def finding_overlap(sets: FindingSets, job_a: str, job_b: str) -> dict[str, Any] | None:
-    """Jaccard of two jobs' finding signatures over the tools that measured both; None when none did."""
-    job_a, job_b = str(job_a), str(job_b)
-    tools = sorted(sets.measured.get(job_a, set()) & sets.measured.get(job_b, set()))
+def finding_overlap(sets: FindingSets, run_a: str, run_b: str) -> dict[str, Any] | None:
+    """Jaccard of two runs' finding signatures over the tools that measured both; None when none did."""
+    run_a, run_b = str(run_a), str(run_b)
+    tools = sorted(sets.measured.get(run_a, set()) & sets.measured.get(run_b, set()))
     if not tools:
         return None
     per_tool = []
@@ -486,8 +372,8 @@ def finding_overlap(sets: FindingSets, job_a: str, job_b: str) -> dict[str, Any]
     for tool in tools:
         row: dict[str, Any] = {"tool": tool}
         for kind, table in (("code", sets.code), ("dependency", sets.dependency)):
-            sa = table.get(job_a, {}).get(tool, set())
-            sb = table.get(job_b, {}).get(tool, set())
+            sa = table.get(run_a, {}).get(tool, set())
+            sb = table.get(run_b, {}).get(tool, set())
             pooled[kind][0].update((tool, *s) for s in sa)
             pooled[kind][1].update((tool, *s) for s in sb)
             row[kind] = {"jaccard": jaccard(sa, sb), "a": len(sa), "b": len(sb), "both": len(sa & sb)}
@@ -524,31 +410,36 @@ def _call_signature(response: Any) -> tuple:
     return (r.get("status"), (r.get("content") or "").strip(), calls)
 
 
-def _calls(job_id: str) -> list[dict[str, Any]]:
+def _calls(run_id: str) -> list[dict[str, Any]]:
+    """The stored call artifacts of the run's last attempt, in call order (a retry restarts the numbering)."""
     from backend.generation.models import GenerationArtifact
 
-    return list(
-        GenerationArtifact.objects.filter(job_id=job_id, stage__startswith="agent_call_")
-        .order_by("stage")
-        .values("stage", "response_payload"),
-    )
+    rows = [
+        row
+        for row in GenerationArtifact.objects.filter(run_id=run_id, stage__regex=_CALL_STAGE_RE.pattern)
+        .order_by("attempt", "stage")
+        .values("attempt", "stage", "response_payload")
+        if _CALL_STAGE_RE.match(row["stage"])
+    ]
+    last = max((row["attempt"] for row in rows), default=None)
+    return [row for row in rows if row["attempt"] == last]
 
 
-def call_divergence(job_a: str, job_b: str) -> dict[str, Any]:
+def call_divergence(run_a: str, run_b: str) -> dict[str, Any]:
     """Where two runs' LLM call sequences first differ (cached per pair).
 
     ``first_divergent_call`` is 1-based; None when every call matched and the
     counts are equal (the replay reproduced, as far as stored artifacts tell).
     A run without stored calls gives ``comparable: false``.
     """
-    lo, hi = sorted((str(job_a), str(job_b)))
+    lo, hi = sorted((str(run_a), str(run_b)))
     key = f"variability:calls:v{ALGO_VERSION}:{lo}:{hi}"
     try:
         hit = cache.get(key)
     except Exception:  # noqa: BLE001
         hit = None
     if hit is not None:
-        return hit if lo == str(job_a) else _swap_calls(hit)
+        return hit if lo == str(run_a) else _swap_calls(hit)
     calls_a, calls_b = _calls(lo), _calls(hi)
     providers_a = sorted({str((c["response_payload"] or {}).get("provider") or "unknown") for c in calls_a})
     providers_b = sorted({str((c["response_payload"] or {}).get("provider") or "unknown") for c in calls_b})
@@ -576,7 +467,7 @@ def call_divergence(job_a: str, job_b: str) -> dict[str, Any]:
         "basis": "stored call artifacts (content truncated at 8000 chars)",
     }
     _cache_set(key, value, _CALLS_CACHE_SECONDS)
-    return value if lo == str(job_a) else _swap_calls(value)
+    return value if lo == str(run_a) else _swap_calls(value)
 
 
 def _swap_calls(value: dict[str, Any]) -> dict[str, Any]:

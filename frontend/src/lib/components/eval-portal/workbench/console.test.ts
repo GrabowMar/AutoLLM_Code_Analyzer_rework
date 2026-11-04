@@ -131,9 +131,8 @@ describe("endpoint suggestions", () => {
   const spec: AppSpecView = {
     name: "Todo",
     description: "",
-    backend_requirements: [],
+    prose: "",
     frontend_requirements: [],
-    admin_requirements: [],
     api_endpoints: [
       {
         method: "get",

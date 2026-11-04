@@ -1,0 +1,264 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Clinic appointments
+summary: Book, reschedule and cancel clinic appointments; clinic staff see the whole day.
+category: healthcare
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Appointment
+  fields:
+  - {name: patient_name, type: string, required: true, max_length: 100}
+  - {name: date, type: date, required: true}
+  - {name: time, type: string, required: true, max_length: 5}
+  - {name: reason, type: string, max_length: 500}
+  - name: status
+    type: enum
+    enum: [scheduled, completed, cancelled]
+    default: scheduled
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: appointments.list
+  method: GET
+  path: /api/appointments
+  auth: user
+  query:
+  - name: status
+    type: enum
+    semantics: filter
+    enum: [scheduled, completed, cancelled]
+  - {name: start_date, type: date, semantics: filter}
+  - {name: end_date, type: date, semantics: filter}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, patient_name, date, time]
+          properties:
+            id:
+              type: [integer, string]
+            patient_name: {type: string, maxLength: 100, minLength: 1}
+            date: {type: string, format: date}
+            time: {type: string, maxLength: 5, minLength: 1}
+            reason:
+              type: [string, 'null']
+              maxLength: 500
+            status:
+              type: [string, 'null']
+              enum: [scheduled, completed, cancelled, null]
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+  errors: [400]
+- id: appointments.create
+  method: POST
+  path: /api/appointments
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      patient_name: {type: string, maxLength: 100, minLength: 1}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      reason:
+        type: [string, 'null']
+        maxLength: 500
+    required: [patient_name, date, time]
+  response_schema:
+    type: object
+    required: [id, patient_name, date, time]
+    properties:
+      id:
+        type: [integer, string]
+      patient_name: {type: string, maxLength: 100, minLength: 1}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      reason:
+        type: [string, 'null']
+        maxLength: 500
+      status:
+        type: [string, 'null']
+        enum: [scheduled, completed, cancelled, null]
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+- id: appointments.get
+  method: GET
+  path: /api/appointments/{id}
+  auth: owner
+  owner_entity: Appointment
+  response_schema:
+    type: object
+    required: [id, patient_name, date, time]
+    properties:
+      id:
+        type: [integer, string]
+      patient_name: {type: string, maxLength: 100, minLength: 1}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      reason:
+        type: [string, 'null']
+        maxLength: 500
+      status:
+        type: [string, 'null']
+        enum: [scheduled, completed, cancelled, null]
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: appointments.update
+  method: PATCH
+  path: /api/appointments/{id}
+  auth: owner
+  owner_entity: Appointment
+  request_schema:
+    type: object
+    properties:
+      patient_name: {type: string, maxLength: 100, minLength: 1}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      reason:
+        type: [string, 'null']
+        maxLength: 500
+      status:
+        type: [string, 'null']
+        enum: [scheduled, completed, cancelled, null]
+  response_schema:
+    type: object
+    required: [id, patient_name, date, time]
+    properties:
+      id:
+        type: [integer, string]
+      patient_name: {type: string, maxLength: 100, minLength: 1}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      reason:
+        type: [string, 'null']
+        maxLength: 500
+      status:
+        type: [string, 'null']
+        enum: [scheduled, completed, cancelled, null]
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404, 409]
+- id: appointments.delete
+  method: DELETE
+  path: /api/appointments/{id}
+  auth: owner
+  owner_entity: Appointment
+  success_status: 204
+  errors: [404]
+- id: schedule.get
+  method: GET
+  path: /api/schedule
+  auth: public
+  query:
+  - {name: date, type: date, semantics: filter}
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            time: {type: string}
+            booked: {type: integer}
+          required: [time, booked]
+- id: admin.appointments
+  method: GET
+  path: /api/admin/appointments
+  auth: admin
+  query:
+  - {name: date, type: date, semantics: filter}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, patient_name, date, time]
+          properties:
+            id:
+              type: [integer, string]
+            patient_name: {type: string, maxLength: 100, minLength: 1}
+            date: {type: string, format: date}
+            time: {type: string, maxLength: 5, minLength: 1}
+            reason:
+              type: [string, 'null']
+              maxLength: 500
+            status:
+              type: [string, 'null']
+              enum: [scheduled, completed, cancelled, null]
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.schedule
+  text: A public date picker with the booked times of that day and how many appointments each has.
+  endpoints: [schedule.get]
+- id: ui.mine
+  text: The user's appointments with a status badge, status and date-range filters and paging; 'Mark completed'
+    and 'Cancel' (with confirmation) on scheduled ones; cancelled ones greyed out.
+  endpoints: [appointments.list, appointments.update]
+- id: ui.forms
+  text: A booking form and a reschedule form showing the API's validation messages.
+  endpoints: [appointments.create, appointments.update]
+- id: ui.admin
+  text: 'For the admin: every appointment of the chosen day.'
+  endpoints: [admin.appointments]
+features: [auth, ownership, admin, filter, pagination, scheduling]
+surfaces: [cwe-639, cwe-862, cwe-200, cwe-359, cwe-20, cwe-89, cwe-798]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+probes:
+- {id: probe.appointments.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: appointments.get}
+- {id: probe.appointments.default_admin, cwe: cwe-798, kind: default_credential}

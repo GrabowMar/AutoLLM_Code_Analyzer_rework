@@ -1,0 +1,14 @@
+name: Flask + React, minimal
+description: Flask serving /api/health and the Vite build; a one-component React shell.
+stack_profile: flask-react@1
+level: minimal
+base_images:
+  - {ref: "python:3.13-slim", digest: "python:3.13-slim@sha256:3333333333333333333333333333333333333333333333333333333333333333"}
+  - {ref: "node:24-slim", digest: "node:24-slim@sha256:4444444444444444444444444444444444444444444444444444444444444444"}
+lockfiles: [backend/requirements.txt]
+install: [pip install -r backend/requirements.txt, npm ci]
+composition:
+  backend_fragment: backend/flask/minimal
+  frontend_fragment: frontend/react/minimal
+  dockerfile_template: flask.Dockerfile.jinja2
+forbidden_content_check: {passed: true, linter_version: 1}

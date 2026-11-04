@@ -1,0 +1,11 @@
+name: Debug mode enabled (Python)
+description: The app runs with debug=True (Flask app.run / config) or DEBUG = True (Django settings), exposing the interactive debugger.
+content:
+  engine: regex
+  languages: [python]
+  rule: '\.run\([^)\n]*\bdebug\s*=\s*True|\bDEBUG\s*=\s*True\b'
+  tool: {name: re, version: py3.13}
+  feature_key: py-debug-true
+  polarity: insecure
+  cwe: [cwe-489]
+  description: The app enables debug mode.

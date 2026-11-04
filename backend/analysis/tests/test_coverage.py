@@ -14,8 +14,7 @@ from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import AnalyzerWorkspaceFactory
 from backend.analysis.tests.factories import InstalledToolFactory
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.analysis.tests.factories import generation_run
 
 pytestmark = pytest.mark.django_db
 
@@ -64,15 +63,12 @@ def test_detect_empty_map():
 
 
 def test_app_coverage_counts_apps_and_tool_fit(user):
-    GenerationJobFactory(created_by=user, status=GenerationJob.Status.COMPLETED, result_data={"files": FLASK_REACT})
-    GenerationJobFactory(
-        created_by=user,
-        status=GenerationJob.Status.COMPLETED,
-        result_data={"files": {"main.py": "from fastapi import FastAPI\n"}},
-    )
-    # Not counted: failed, or someone else's.
-    GenerationJobFactory(created_by=user, status=GenerationJob.Status.FAILED, result_data={"files": FLASK_REACT})
-    GenerationJobFactory(status=GenerationJob.Status.COMPLETED, result_data={"files": FLASK_REACT})
+    generation_run(user, files=FLASK_REACT)
+    generation_run(user, files={"main.py": "from fastapi import FastAPI\n"})
+    # Not counted: failed, someone else's, or never collected (no tree).
+    generation_run(user, files=FLASK_REACT, status="failed")
+    generation_run(files=FLASK_REACT)
+    generation_run(user, tested=False, status="completed")
 
     cov = app_coverage(user)
 

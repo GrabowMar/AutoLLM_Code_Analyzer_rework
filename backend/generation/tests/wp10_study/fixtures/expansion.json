@@ -1,0 +1,60 @@
+{
+  "about": "Factor-expansion fixtures shared with the study builder's vitest suite (WP-15 copies this file to frontend/src/lib/components/studies/__fixtures__/expansion.json). Each case gives factors, grid, units and repeats, and the expected condition and cell counts (main stage, no pilot).",
+  "cases": [
+    {
+      "name": "done_when_2x2x2_x2tasks_x2repeats",
+      "factors": [
+        {"key": "model", "role": "crossed", "levels": ["m1", "m2"]},
+        {"key": "stack_profile", "role": "crossed", "levels": ["s1", "s2"]},
+        {"key": "style", "role": "crossed", "levels": ["y1", "y2"]}
+      ],
+      "grid": {"type": "full", "exclude": []},
+      "units": 2, "repeats": 2,
+      "expected": {"conditions": 8, "cells": 32, "blocks": 4, "unbalanced": false}
+    },
+    {
+      "name": "with_prose_variants",
+      "factors": [
+        {"key": "model", "role": "crossed", "levels": ["m1", "m2"]},
+        {"key": "stack_profile", "role": "crossed", "levels": ["s1", "s2"]},
+        {"key": "style", "role": "crossed", "levels": ["y1", "y2"]},
+        {"key": "prose_variant", "role": "crossed", "levels": ["minimal", "standard"]}
+      ],
+      "grid": {"type": "full", "exclude": []},
+      "units": 2, "repeats": 2,
+      "expected": {"conditions": 16, "cells": 64, "blocks": 4, "unbalanced": false}
+    },
+    {
+      "name": "fixed_factor",
+      "factors": [
+        {"key": "model", "role": "crossed", "levels": ["m1", "m2", "m3"]},
+        {"key": "stack_profile", "role": "fixed", "levels": ["s1"]}
+      ],
+      "grid": {"type": "full", "exclude": []},
+      "units": 3, "repeats": 5,
+      "expected": {"conditions": 3, "cells": 45, "blocks": 15, "unbalanced": false}
+    },
+    {
+      "name": "exclusion",
+      "factors": [
+        {"key": "model", "role": "crossed", "levels": ["m1", "m2"]},
+        {"key": "style", "role": "crossed", "levels": ["y1", "y2"]}
+      ],
+      "grid": {"type": "full", "exclude": [{"model": "m1", "style": "y2"}]},
+      "units": 1, "repeats": 1,
+      "expected": {"conditions": 3, "cells": 3, "blocks": 1, "unbalanced": true}
+    },
+    {
+      "name": "half_fraction_D_eq_ABC",
+      "factors": [
+        {"key": "model", "role": "crossed", "levels": ["m1", "m2"]},
+        {"key": "stack_profile", "role": "crossed", "levels": ["s1", "s2"]},
+        {"key": "style", "role": "crossed", "levels": ["y1", "y2"]},
+        {"key": "guidance", "role": "fraction", "levels": ["g1", "g2"]}
+      ],
+      "grid": {"type": "fractional", "fraction": {"generator": "D=ABC"}, "exclude": []},
+      "units": 2, "repeats": 3,
+      "expected": {"conditions": 8, "cells": 48, "blocks": 6, "unbalanced": true}
+    }
+  ]
+}

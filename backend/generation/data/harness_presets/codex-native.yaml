@@ -1,0 +1,5 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: codex (native)
+description: codex 0.166.0 with its native system prompt, tools and defaults. Archived until the adapter is enabled.
+archived: true
+content: {harness: codex, harness_version: 0.166.0, pin_system_prompt: true}

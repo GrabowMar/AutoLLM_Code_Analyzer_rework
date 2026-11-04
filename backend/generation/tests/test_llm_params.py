@@ -1,17 +1,13 @@
-"""Tests for the layered LLM sampling params (validation, merge, snapshot plumbing)."""
+"""Tests for the layered LLM sampling params (validation, merge, named layers)."""
 
 from __future__ import annotations
 
 import pytest
 
-from backend.generation.services.llm_params import SAMPLING_KEYS
 from backend.generation.services.llm_params import merge_llm_params
 from backend.generation.services.llm_params import sampling_params
 from backend.generation.services.llm_params import validate_llm_params
-from backend.generation.services.profile_resolver import build_resolved_snapshot
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import GenerationProfileFactory
-from backend.llm_models.tests.factories import LLMModelFactory
+from backend.generation.services.sampling import layered_llm_params
 
 # ── validate_llm_params ───────────────────────────────────────────────
 
@@ -133,64 +129,16 @@ def test_sampling_params_drops_v2_provenance_provider_string():
     assert sampling_params(routing) == routing
 
 
-# ── snapshot plumbing ─────────────────────────────────────────────────
+# ── named layers (services.sampling) ─────────────────────────────────
 
 
-@pytest.mark.django_db
-def test_snapshot_layers_profile_config_under_run_overrides():
-    app = AppRequirementTemplateFactory()
-    model = LLMModelFactory()
-    profile = GenerationProfileFactory(llm_config={"temperature": 0.9, "top_k": 40})
-
-    snapshot = build_resolved_snapshot(
-        app_requirement=app,
-        profile=profile,
-        scaffolding_slug="flask-react",
-        model=model,
-        temperature=0.3,
-        max_tokens=32000,
-        user=None,
-        llm_overrides={"top_k": 20, "reasoning": {"effort": "low"}},
+def test_layered_params_name_the_winning_layer_and_none_unsets():
+    merged, sources = layered_llm_params(
+        [
+            ("preset", {"temperature": 0.7, "top_p": 0.9}),
+            ("study", {"temperature": 0.2, "top_p": None}),
+            ("empty", None),
+        ],
     )
-
-    llm = snapshot["llm"]
-    assert llm["temperature"] == 0.9  # profile beats legacy base
-    assert llm["top_k"] == 20  # run override beats profile
-    assert llm["reasoning"] == {"effort": "low"}
-    assert llm["max_tokens"] == 32000  # base survives when no layer overrides
-    assert llm["model_provider"] == model.provider
-    assert snapshot["llm_overrides"] == {"top_k": 20, "reasoning": {"effort": "low"}}
-    assert snapshot["bundle_schema_version"] == 3
-
-
-@pytest.mark.django_db
-def test_sampling_params_never_enter_prompt_hash_but_all_enter_fingerprint():
-    app = AppRequirementTemplateFactory()
-    model = LLMModelFactory()
-    profile = GenerationProfileFactory()
-
-    def snap(overrides):
-        return build_resolved_snapshot(
-            app_requirement=app,
-            profile=profile,
-            scaffolding_slug="flask-react",
-            model=model,
-            temperature=0.3,
-            max_tokens=32000,
-            user=None,
-            experiment_seed=42,
-            llm_overrides=overrides,
-        )
-
-    baseline = snap({})
-    for key, value in [
-        ("temperature", 1.5),
-        ("top_k", 7),
-        ("stop", ["END"]),
-        ("provider", {"order": ["openai"]}),
-        ("reasoning", {"effort": "high"}),
-    ]:
-        assert key in SAMPLING_KEYS
-        varied = snap({key: value})
-        assert varied["prompt_hash"] == baseline["prompt_hash"], key
-        assert varied["run_fingerprint"] != baseline["run_fingerprint"], key
+    assert merged == {"temperature": 0.2}
+    assert sources == {"temperature": "study"}

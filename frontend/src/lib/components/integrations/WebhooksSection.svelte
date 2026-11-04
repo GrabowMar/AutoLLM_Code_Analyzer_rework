@@ -204,7 +204,7 @@
 							{:else}
 								{#each sub.events as ev (ev)}<code class="mono-tag">{ev}</code>{/each}
 							{/if}
-							{#if sub.include_experiment_jobs}<code class="mono-tag">+ experiment jobs</code>{/if}
+							{#if sub.include_study_runs}<code class="mono-tag">+ experiment runs</code>{/if}
 						</p>
 					</div>
 					<div class="flex shrink-0 items-center gap-0.5">

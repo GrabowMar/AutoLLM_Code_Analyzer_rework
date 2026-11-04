@@ -35,6 +35,12 @@ OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=True
 # limit. A read token is enough; gated repos also need their license accepted.
 HUGGINGFACE_API_TOKEN=
 
+# Generation library — seed the system library (tasks, stacks, starters, prompts,
+# presets) after every `migrate`. Off when unset; tests seed explicitly.
+# Without it run `just manage seed_library` once (docs/QUICKSTART).
+# ------------------------------------------------------------------------------
+GENERATION_SEED_ON_MIGRATE=true
+
 # Public URL of the SvelteKit app in the browser (used in verification/reset emails).
 # Must match how you open the app — not the internal Docker service name.
 # ------------------------------------------------------------------------------

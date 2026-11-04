@@ -390,10 +390,10 @@
 						{/if}
 					</dd>
 				</div>
-				{#if task.experiment}
+				{#if task.study}
 					<div class="flex items-center justify-between gap-3 px-4 py-2">
 						<dt class="text-muted-foreground">Experiment</dt>
-						<dd class="min-w-0 truncate text-right"><a class="settings-link" href="/experiments/{task.experiment.id}">{task.experiment.name}</a></dd>
+						<dd class="min-w-0 truncate text-right"><a class="settings-link" href="/experiments/{task.study.id}">{task.study.name}</a></dd>
 					</div>
 				{/if}
 				{#if task.owner}

@@ -92,20 +92,16 @@ def test_sensitivity_endpoint(auth_client):
     from backend.analysis.models import Finding
     from backend.analysis.tests.factories import AnalysisRunFactory
     from backend.analysis.tests.factories import ToolResultFactory
-    from backend.generation.models import GenerationJob
-    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.generation.tests.factories import GenerationRunFactory
+    from backend.generation.tests.factories import RunFileFactory
 
     client, user = auth_client
     model = LLMModelFactory(model_id="m1", model_name="One")
-    job = GenerationJobFactory(
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        metrics={"lines_of_code": 1000},
-    )
+    job = GenerationRunFactory(created_by=user, model=model, tested=True)
+    RunFileFactory(run=job, path="app.py", loc=1000)
     run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
     result = ToolResultFactory(run=run, tool_slug="bandit")
-    Finding.objects.create(result=result, severity="high", title="f")
+    Finding.objects.create(result=result, severity="high", title="f", file_path="app.py")
 
     res = client.get("/api/rankings/sensitivity/")
     assert res.status_code == 200
@@ -124,11 +120,11 @@ def test_unauthenticated(client):
     assert client.get("/api/rankings/sensitivity/").status_code == 401
 
 
-def test_list_rankings_rejects_a_malformed_experiment_id(auth_client):
+def test_list_rankings_rejects_a_malformed_study_id(auth_client):
     client, _ = auth_client
-    res = client.get("/api/rankings/?experiment_id=not-a-uuid")
+    res = client.get("/api/rankings/?study_id=not-a-uuid")
     assert res.status_code == 400
-    ok = client.get("/api/rankings/?experiment_id=6f1c1d5e-9a43-4a8b-b6a4-3c3f4f0b9d2e")
+    ok = client.get("/api/rankings/?study_id=6f1c1d5e-9a43-4a8b-b6a4-3c3f4f0b9d2e")
     assert ok.status_code == 200
 
 

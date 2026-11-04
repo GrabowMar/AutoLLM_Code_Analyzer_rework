@@ -11,7 +11,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import type { Question, QuestionKind } from '$lib/api/types/human-eval';
 	import { messageAt, messagesAt, under, type FieldError } from './errors';
 	import { QUESTION_KINDS, applyQuestionKind } from './factories';

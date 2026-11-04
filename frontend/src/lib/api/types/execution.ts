@@ -1,4 +1,4 @@
-/** /api/execution/ wire types (spec §F.4). Mirrors backend/execution/api_schemas.py. */
+/** /api/execution/ wire types. Mirrors backend/execution/api_schemas.py (v3: runs and studies). */
 
 export type BlockedReason =
   | "sandbox_full"
@@ -8,10 +8,15 @@ export type BlockedReason =
   | "model_not_served"
   | "residency_wait"
   | "warming_model"
-  | "experiment_cap"
+  | "study_cap"
   | "circuit_open"
   | "draining"
-  | "retry_backoff";
+  | "retry_backoff"
+  | "condition_paused"
+  | "study_endpoint_cap"
+  | "study_model_cap"
+  | "study_provider_cap"
+  | "budget";
 
 export interface UsedTotal {
   used: number;
@@ -35,13 +40,15 @@ export interface ExecutorStatus {
   } | null;
   code_stale: boolean;
   draining: boolean;
-  draining_remaining: { jobs: number; post_runs: number };
+  /** Runs and post-run steps still finishing while the executor drains. */
+  draining_remaining: { runs: number; post_runs: number };
 }
 
 export interface SlotSettings {
   sandbox_slots: number;
   eval_slots: number;
   llm_job_threads: number;
+  /** 0-2 (spec §12: `post_run_slots` bound). */
   post_run_slots: number;
 }
 
@@ -62,7 +69,7 @@ export interface EndpointCapacity {
   status: "online" | "offline" | "degraded" | "disabled";
   /** in-flight upstream requests / max_concurrency */
   slots: UsedTotal;
-  /** active jobs / job cap */
+  /** active runs / the endpoint's job cap (`max_active_jobs`; the key keeps its name) */
   jobs: UsedTotal;
   held_by_others: number;
   queued_requests: number;
@@ -75,7 +82,8 @@ export interface EndpointCapacity {
   blocked_reason: string | null;
 }
 
-export interface ExperimentCapacityRow {
+/** One running study (`Study.max_parallel` caps its runs; blocked reason `study_cap`). */
+export interface StudyCapacityRow {
   id: string;
   name: string;
   status: string;
@@ -91,13 +99,17 @@ export interface Capacity {
   limits: CapacityLimits;
   lanes: Lanes;
   endpoints: EndpointCapacity[];
-  experiments: ExperimentCapacityRow[];
+  studies: StudyCapacityRow[];
 }
 
 export interface QueueItem {
-  job_id: string;
-  experiment_id: string | null;
+  /** GenerationRun id. */
+  run_id: string;
+  /** Run kind (`app_agentic`, `slot_single_shot`, ...). */
+  kind: string;
+  study_id: string | null;
   condition_id: number | null;
+  cell_id: number | null;
   model_name: string;
   endpoint_slug: string;
   lane: "sandbox" | "llm";
@@ -111,12 +123,12 @@ export interface QueueItem {
 
 export interface QueueOut {
   items: QueueItem[];
-  /** endpoint slug -> other users' jobs ahead (count only) */
+  /** endpoint slug -> other users' runs ahead (count only) */
   others_ahead: Record<string, number>;
 }
 
 export interface QueueQuery {
-  experiment_id?: string;
+  study_id?: string;
   endpoint?: string;
   limit?: number;
 }

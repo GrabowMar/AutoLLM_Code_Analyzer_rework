@@ -1,0 +1,4 @@
+name: Style fragment, Tailwind
+role: fragment
+modes: [app, slot]
+variables: []

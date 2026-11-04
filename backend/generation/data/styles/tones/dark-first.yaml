@@ -1,0 +1,3 @@
+# Tone catalogue entry (not a library entity). A style with this tone copies `tone` (the slug) and `tone_text`.
+{name: Dark first, description: 'Visual tone preset: dark first.', tone_text: 'Dark first: a dark background by
+    default with light text and a single vivid accent colour.'}

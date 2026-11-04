@@ -1,0 +1,51 @@
+"""URL configuration."""
+
+{% if has_frontend %}
+import mimetypes
+
+from django.conf import settings
+from django.http import FileResponse
+from django.http import Http404
+from django.http import JsonResponse
+from django.urls import path
+from django.urls import re_path
+
+
+def health(request):
+    return JsonResponse({"status": "ok"})
+
+
+def frontend(request, asset=""):
+    dist = settings.FRONTEND_DIST.resolve()
+    target = (dist / asset).resolve()
+    if not (asset and target.is_relative_to(dist) and target.is_file()):
+        target = dist / "index.html"
+    if not target.is_file():
+        raise Http404
+    content_type, _ = mimetypes.guess_type(target.name)
+    return FileResponse(target.open("rb"), content_type=content_type)
+
+
+urlpatterns = [
+    path("api/health", health),
+    re_path(r"^(?P<asset>.*)$", frontend),
+]
+{% else %}
+from django.http import JsonResponse
+from django.shortcuts import render
+from django.urls import path
+
+
+def health(request):
+    return JsonResponse({"status": "ok"})
+
+
+def index(request):
+    return render(request, "index.html")
+
+
+urlpatterns = [
+    path("api/health", health),
+    path("", index),
+]
+{% endif %}

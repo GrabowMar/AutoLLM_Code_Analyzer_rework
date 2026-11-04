@@ -1,0 +1,11 @@
+name: Path traversal probe exploited
+description: Maps the evaluation's path_traversal probes (CWE-22) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:path_traversal'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-path-traversal
+  polarity: insecure
+  cwe: [cwe-22]
+  description: A path_traversal probe was exploited against the assembled app.

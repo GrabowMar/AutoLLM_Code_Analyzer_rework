@@ -1,0 +1,6 @@
+Choose the language, framework, frontend and database for this app yourself. Write a `Dockerfile` in the workspace root that builds and starts the whole app; it is built as written. Every `FROM` line must name one of these base images, copied exactly as listed with its `@sha256:` digest (an earlier build stage may also be used by its name):
+{% for ref in allowed_bases %}
+- `{{ ref }}`
+{% endfor %}
+
+Serve the API under `/api`, with `GET /api/health` answering `{"status": "ok"}` once the app is ready, and serve the user interface from `/` on the same port. Keep persistent data under `./data`.

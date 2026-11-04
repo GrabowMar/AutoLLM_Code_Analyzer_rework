@@ -195,13 +195,13 @@ class TestLeases:
 
 @pytest.mark.django_db
 def test_cancel_for_jobs_by_attempt(endpoint, local_model):
-    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.generation.tests.factories import GenerationRunFactory
 
-    job = GenerationJobFactory(model=local_model, created_by=endpoint.owner)
+    job = GenerationRunFactory(model=local_model, created_by=endpoint.owner)
     access = endpoint_access(endpoint, served_model_name="m:7b")
-    keep = q.enqueue(access, "/api/chat", {}, job=job)
+    keep = q.enqueue(access, "/api/chat", {}, job=job, source=LLMRequest.Source.ANALYSIS)
     job.attempt = 1
-    drop = q.enqueue(access, "/api/chat", {}, job=job)
+    drop = q.enqueue(access, "/api/chat", {}, job=job, source=LLMRequest.Source.ANALYSIS)
     assert q.cancel_for_jobs([job.pk], attempt=1) == 1
     assert LLMRequest.objects.get(pk=drop).status == Status.CANCELLED
     assert LLMRequest.objects.get(pk=keep).status == Status.QUEUED

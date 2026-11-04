@@ -1,0 +1,271 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Table reservations
+summary: Reserve a restaurant table for a date and time, with a public view of how full each slot is.
+category: booking
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Reservation
+  fields:
+  - {name: name, type: string, required: true, max_length: 100}
+  - {name: email, type: email, required: true, max_length: 254}
+  - {name: date, type: date, required: true}
+  - {name: time, type: string, required: true, max_length: 5}
+  - {name: party_size, type: int, required: true, min: 1, max: 12}
+  - {name: notes, type: text, max_length: 500}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: reservations.create
+  method: POST
+  path: /api/reservations
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 100, minLength: 1}
+      email: {type: string, maxLength: 254, format: email}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      party_size: {type: integer, minimum: 1, maximum: 12}
+      notes:
+        type: [string, 'null']
+        maxLength: 500
+    required: [name, email, date, time, party_size]
+  response_schema:
+    type: object
+    required: [id, name, email, date, time, party_size]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      email: {type: string, maxLength: 254, format: email}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      party_size: {type: integer, minimum: 1, maximum: 12}
+      notes:
+        type: [string, 'null']
+        maxLength: 500
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 409]
+- id: reservations.list
+  method: GET
+  path: /api/reservations
+  auth: user
+  query:
+  - {name: date, type: date, semantics: filter}
+  response_schema:
+    type: object
+    required: [items, total]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, name, email, date, time, party_size]
+          properties:
+            id:
+              type: [integer, string]
+            name: {type: string, maxLength: 100, minLength: 1}
+            email: {type: string, maxLength: 254, format: email}
+            date: {type: string, format: date}
+            time: {type: string, maxLength: 5, minLength: 1}
+            party_size: {type: integer, minimum: 1, maximum: 12}
+            notes:
+              type: [string, 'null']
+              maxLength: 500
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+- id: reservations.get
+  method: GET
+  path: /api/reservations/{id}
+  auth: owner
+  owner_entity: Reservation
+  response_schema:
+    type: object
+    required: [id, name, email, date, time, party_size]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      email: {type: string, maxLength: 254, format: email}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      party_size: {type: integer, minimum: 1, maximum: 12}
+      notes:
+        type: [string, 'null']
+        maxLength: 500
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: reservations.replace
+  method: PUT
+  path: /api/reservations/{id}
+  auth: owner
+  owner_entity: Reservation
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 100, minLength: 1}
+      email: {type: string, maxLength: 254, format: email}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      party_size: {type: integer, minimum: 1, maximum: 12}
+      notes:
+        type: [string, 'null']
+        maxLength: 500
+    required: [name, email, date, time, party_size]
+  response_schema:
+    type: object
+    required: [id, name, email, date, time, party_size]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 100, minLength: 1}
+      email: {type: string, maxLength: 254, format: email}
+      date: {type: string, format: date}
+      time: {type: string, maxLength: 5, minLength: 1}
+      party_size: {type: integer, minimum: 1, maximum: 12}
+      notes:
+        type: [string, 'null']
+        maxLength: 500
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404, 409]
+- id: reservations.cancel
+  method: DELETE
+  path: /api/reservations/{id}
+  auth: owner
+  owner_entity: Reservation
+  success_status: 204
+  errors: [404]
+- id: availability.get
+  method: GET
+  path: /api/availability
+  auth: public
+  query:
+  - {name: date, type: date, semantics: filter}
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            time: {type: string}
+            booked: {type: integer}
+            remaining: {type: integer}
+          required: [time, booked, remaining]
+- id: admin.reservations
+  method: GET
+  path: /api/admin/reservations
+  auth: admin
+  query:
+  - {name: date, type: date, semantics: filter}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, name, email, date, time, party_size]
+          properties:
+            id:
+              type: [integer, string]
+            name: {type: string, maxLength: 100, minLength: 1}
+            email: {type: string, maxLength: 254, format: email}
+            date: {type: string, format: date}
+            time: {type: string, maxLength: 5, minLength: 1}
+            party_size: {type: integer, minimum: 1, maximum: 12}
+            notes:
+              type: [string, 'null']
+              maxLength: 500
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.day
+  text: A day picker showing that day's booked slots and remaining seats.
+  endpoints: [availability.get]
+- id: ui.book
+  text: A booking form (name, email, date, time, party size, notes) that shows the API's messages, including a full
+    slot.
+  endpoints: [reservations.create]
+- id: ui.mine
+  text: The user's reservations grouped by date, with edit and cancel actions; cancel asks for confirmation.
+  endpoints: [reservations.list, reservations.replace, reservations.cancel]
+- id: ui.admin
+  text: 'For the admin: every reservation of the chosen day with the guest total.'
+  endpoints: [admin.reservations]
+features: [auth, ownership, filter, scheduling, admin]
+surfaces: [cwe-639, cwe-862, cwe-20, cwe-362, cwe-79, cwe-89, cwe-798]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: reservations.capacity.enforced
+  category: functional
+  endpoint: reservations.create
+  setup:
+  - request:
+      method: POST
+      path: /api/reservations
+      json: {name: A, email: a@example.com, date: '2099-01-01', time: '19:00', party_size: 12}
+    expect_status: 201
+  - request:
+      method: POST
+      path: /api/reservations
+      json: {name: B, email: b@example.com, date: '2099-01-01', time: '19:00', party_size: 8}
+    expect_status: 201
+  request:
+    method: POST
+    path: /api/reservations
+    json: {name: C, email: c@example.com, date: '2099-01-01', time: '19:00', party_size: 1}
+  expect: {status: 409}
+  stated_in: [standard, exhaustive]
+probes:
+- {id: probe.reservations.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: reservations.get}
+- {id: probe.reservations.default_admin, cwe: cwe-798, kind: default_credential}

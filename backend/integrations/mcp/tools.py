@@ -4,6 +4,12 @@ Curated tools carry hand-written names and descriptions but take their input
 schema from the operation's OpenAPI definition. The three generic tools
 (``find_api_operations`` / ``describe_api_operation`` / ``call_api``) reach
 every other operation, so an agent can do anything the UI can.
+
+A curated tool whose operation is not published yet is listed with ``enabled=False`` and the
+work package that publishes it (``pending``); it is neither listed nor callable. An enabled tool
+whose operation does not resolve fails ``test_mcp``. Operation ids are given without ninja's
+``backend_`` prefix; explicit ids (``operation_id=`` on the route, e.g. the v3 study tools'
+``generation_studies_*``) resolve as written.
 """
 
 from __future__ import annotations
@@ -27,8 +33,10 @@ MAX_RESULT_CHARS = 100_000
 @dataclass(frozen=True)
 class Curated:
     name: str
-    operation_id: str  # without the "backend_" prefix
+    operation_id: str  # without the "backend_" prefix; "" while the operation is not published
     description: str
+    enabled: bool = True
+    pending: str = ""  # the work package that publishes the operation (disabled tools only)
 
 
 # (tool name, operation, description). Keep descriptions about *when* to use the
@@ -48,48 +56,39 @@ CURATED: tuple[Curated, ...] = (
         "llm_models_api_views_get_model_comparison",
         "Side-by-side comparison of several models (pricing, context, capabilities, scores).",
     ),
+    # ── studies and runs (v3: WP-10 study/api.py, WP-08 runs/api.py) ──────────
     Curated(
-        "list_app_templates",
-        "generation_api_views_templates_list_app_templates",
-        "Application requirement templates (what to build). Their ids are `app_requirement_ids`.",
+        "list_studies",
+        "generation_studies_list",
+        "Studies (factorial designs over models x tasks x treatments). Filter by status, mode or kind.",
     ),
     Curated(
-        "list_stacks",
-        "generation_api_views_templates_list_stacks",
-        "Technology stacks a generated app can target (`stack_slug`).",
-    ),
-    # ── generation ──────────────────────────────────────────────────────
-    Curated(
-        "generate_apps",
-        "generation_api_views_custom_create_scaffolding_jobs",
-        "Generate complete applications: one job per (template x model x trial) using the "
-        "scaffolding pipeline. Costs LLM credits. Poll get_generation_job for progress.",
+        "get_study",
+        "generation_studies_get",
+        "One study: its design, active plan, analysis plan and lock state.",
     ),
     Curated(
-        "generate_custom",
-        "generation_api_views_custom_create_custom_job",
-        "One free-form generation job from your own system + user prompt for a single model.",
+        "resolve_study",
+        "generation_studies_resolve",
+        "Free dry-run of a study's design: conditions, units, cells, cost estimate and issues. "
+        "Its `plan_hash` is what launch_study takes.",
     ),
     Curated(
-        "preview_agent_jobs",
-        "generation_api_views_custom_preview_agent_jobs",
-        "Free dry-run of agent-mode jobs: shows resolved harness, budgets and warnings without spending.",
+        "launch_study",
+        "generation_studies_launch",
+        "Launch a resolved study plan (`plan_hash` from resolve_study). "
+        "Costs LLM credits; confirm with the user first.",
     ),
     Curated(
-        "create_agent_jobs",
-        "generation_api_views_custom_create_agent_jobs",
-        "Start agent-mode generation (a coding agent builds the app in a sandbox). Costs LLM credits.",
+        "list_runs",
+        "generation_runs_api_list_runs",
+        "Generation runs (samples), filterable by study, condition, kind, outcome and model.",
     ),
-    Curated("list_generation_jobs", "generation_api_views_jobs_list_jobs", "List/filter generation jobs."),
-    Curated("get_generation_job", "generation_api_views_jobs_get_job", "Status, metrics and output of one job."),
     Curated(
-        "get_job_artifacts",
-        "generation_api_views_jobs_get_job_artifacts",
-        "Generated files and run artifacts of a job.",
+        "get_run",
+        "generation_runs_api_get_run",
+        "One run: status, outcome, validity, metrics and its latest evaluation.",
     ),
-    Curated("generation_stats", "generation_api_views_jobs_job_stats", "Aggregate generation job counts."),
-    Curated("cancel_generation_job", "generation_api_views_jobs_cancel_job", "Cancel a queued/running job."),
-    Curated("retry_generation_job", "generation_api_views_jobs_retry_job", "Retry a failed job."),
     # ── runtime (run the generated app) ────────────────────────────────
     Curated(
         "build_app",
@@ -110,7 +109,7 @@ CURATED: tuple[Curated, ...] = (
     Curated(
         "analyze",
         "analysis_api_views_runs_create_run",
-        "Run analyzers on a generated job (`generation_job_id`) or on pasted `source_code` "
+        "Run analyzers on a generation run (`generation_job_id` is the run id) or on pasted `source_code` "
         "({path: content}). Returns a run id; poll get_analysis_run.",
     ),
     Curated("list_analysis_runs", "analysis_api_views_runs_list_runs", "List analysis runs."),
@@ -129,25 +128,6 @@ CURATED: tuple[Curated, ...] = (
     Curated("list_reports", "reports_api_views_list_reports", "Generated reports."),
     Curated("generate_report", "reports_api_views_generate_report", "Generate a report (async)."),
     Curated("get_report_data", "reports_api_views_get_report_data", "The data of a finished report."),
-    # ── experiments ─────────────────────────────────────────────────────
-    Curated("list_experiments", "generation_api_views_experiments_list_experiments", "Controlled experiments."),
-    Curated(
-        "preview_experiment",
-        "generation_api_views_experiments_preview_design",
-        "Free dry-run of an experiment design: cells, cost estimate, warnings.",
-    ),
-    Curated(
-        "create_experiment",
-        "generation_api_views_experiments_create_experiment",
-        "Create an experiment (models x templates x repeats). Set launch=true to start it.",
-    ),
-    Curated("get_experiment", "generation_api_views_experiments_get_experiment", "One experiment's definition."),
-    Curated("experiment_status", "generation_api_views_experiments_status", "Live progress of an experiment."),
-    Curated("experiment_results", "generation_api_views_experiments_results", "Statistical results of an experiment."),
-    Curated("launch_experiment", "generation_api_views_experiments_launch", "Launch a draft experiment."),
-    Curated("pause_experiment", "generation_api_views_experiments_pause", "Pause a running experiment."),
-    Curated("resume_experiment", "generation_api_views_experiments_resume", "Resume a paused experiment."),
-    Curated("cancel_experiment", "generation_api_views_experiments_cancel", "Cancel an experiment."),
     # ── infrastructure ──────────────────────────────────────────────────
     Curated(
         "list_endpoints",
@@ -162,19 +142,18 @@ CORE_TOOLS = frozenset(
     {
         "whoami",
         "search_models",
-        "list_app_templates",
-        "generate_apps",
-        "list_generation_jobs",
-        "get_generation_job",
+        "list_studies",
+        "get_study",
+        "resolve_study",
+        "launch_study",
+        "list_runs",
+        "get_run",
         "list_analyzers",
         "analyze",
         "get_analysis_run",
         "list_findings",
         "rankings",
         "dashboard",
-        "list_experiments",
-        "experiment_status",
-        "experiment_results",
         "find_api_operations",
         "describe_api_operation",
         "call_api",
@@ -193,7 +172,7 @@ GENERIC_TOOLS: tuple[dict[str, Any], ...] = (
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Keywords, e.g. 'experiment schedule'."},
+                "query": {"type": "string", "description": "Keywords, e.g. 'study schedule'."},
                 "tag": {"type": "string", "description": "Optional tag, e.g. generation, analysis, inference."},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 40},
             },
@@ -216,7 +195,7 @@ GENERIC_TOOLS: tuple[dict[str, Any], ...] = (
         "name": "call_api",
         "description": (
             "Call any LLM Lab REST endpoint as the connected user. `path` is the concrete path "
-            "(e.g. /api/generation/jobs/42/), `query` the query parameters, `body` the JSON body."
+            "(e.g. /api/generation/runs/<uuid>/), `query` the query parameters, `body` the JSON body."
         ),
         "inputSchema": {
             "type": "object",
@@ -238,12 +217,17 @@ GENERIC_TOOLS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "read_doc",
-        "description": "Read one documentation page (Markdown) by slug, e.g. EXPERIMENTS or GENERATION_PROCESS.",
+        "description": "Read one documentation page (Markdown) by slug, e.g. STUDIES or GENERATION_PROCESS.",
         "inputSchema": {"type": "object", "properties": {"slug": {"type": "string"}}, "required": ["slug"]},
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
 )
 GENERIC_NAMES = frozenset(t["name"] for t in GENERIC_TOOLS)
+
+
+def pending_tools() -> dict[str, str]:
+    """``{tool name: work package}`` of the curated tools still waiting for their operation."""
+    return {item.name: item.pending for item in CURATED if not item.enabled}
 
 
 class ToolError(Exception):
@@ -261,11 +245,20 @@ class Caller:
     core_only: bool = False
 
 
+def resolve_operation(ops: dict[str, openapi.Operation], operation_id: str) -> openapi.Operation | None:
+    """A curated id → its operation: ninja's generated ``backend_<id>`` or an explicit ``<id>``."""
+    if not operation_id:
+        return None
+    return ops.get(f"backend_{operation_id}") or ops.get(operation_id)
+
+
 def _curated_index() -> dict[str, tuple[Curated, openapi.Operation]]:
     ops = openapi.operations()
     index: dict[str, tuple[Curated, openapi.Operation]] = {}
     for item in CURATED:
-        op = ops.get(f"backend_{item.operation_id}")
+        if not item.enabled:
+            continue
+        op = resolve_operation(ops, item.operation_id)
         if op is not None:  # an operation renamed upstream just drops its tool
             index[item.name] = (item, op)
     return index

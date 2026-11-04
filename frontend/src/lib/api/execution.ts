@@ -26,13 +26,13 @@ export async function getCapacity(
   return res.json();
 }
 
-/** The caller's next pending jobs in scheduler order (staff: everyone's). */
+/** The caller's next pending runs in scheduler order (staff: everyone's); `study_id` narrows to one study. */
 export async function getQueue(
   query: QueueQuery = {},
   options: { signal?: AbortSignal } = {},
 ): Promise<QueueOut> {
   const q = new URLSearchParams();
-  if (query.experiment_id) q.set("experiment_id", query.experiment_id);
+  if (query.study_id) q.set("study_id", query.study_id);
   if (query.endpoint) q.set("endpoint", query.endpoint);
   if (query.limit != null) q.set("limit", String(query.limit));
   const qs = q.toString();

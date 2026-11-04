@@ -9,15 +9,13 @@ from backend.analysis.models import ToolResult
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import FindingFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models.choices import RunStatus as S
+from backend.generation.testing.factories import GenerationRunFactory
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.statistics import services
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
-
-S = GenerationJob.Status
 
 
 def test_tool_scans_count_only_executions_that_measured_something():
@@ -28,16 +26,22 @@ def test_tool_scans_count_only_executions_that_measured_something():
         return ToolResultFactory(run=run, tool_slug=tool, status=status, **kw)
 
     FindingFactory.create_batch(4, result=result("zap", ToolResult.Status.COMPLETED))
-    result("zap", ToolResult.Status.SKIPPED, summary={"skip_reason": "not_applicable"})
+    result("zap", ToolResult.Status.COMPLETED)
+    # Not applicable (nothing in the tree the tool reads) is not measured, never "0 findings" (spec 8.8).
+    result(
+        "zap",
+        ToolResult.Status.SKIPPED,
+        summary={"skip_reason": "not_applicable", "measurement": "not_measured", "tool_applicable": False},
+    )
     result("zap", ToolResult.Status.FAILED)
-    result("zap", ToolResult.Status.SKIPPED, summary={"skip_reason": "cancelled"})
+    result("zap", ToolResult.Status.SKIPPED, summary={"skip_reason": "cancelled", "measurement": "not_measured"})
     result("zap", ToolResult.Status.RUNNING)
     result("nuclei", ToolResult.Status.FAILED)
 
     tools = {t["name"]: t for t in services.get_tool_effectiveness(user)}
 
     zap = tools["zap"]
-    assert (zap["scans"], zap["not_measured"], zap["findings"]) == (2, 2, 4)
+    assert (zap["scans"], zap["not_measured"], zap["findings"]) == (2, 3, 4)
     assert zap["avg_per_scan"] == 2.0
     # Nothing measured: no rate, not a rate of 0.
     assert tools["nuclei"]["scans"] == 0
@@ -48,7 +52,7 @@ def test_success_rates_count_only_finished_work():
     user = UserFactory()
     model = LLMModelFactory()
     for status, n in ((S.COMPLETED, 3), (S.FAILED, 1), (S.PENDING, 2), (S.RUNNING, 1), (S.CANCELLED, 2)):
-        GenerationJobFactory.create_batch(n, created_by=user, model=model, status=status)
+        GenerationRunFactory.create_batch(n, created_by=user, model=model, status=status)
     for status in (
         AnalysisRun.Status.COMPLETED,
         AnalysisRun.Status.PARTIAL,
@@ -74,7 +78,7 @@ def test_success_rates_count_only_finished_work():
 def test_success_rate_is_unknown_before_anything_finished():
     user = UserFactory()
     model = LLMModelFactory()
-    GenerationJobFactory.create_batch(2, created_by=user, model=model, status=S.PENDING)
+    GenerationRunFactory.create_batch(2, created_by=user, model=model, status=S.PENDING)
 
     assert services.get_system_overview(user)["apps_success_rate"] is None
     assert services.get_system_overview(user)["analyses_success_rate"] is None
@@ -83,19 +87,33 @@ def test_success_rate_is_unknown_before_anything_finished():
     assert row["success_rate"] is None
 
 
-def test_lines_of_code_are_source_loc():
+def test_lines_of_code_tokens_and_cost_sum_only_runs_that_recorded_them():
     user = UserFactory()
-    files = {"app.py": "x = 1\n" * 100, "frontend/package-lock.json": "{}\n" * 5000}
-    GenerationJobFactory(
+    GenerationRunFactory(
         created_by=user,
-        status=S.COMPLETED,
-        result_data={"files": files},
-        metrics={"lines_of_code": 5100},
+        tested=True,
+        metrics={"loc_model": 100, "total_tokens": 1000, "cost_usd": 0.5},
     )
-    # A legacy job without stored code falls back to the generation-time count.
-    GenerationJobFactory(created_by=user, status=S.COMPLETED, result_data={}, metrics={"lines_of_code": 40})
+    GenerationRunFactory(created_by=user, tested=True, metrics={"loc_model": 40, "total_tokens": 10})
+    # A run that recorded nothing is not a 0-line, 0-token run: it is left out of the sums.
+    GenerationRunFactory(created_by=user, tested=True, metrics={})
 
-    assert services.get_code_generation_stats(user)["total_lines_of_code"] == 140
+    stats = services.get_code_generation_stats(user)
+
+    assert (stats["total_lines_of_code"], stats["loc_runs"]) == (140, 2)
+    assert (stats["total_tokens"], stats["tokens_runs"]) == (1010, 2)
+    assert (stats["total_cost_usd"], stats["cost_runs"]) == (0.5, 1)
+
+
+def test_code_generation_totals_are_unknown_when_nothing_recorded_them():
+    user = UserFactory()
+    GenerationRunFactory(created_by=user, tested=True, metrics={})
+
+    stats = services.get_code_generation_stats(user)
+
+    assert stats["total_lines_of_code"] is None
+    assert stats["total_tokens"] is None
+    assert stats["total_cost_usd"] is None
 
 
 def test_top_findings_carry_the_tools_own_label_and_tool():
@@ -135,14 +153,14 @@ def test_top_findings_carry_the_tools_own_label_and_tool():
 
 def test_average_durations_are_unknown_until_something_completed():
     user = UserFactory()
-    GenerationJobFactory(created_by=user, status=S.FAILED, duration_seconds=10)
+    GenerationRunFactory(created_by=user, status=S.FAILED, duration_seconds=10)
     AnalysisRunFactory(created_by=user, status=AnalysisRun.Status.FAILED, duration_seconds=5)
 
     assert services.get_system_overview(user)["avg_analysis_duration_seconds"] is None
     assert services.get_code_generation_stats(user)["avg_duration_seconds"] is None
 
     timed = UserFactory()
-    GenerationJobFactory(created_by=timed, status=S.COMPLETED, duration_seconds=12.34)
+    GenerationRunFactory(created_by=timed, tested=True, duration_seconds=12.34)
     AnalysisRunFactory(created_by=timed, status=AnalysisRun.Status.COMPLETED, duration_seconds=0)
 
     # A measured 0 s stays 0, not "unknown".
@@ -153,7 +171,7 @@ def test_average_durations_are_unknown_until_something_completed():
 def test_model_comparison_leaves_unmeasured_counts_and_duration_empty():
     user = UserFactory()
     model = LLMModelFactory()
-    GenerationJobFactory(created_by=user, model=model, status=S.FAILED)
+    GenerationRunFactory(created_by=user, model=model, status=S.FAILED)
 
     row = next(r for r in services.get_model_comparison(user) if r["model_id"] == model.model_id)
 

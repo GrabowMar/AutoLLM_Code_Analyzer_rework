@@ -1,0 +1,25 @@
+The file `{{ slot.path }}` ({{ slot.language }}) is missing {{ slot.label }}; its place is marked with `{{ slot.hole_marker }}`.{% if slot.endpoint %} The missing code handles `{{ slot.endpoint.method }} {{ slot.endpoint.path }}`.{% endif %}
+{% if slot.signature %}
+
+Keep this signature{% if slot.decorators %} and these decorators{% endif %}:
+
+````
+{% for decorator in slot.decorators %}{{ decorator }}
+{% endfor %}{{ slot.signature }}
+````
+{% endif %}{% if slot.spec_excerpt %}
+
+What the application does:
+
+{{ slot.spec_excerpt }}
+{% endif %}
+
+The application uses this stack: {{ stack.fragment_text }}
+{% if context %}
+
+The code around it:
+
+{{ context }}
+{% endif %}
+
+Write the missing code.

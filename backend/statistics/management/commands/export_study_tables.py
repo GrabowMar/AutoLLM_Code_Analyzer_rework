@@ -1,18 +1,20 @@
 """Write the study tables a paper reports as CSV + JSON.
 
 Usage:
-    python manage.py export_study_tables --out results/ [--experiment <uuid>] [--batch <uuid>]
+    python manage.py export_study_tables --out results/ [--study <uuid>] [--stage main|pilot]
         [--include-ai] [--line-tolerance 2] [--all-tools] [--no-spreadsheet-safe]
+
+Scope: the study's current runs (the first usable attempt per cell at ``--stage``, beyond-plan runs
+excluded; ``runs.view.current_runs``), else every run's current attempt.
 
 Files (one row per entity, deduplicated issues next to raw findings):
     issues_per_app.csv, issues_by_model.csv, issues_by_condition.csv,
-    issues_by_template.csv, issues_by_model_template.csv, issues_by_tool.csv,
+    issues_by_task.csv, issues_by_model_task.csv, issues_by_tool.csv,
     issues_by_tool_rule.csv, tool_overlap.csv, issue_clusters.csv,
-    tool_coverage.csv, healing_by_model.csv, healing_by_condition.csv,
-    healing_by_template.csv, healing_per_app.csv, tool_inventory.csv, tool_executions.csv,
+    tool_coverage.csv, tool_inventory.csv, tool_executions.csv,
     code_metrics_per_app.csv (radon / lizard / jscpd metrics of each tool's latest result, with
     the instrument behind them; empty cells: the tool did not measure the app),
-    study_summary.json (totals, coverage, healing, inventory counts, accounting)
+    study_summary.json (scope, totals, coverage, inventory counts, accounting)
 
 A table with no rows still gets its real header. Text cells a spreadsheet
 would read as a formula (``=``, ``+``, ``-``, ``@``) get a leading apostrophe
@@ -30,7 +32,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand
+from django.core.management.base import CommandError
 
 from backend.export.services.csv_safe import safe_cell
 from backend.statistics.services.accounting import run_accounting
@@ -39,20 +43,16 @@ from backend.statistics.services.study import BY_TOOL_KEYS
 from backend.statistics.services.study import BY_TOOL_RULE_KEYS
 from backend.statistics.services.study import CODE_METRIC_PER_APP_KEYS
 from backend.statistics.services.study import GROUP_SUMMARY_KEYS
-from backend.statistics.services.study import HEALING_PER_APP_KEYS
 from backend.statistics.services.study import ISSUE_KEYS
 from backend.statistics.services.study import PER_APP_KEYS
 from backend.statistics.services.study import TOOL_PAIR_KEYS
 from backend.statistics.services.study import code_metrics_per_app
-from backend.statistics.services.study import healing_impact
 from backend.statistics.services.study import issue_breakdowns
-from backend.statistics.services.study import study_jobs
+from backend.statistics.services.study import study_runs
 
 TOOL_EXECUTION_KEYS = ("tool", "category", "executions", "completed", "failed", "skipped", "unfinished", "apps")
-# Coverage counts jobs (runs): repeats of one app are measured separately.
+# Coverage counts runs: repeats of one app are measured separately.
 TOOL_COVERAGE_KEYS = ("tool", "counted", "runs_measured", "runs_missing", "reasons")
-# Healing pairs are runs; apps are the distinct (condition, app) units among them.
-HEALING_GROUP_KEYS = ("apps", "runs")
 
 
 def _cell(value: Any) -> Any:
@@ -114,12 +114,17 @@ def coverage_rows(issues: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 class Command(BaseCommand):
-    help = "Export deduplicated issue breakdowns, healing ablation and tool accounting as CSV/JSON."
+    help = "Export deduplicated issue breakdowns, code metrics and tool accounting as CSV/JSON."
 
     def add_arguments(self, parser):
         parser.add_argument("--out", required=True, help="Output directory (created if missing)")
-        parser.add_argument("--experiment", default=None, help="Experiment id to scope to")
-        parser.add_argument("--batch", default=None, help="Generation batch id to scope to")
+        parser.add_argument("--study", default=None, help="Study id to scope to (its current runs)")
+        parser.add_argument(
+            "--stage",
+            default="main",
+            choices=("main", "pilot"),
+            help="Study stage to export (pilot and main are never pooled; default main)",
+        )
         parser.add_argument("--include-ai", action="store_true", help="Count AI-reviewer findings too")
         parser.add_argument("--line-tolerance", type=int, default=2, help="Line distance for cross-tool merges")
         parser.add_argument(
@@ -137,13 +142,25 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         out = Path(opts["out"])
         out.mkdir(parents=True, exist_ok=True)
-        jobs = study_jobs(experiment_id=opts["experiment"], batch_id=opts["batch"])
+        study_id = opts["study"]
+        if study_id:
+            from backend.generation.models import Study
+
+            try:
+                exists = Study.objects.filter(pk=study_id).exists()
+            except (ValueError, ValidationError) as exc:
+                msg = f"--study must be a study id: {exc}"
+                raise CommandError(msg) from exc
+            if not exists:
+                msg = f"no study {study_id}"
+                raise CommandError(msg)
+        runs = list(study_runs(study_id=study_id, stage=opts["stage"]))
 
         def write(name: str, rows: list[dict[str, Any]], header=()) -> None:
             _write_csv(out / name, rows, header, spreadsheet_safe=opts["spreadsheet_safe"])
 
         issues = issue_breakdowns(
-            jobs,
+            runs,
             include_ai=opts["include_ai"],
             line_tolerance=opts["line_tolerance"],
             common_tools_only=not opts["all_tools"],
@@ -152,8 +169,8 @@ class Command(BaseCommand):
             ("per_app", "issues_per_app", PER_APP_KEYS),
             ("by_model", "issues_by_model", ("model", *GROUP_SUMMARY_KEYS)),
             ("by_condition", "issues_by_condition", ("condition_id", "condition_label", *GROUP_SUMMARY_KEYS)),
-            ("by_template", "issues_by_template", ("template", *GROUP_SUMMARY_KEYS)),
-            ("by_model_template", "issues_by_model_template", ("model", "template", *GROUP_SUMMARY_KEYS)),
+            ("by_task", "issues_by_task", ("task", *GROUP_SUMMARY_KEYS)),
+            ("by_model_task", "issues_by_model_task", ("model", "task", *GROUP_SUMMARY_KEYS)),
             ("by_tool", "issues_by_tool", BY_TOOL_KEYS),
             ("by_tool_rule", "issues_by_tool_rule", BY_TOOL_RULE_KEYS),
             ("tool_pairs", "tool_overlap", TOOL_PAIR_KEYS),
@@ -161,18 +178,7 @@ class Command(BaseCommand):
         ):
             write(f"{name}.csv", issues[key], header)
         write("tool_coverage.csv", coverage_rows(issues), TOOL_COVERAGE_KEYS)
-        write("code_metrics_per_app.csv", code_metrics_per_app(jobs), CODE_METRIC_PER_APP_KEYS)
-
-        healing = healing_impact(jobs)
-        # Agent builds are never healed: their scopes have no rows, only headers.
-        write("healing_by_model.csv", healing["by_model"], ("model", *HEALING_GROUP_KEYS))
-        write(
-            "healing_by_condition.csv",
-            healing["by_condition"],
-            ("condition_id", "condition_label", *HEALING_GROUP_KEYS),
-        )
-        write("healing_by_template.csv", healing["by_template"], ("template", *HEALING_GROUP_KEYS))
-        write("healing_per_app.csv", healing["per_app"], HEALING_PER_APP_KEYS)
+        write("code_metrics_per_app.csv", code_metrics_per_app(runs), CODE_METRIC_PER_APP_KEYS)
 
         inventory = tool_inventory()
         write(
@@ -180,16 +186,12 @@ class Command(BaseCommand):
             [{**t, "source": "catalog"} for t in inventory["analyzers"]]
             + [{**e, "source": "platform", "is_enabled": True} for e in inventory["evaluators"]],
         )
-        accounting = run_accounting(jobs)
+        accounting = run_accounting(runs)
         write("tool_executions.csv", accounting["tools"]["latest"], TOOL_EXECUTION_KEYS)
 
         summary = {
-            "scope": {"experiment": opts["experiment"], "batch": opts["batch"]},
+            "scope": {"study": study_id, "stage": opts["stage"], "runs": len(runs)},
             "issues": {"params": issues["params"], "coverage": issues["coverage"], "totals": issues["totals"]},
-            "healing": {
-                k: healing[k]
-                for k in ("baseline", "modes", "not_applicable", "totals", "added_requirements", "patches")
-            },
             "tool_counts": inventory["counts"],
             "accounting": accounting,
         }
