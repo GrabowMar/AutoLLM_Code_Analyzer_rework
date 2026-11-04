@@ -272,7 +272,8 @@ export function randomSeed(): number {
     crypto?: { getRandomValues?: (a: Uint32Array) => Uint32Array };
   };
   if (g.crypto?.getRandomValues)
-    return g.crypto.getRandomValues(new Uint32Array(1))[0] % 2 ** 31;
+    // Drop the top bit: uniform over [0, 2^31) with no modulo.
+    return g.crypto.getRandomValues(new Uint32Array(1))[0] >>> 1;
   return Math.floor(Math.random() * 2 ** 31);
 }
 

@@ -38,3 +38,7 @@ MEDIA_URL = "http://media.testserver/"
 # ------------------------------------------------------------------------------
 TESTING = True
 SAMPLE_BUILD_BACKEND = "legacy"
+
+# The test DB must never be seeded from generation/data/ on migrate: tests seed explicitly (the golden
+# library), and a seeded DB makes it collide. CI copies .envs/.local/.django.example, which enables it.
+GENERATION_SEED_ON_MIGRATE = False
