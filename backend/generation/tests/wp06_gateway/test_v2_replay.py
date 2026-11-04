@@ -56,7 +56,8 @@ def test_session_replays_byte_equal(tmp_path, path, sticky):
             assert got == expected
         else:
             body = json.loads(got)
-            assert body.pop("session_id") == cfg["session_id"]
+            session_id = body.pop("session_id")
+            assert session_id == cfg["session_id"]
             assert json.dumps(body).encode() == expected
             assert set(json.loads(got)) - set(json.loads(expected)) == set(NEW_POLICY_FIELDS)
         assert record["request"] == json.loads(got)

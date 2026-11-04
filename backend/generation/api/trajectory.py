@@ -153,8 +153,10 @@ def model_behaviour(request, model_id: int):
             },
         )
     notes = [
-        "Descriptive only: no significance tests. Each harness version is summarised on its own; counters come "
-        "from each harness's own trajectory parser and are compared within a harness.",
+        (
+            "Descriptive only: no significance tests. Each harness version is summarised on its own; counters come "
+            "from each harness's own trajectory parser and are compared within a harness."
+        ),
         "Pooled over every task this model ran, so differences can reflect the task mix.",
         "Pass rate: measured evaluations only (runs never evaluated or not measured are left out, not 0).",
     ]
