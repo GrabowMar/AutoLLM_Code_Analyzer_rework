@@ -1115,6 +1115,10 @@ export interface HarnessOut {
   vendor_affinity: string | null;
   min_call_output_tokens: number;
   open_questions: string[];
+  /** Open questions that apply only on some endpoints, keyed by endpoint kind. */
+  endpoint_open_questions: Record<string, string[]>;
+  /** Why this harness is limited to exploratory studies (`null` when it is not). */
+  exploratory_only: string | null;
 }
 
 /** `GET /harnesses/{name}/facts/` (`HarnessFacts.to_dict()`); the keys are WP-07's. */

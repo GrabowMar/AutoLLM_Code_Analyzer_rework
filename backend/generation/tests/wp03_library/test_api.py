@@ -227,8 +227,9 @@ class TestLibrary:
         refused = post(as_alice, "/library/tasks/crud_todo_list/versions/1/oracle/", {"stacks": ["flask-react@1"]})
         assert refused.status_code == 403
         client.force_login(staff)
-        pending = post(client, "/library/tasks/crud_todo_list/versions/1/oracle/", {"stacks": ["flask-react@1"]})
-        # WP-09: a stack without a reference tree is recorded as missing, nothing queued.
+        pending = post(client, "/library/tasks/crud_todo_list/versions/1/oracle/", {"stacks": ["fastapi-vue@1"]})
+        # WP-09: a stack without a reference tree (crud_todo_list has none for fastapi-vue) is recorded
+        # as missing, nothing queued.
         assert pending.status_code == 200
         assert pending.json() == {"queued_runs": []}
 

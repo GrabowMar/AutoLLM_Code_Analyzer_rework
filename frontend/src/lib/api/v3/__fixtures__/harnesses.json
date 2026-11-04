@@ -23,10 +23,12 @@
     "pinned_version": "1.18.35",
     "option_schema": [],
     "default_options": {},
-    "facts_version": 1,
+    "facts_version": 2,
     "vendor_affinity": null,
     "min_call_output_tokens": 4096,
-    "open_questions": []
+    "open_questions": [],
+    "endpoint_open_questions": {},
+    "exploratory_only": null
   },
   {
     "name": "mini-swe-agent",
@@ -55,7 +57,9 @@
     "facts_version": 1,
     "vendor_affinity": null,
     "min_call_output_tokens": 2048,
-    "open_questions": []
+    "open_questions": [],
+    "endpoint_open_questions": {},
+    "exploratory_only": null
   },
   {
     "name": "aider",
@@ -125,7 +129,9 @@
     "facts_version": 1,
     "vendor_affinity": null,
     "min_call_output_tokens": 8192,
-    "open_questions": []
+    "open_questions": [],
+    "endpoint_open_questions": {},
+    "exploratory_only": null
   },
   {
     "name": "claude-code",
@@ -145,19 +151,22 @@
       "supports_request_class": true,
       "headless_flag": "--bare -p --output-format stream-json"
     },
-    "enabled": false,
-    "blocked_reason": "passthrough needs WP-06's /v1/messages route verified against OpenRouter, and a real-model smoke run; open questions: OpenRouter /api/v1/messages: acceptance of provider routing fields and usage.cost in the native response (WP-06 passthrough; else /generation backfill + routing_partial); real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2)",
+    "enabled": true,
+    "blocked_reason": null,
     "versions": ["2.1.316"],
     "pinned_version": "2.1.316",
     "option_schema": [],
     "default_options": {},
-    "facts_version": 1,
+    "facts_version": 2,
     "vendor_affinity": "anthropic",
     "min_call_output_tokens": 16384,
-    "open_questions": [
-      "OpenRouter /api/v1/messages: acceptance of provider routing fields and usage.cost in the native response (WP-06 passthrough; else /generation backfill + routing_partial)",
-      "real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2)"
-    ]
+    "open_questions": [],
+    "endpoint_open_questions": {
+      "openrouter": [
+        "OpenRouter /api/v1/messages: acceptance of provider routing fields and usage.cost in the native response (WP-06 passthrough; else /generation backfill + routing_partial)"
+      ]
+    },
+    "exploratory_only": "no real-model smoke run on three model families is logged yet (scripted-upstream and translate-mode gateway smoke runs only)"
   },
   {
     "name": "codex",
@@ -191,7 +200,9 @@
       "real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2)",
       "unknown model slugs get fallback metadata without an apply_patch tool although the pinned instructions tell the model to use one (no config key forces it; --strict-config refuses include_apply_patch_tool): force function tools or keep the harness disabled (fairness, 5.2)",
       "bundled system skills stay listed in a developer message with no switch to remove them (5.2 rule: no hidden capabilities beyond the declared tool set)"
-    ]
+    ],
+    "endpoint_open_questions": {},
+    "exploratory_only": null
   },
   {
     "name": "goose",
@@ -211,8 +222,8 @@
       "supports_request_class": false,
       "headless_flag": "run --no-session --output-format stream-json"
     },
-    "enabled": false,
-    "blocked_reason": "facts verified offline; awaiting a real-model smoke run through the WP-06 gateway; open questions: built-in skills (web-search via DuckDuckGo/Tavily/SearXNG, goose-doc-guide) and the load_skill tool are advertised even with --no-profile and no verified switch removes them (smoke run, v1.57.0)",
+    "enabled": true,
+    "blocked_reason": null,
     "versions": ["1.57.0"],
     "pinned_version": "1.57.0",
     "option_schema": [
@@ -230,12 +241,12 @@
     "default_options": {
       "max_tool_repetitions": 0
     },
-    "facts_version": 1,
+    "facts_version": 2,
     "vendor_affinity": null,
     "min_call_output_tokens": 4096,
-    "open_questions": [
-      "built-in skills (web-search via DuckDuckGo/Tavily/SearXNG, goose-doc-guide) and the load_skill tool are advertised even with --no-profile and no verified switch removes them (smoke run, v1.57.0)"
-    ]
+    "open_questions": [],
+    "endpoint_open_questions": {},
+    "exploratory_only": "built-in skills (web-search via DuckDuckGo/Tavily/SearXNG, goose-doc-guide) and the load_skill tool are advertised even with --no-profile and no verified switch removes them (the sandbox has no web egress, so a web search fails); no real-model smoke run is logged yet"
   },
   {
     "name": "qwen-code",
@@ -256,22 +267,24 @@
       "headless_flag": "--bare --output-format stream-json (stdin prompt)"
     },
     "enabled": false,
-    "blocked_reason": "facts verified offline; awaiting a real-model smoke run through the WP-06 gateway; open questions: usage statistics (privacy.usageStatisticsEnabled) can only be switched off in settings.json, which --bare ignores: verify no stats traffic under network_policy=packages (egress allowlist) before enabling",
+    "blocked_reason": "facts verified offline; awaiting a real-model smoke run through the WP-06 gateway; open questions: usage statistics are sent even with --bare: the egress probe (HTTPS proxy, 2026-11-03) saw CONNECTs to *.rum.aliyuncs.com (Aliyun RUM) and models.dev; privacy.usageStatisticsEnabled lives in settings.json, which --bare ignores, and no verified flag or env var switches it off",
     "versions": ["0.26.6"],
     "pinned_version": "0.26.6",
     "option_schema": [],
     "default_options": {},
-    "facts_version": 1,
+    "facts_version": 2,
     "vendor_affinity": null,
     "min_call_output_tokens": 4096,
     "open_questions": [
-      "usage statistics (privacy.usageStatisticsEnabled) can only be switched off in settings.json, which --bare ignores: verify no stats traffic under network_policy=packages (egress allowlist) before enabling"
-    ]
+      "usage statistics are sent even with --bare: the egress probe (HTTPS proxy, 2026-11-03) saw CONNECTs to *.rum.aliyuncs.com (Aliyun RUM) and models.dev; privacy.usageStatisticsEnabled lives in settings.json, which --bare ignores, and no verified flag or env var switches it off"
+    ],
+    "endpoint_open_questions": {},
+    "exploratory_only": null
   },
   {
     "name": "gemini-cli",
     "label": "Gemini CLI",
-    "description": "Google's Gemini CLI through the gateway's Gemini translator (wave 3).",
+    "description": "Google's Gemini CLI through the gateway's Gemini translator, system prompt pinned.",
     "protocol": "gemini_generate",
     "capabilities": {
       "agentic": true,
@@ -279,28 +292,24 @@
       "supports_max_turns": true,
       "supports_system_prompt": "override",
       "supports_tool_policy": true,
-      "supports_compaction_control": true,
-      "supports_context_limit": true,
+      "supports_compaction_control": false,
+      "supports_context_limit": false,
       "supports_reasoning_effort_passthrough": false,
       "supports_path_restriction": false,
       "supports_request_class": false,
-      "headless_flag": "-o stream-json --approval-mode=yolo"
+      "headless_flag": "--skip-trust --approval-mode=yolo -o stream-json (stdin prompt)"
     },
     "enabled": false,
-    "blocked_reason": "wave 3: needs the WP-06 gemini_generate translator and the open questions closed; open questions: WP-06 gemini_generate translator (thoughtSignature round trip, countTokens local) not available yet; stdin-only prompt in headless mode (no -p) for the pinned version; generic model config for non-Gemini slugs (the CLI validates model names); GEMINI_SANDBOX=false overriding the yolo default in the pinned version; captured default prompt (GEMINI_WRITE_SYSTEM_MD) per model-dependent variant",
+    "blocked_reason": "facts verified offline (scripted smoke runs); awaiting a real-model smoke run through the WP-06 gemini_generate translator",
     "versions": ["0.66.0"],
     "pinned_version": "0.66.0",
     "option_schema": [],
     "default_options": {},
-    "facts_version": 1,
+    "facts_version": 2,
     "vendor_affinity": "google",
     "min_call_output_tokens": 4096,
-    "open_questions": [
-      "WP-06 gemini_generate translator (thoughtSignature round trip, countTokens local) not available yet",
-      "stdin-only prompt in headless mode (no -p) for the pinned version",
-      "generic model config for non-Gemini slugs (the CLI validates model names)",
-      "GEMINI_SANDBOX=false overriding the yolo default in the pinned version",
-      "captured default prompt (GEMINI_WRITE_SYSTEM_MD) per model-dependent variant"
-    ]
+    "open_questions": [],
+    "endpoint_open_questions": {},
+    "exploratory_only": null
   }
 ]

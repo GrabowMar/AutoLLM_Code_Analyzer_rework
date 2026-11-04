@@ -100,7 +100,7 @@
     {
       "name": "claude-code",
       "label": "Claude Code",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "codex",
@@ -110,7 +110,7 @@
     {
       "name": "goose",
       "label": "Goose",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "qwen-code",
@@ -123,14 +123,6 @@
       "enabled": false
     }
   ],
-  "limits": {
-    "max_repeats": 200,
-    "max_cells": 20000,
-    "sandbox_max": {
-      "memory": "3g",
-      "nano_cpus": 2000000000
-    }
-  },
   "issue_codes": [
     {
       "code": "estimate_exceeds_cap",
@@ -139,6 +131,14 @@
       "alternatives": ["error"],
       "owner": "budget/estimate.py",
       "summary": "warn when p90_total > study cap; error when expected_total > study cap"
+    },
+    {
+      "code": "cap_admits_fewer_blocks",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "budget/estimate.py",
+      "summary": "the study cap admits fewer replicate blocks than planned (whole-block worst-case reservation, E2E-28)"
     },
     {
       "code": "context_cap_above_call_cap",
@@ -283,6 +283,14 @@
       "alternatives": [],
       "owner": "study/plan.py",
       "summary": "harness adapter has open questions (registry enabled=False)"
+    },
+    {
+      "code": "harness_exploratory_only",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "harness enabled but not verified for confirmatory use (no real-model smoke run / tool-surface caveat)"
     },
     {
       "code": "harness_protocol_unavailable_for_endpoint",
@@ -844,5 +852,13 @@
       "owner": "library/lint.py",
       "summary": "tasks/vocab.yaml is missing: the built-in vocabulary"
     }
-  ]
+  ],
+  "limits": {
+    "max_repeats": 200,
+    "max_cells": 20000,
+    "sandbox_max": {
+      "memory": "3g",
+      "nano_cpus": 2000000000
+    }
+  }
 }
