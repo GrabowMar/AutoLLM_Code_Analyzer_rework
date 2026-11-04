@@ -68,7 +68,8 @@
 	$effect(() => {
 		const item = current;
 		if (item && draftFor !== item.pinned_ref) {
-			draft = structuredClone(item.content as ResourcePolicyContent);
+			// Library rows are $state proxies, which structuredClone rejects (DataCloneError): snapshot first.
+			draft = structuredClone($state.snapshot(item.content) as ResourcePolicyContent);
 			draftFor = item.pinned_ref;
 		}
 	});
@@ -109,7 +110,7 @@
 			});
 			rememberPolicy(saved);
 			draftFor = saved.pinned_ref;
-			draft = structuredClone(saved.content as ResourcePolicyContent);
+			draft = structuredClone($state.snapshot(saved.content) as ResourcePolicyContent);
 			presetName = '';
 			onchange(saved.pinned_ref);
 		} catch (e) {
@@ -204,7 +205,7 @@
 				<Button size="sm" onclick={save} disabled={saving}>
 					{#if saving}<LoaderCircle class="animate-spin" />{:else}<Save />{/if}Save as preset
 				</Button>
-				<Button size="sm" variant="ghost" onclick={() => (draft = structuredClone(current!.content as ResourcePolicyContent))}>Discard edits</Button>
+				<Button size="sm" variant="ghost" onclick={() => (draft = structuredClone($state.snapshot(current!.content) as ResourcePolicyContent))}>Discard edits</Button>
 				<p class="w-full text-xs text-muted-foreground">Presets are immutable: saving creates a new preset (or a new version of yours) and pins it.</p>
 			</div>
 		{/if}

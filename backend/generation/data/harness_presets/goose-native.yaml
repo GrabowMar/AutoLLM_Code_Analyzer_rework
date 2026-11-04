@@ -1,5 +1,5 @@
 # Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
 name: goose (native)
-description: goose 1.57.0 with its native system prompt, tools and defaults. Archived until the adapter is enabled.
-archived: true
+description: goose 1.57.0 with its native system prompt, tools and defaults.
+archived: false
 content: {harness: goose, harness_version: 1.57.0}

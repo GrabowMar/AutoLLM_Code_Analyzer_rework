@@ -184,8 +184,13 @@
 		submitError = '';
 	}
 
-	// `Estimate.expected_total` (USD) of the one-cell plan
-	const expected = $derived(typeof estimate?.expected_total === 'number' ? (estimate.expected_total as number) : null);
+	// The one-cell plan's expected USD in its cap's unit (`Estimate.cap_basis`: list price on a subscription or
+	// local endpoint, which bills $0)
+	const expected = $derived.by(() => {
+		const key = estimate?.cap_basis === 'list' ? 'expected_list_total' : 'expected_total';
+		const value = estimate?.[key];
+		return typeof value === 'number' ? value : null;
+	});
 </script>
 
 {#snippet field(id: string, label: string, key: keyof ParentAppForm, items: OptionItem[], placeholder: string, clear?: string)}

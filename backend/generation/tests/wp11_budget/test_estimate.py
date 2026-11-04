@@ -258,9 +258,10 @@ class TestPlan:
         assert est.p90_total == pytest.approx(2.7)
         assert [(c.condition_index, c.n_cells, c.expected_usd) for c in est.by_condition] == [(0, 6, 0.6), (1, 6, 1.2)]
         assert est.by_level == {"model": {"m0": 0.6, "m1": 1.2}}
-        # Blocks cost 0.3 each: 0.3, 0.6, ... 1.8 -> 6 blocks under 2.0; a repeat costs 0.6 -> 3 repeats;
-        # a unit costs 0.3 x 3 repeats = 0.9 -> 2 units (1.8 <= 2.0).
-        assert (est.fit.blocks_under_cap, est.fit.max_repeats_under_cap, est.fit.max_units_under_cap) == (6, 3, 2)
+        # Blocks are expected to cost 0.3 each and reserve 2 x 0.3 = 0.6 when claimed (E2E-28): block 6 needs
+        # 1.5 spent + 0.6 > 2.0, so 5 blocks are admitted; a repeat costs 0.6 -> 3 repeats; a unit costs
+        # 0.3 x 3 repeats = 0.9 -> 2 units (1.8 <= 2.0).
+        assert (est.fit.blocks_under_cap, est.fit.max_repeats_under_cap, est.fit.max_units_under_cap) == (5, 3, 2)
         # worst case: min(cap, sum of min(cell cap 0.6, 0.3 x (1 + infra_retries 1)))
         assert est.worst_case_total == pytest.approx(2.0)
         assert est.time.effective_parallel == 2
@@ -274,7 +275,10 @@ class TestPlan:
             cell_estimator=_fixed,
             tier="frugal",
         )
-        assert [(i.code, i.severity) for i in warn.issues] == [("estimate_exceeds_cap", "warn")]
+        assert [(i.code, i.severity) for i in warn.issues] == [
+            ("estimate_exceeds_cap", "warn"),
+            ("cap_admits_fewer_blocks", "warn"),
+        ]
         error = estimate.estimate_plan(
             _plan(),
             policy=policy.apply_overrides(FRUGAL, {"study.max_cost_usd": 1.0}),
@@ -286,7 +290,7 @@ class TestPlan:
         assert [f.action for f in issue.fix] == ["set_study_cap", "set_repeats"]
         assert issue.fix[0].params == {"study_cap": 2.97}
         assert issue.fix[1].params == {"repeats": 1}
-        assert error.fit.blocks_under_cap == 3
+        assert error.fit.blocks_under_cap == 2  # 0.3 + 0.6 <= 1.0 < 0.6 + 0.6
         ok = estimate.estimate_plan(
             _plan(),
             policy=policy.apply_overrides(FRUGAL, {"study.max_cost_usd": 3.0}),
@@ -294,6 +298,61 @@ class TestPlan:
             tier="frugal",
         )
         assert ok.issues == []
+
+    def test_a_cap_that_admits_fewer_blocks_warns(self):
+        # The live case (E2E-28): the expected total fits, but the scheduler claims a block only when the
+        # spend so far plus the block's whole worst-case reservation fits under the cap.
+        est = estimate.estimate_plan(
+            _plan(),
+            policy=policy.apply_overrides(FRUGAL, {"study.max_cost_usd": 1.9}),
+            cell_estimator=_fixed,
+            tier="frugal",
+        )
+        assert est.expected_total == pytest.approx(1.8)
+        assert est.fit.blocks_under_cap == 5
+        issue = est.issues[-1]
+        assert (issue.code, issue.severity) == ("cap_admits_fewer_blocks", "warn")
+        assert issue.data == {"blocks": 6, "admitted": 5, "cap": 1.9, "cap_for_all_blocks": 2.1}
+        assert issue.fix[0].params == {"study_cap": 2.1}
+        assert "admits 5 of 6" in issue.message
+        ok = estimate.estimate_plan(
+            _plan(),
+            policy=policy.apply_overrides(FRUGAL, {"study.max_cost_usd": 2.1}),
+            cell_estimator=_fixed,
+            tier="frugal",
+        )
+        assert ok.fit.blocks_under_cap == 6
+        assert "cap_admits_fewer_blocks" not in [i.code for i in ok.issues]
+
+    def test_reused_pilot_cells_are_counted_once(self):
+        # E2E-28: with pilot.reuse_as_main an exploratory study's pilot cells become its repeat-0 main cells,
+        # so the plan's identical main cells are no second run (study 03df8fe9 showed 72 cells for 36 runs).
+        pilot = [
+            _cell(c, u, 0).model_copy(update={"stage": "pilot", "cell_key": cell_key(c, u, 0, "pilot")})
+            for u in range(2)
+            for c in range(2)
+        ]
+        plan = _plan().model_copy(update={"cells": pilot + _plan().cells})
+        content = policy.apply_overrides(FRUGAL, {"study.max_cost_usd": 10.0})
+        exploratory = estimate.estimate_plan(plan, policy=content, tier="frugal", cell_estimator=_fixed)
+        assert exploratory.expected_total == pytest.approx(1.8)  # 12 runs, not 16
+        assert sum(c.n_cells for c in exploratory.by_condition) == 12
+        assert exploratory.fit.blocks_under_cap == 6  # 2 pilot blocks + the 4 main blocks of repeats 1-2
+        confirmatory = estimate.estimate_plan(
+            plan,
+            policy=content,
+            tier="frugal",
+            cell_estimator=_fixed,
+            study_kind="confirmatory",
+        )
+        assert confirmatory.expected_total == pytest.approx(2.4)  # never reused: 16 runs
+        no_reuse = estimate.estimate_plan(
+            plan,
+            policy=policy.apply_overrides(content, {"pilot.reuse_as_main": False}),
+            tier="frugal",
+            cell_estimator=_fixed,
+        )
+        assert no_reuse.expected_total == pytest.approx(2.4)
 
     def test_auto_cap(self):
         est = estimate.estimate_plan(_plan(), policy=FRUGAL, tier="frugal", cell_estimator=_fixed)
@@ -344,3 +403,153 @@ def test_estimate_cell_from_a_resolved_cell():
     est = estimate.estimate_cell(cell, priors=NO_PRIORS)
     assert est.basis == "heuristic"
     assert 0 < est.expected_usd <= est.cap_usd <= 0.30
+
+
+# --- list-price basis (E2E-13) ------------------------------------------------------------------------------
+
+
+class TestListEstimate:
+    """On a subscription or local endpoint the billed amounts are 0 and the cap counts list price: every cell
+    estimate carries list p10/p90 next to the billed ones, and the plan prices the cap in list units."""
+
+    def test_heuristic_list_spread_on_a_subscription_endpoint(self):
+        est = estimate.estimate_inputs(_agentic(cost_basis="list_price"), priors=NO_PRIORS)
+        assert (est.expected_usd, est.p10_usd, est.p90_usd) == (0.0, 0.0, 0.0)
+        assert est.expected_list_usd == pytest.approx(0.1933)
+        assert est.p10_list_usd == pytest.approx(0.1933 * 0.4)
+        assert est.p90_list_usd == pytest.approx(0.30)  # 2.2 x 0.1933 truncated at the per-attempt cap
+
+    def test_heuristic_list_is_the_uncalibrated_catalog_price(self):
+        priors = {"calibration|vendor/cheap|price|*|*": _prior(10, 0.5)}
+        est = estimate.estimate_inputs(_agentic(size_bucket="M", tier="frugal"), priors=priors)
+        assert est.expected_usd == pytest.approx(0.1933 * 0.5)
+        assert est.expected_list_usd == pytest.approx(0.1933)
+
+    def test_prior_of_subscription_runs_keeps_its_list_cost(self):
+        # The runs billed 0 (subscription) but cost 0.05 at list price: the old ratio (list / billed) lost it.
+        prior = _prior(6, 0.0, cost_p10=0.0, cost_p90=0.0, list_cost_p10=0.02, list_cost_p50=0.05, list_cost_p90=0.12)
+        est = estimate.estimate_inputs(
+            _agentic(size_bucket="M", tier="frugal", cost_basis="list_price"),
+            priors={"app_agentic|opencode|vendor/cheap|M|frugal": prior},
+        )
+        assert est.basis.startswith("prior:")
+        assert est.expected_usd == 0.0
+        assert (est.expected_list_usd, est.p10_list_usd, est.p90_list_usd) == (
+            pytest.approx(0.05),
+            pytest.approx(0.02),
+            pytest.approx(0.12),
+        )
+
+    def test_prior_without_list_percentiles_uses_the_billed_or_default_spread(self):
+        key = "app_agentic|opencode|vendor/cheap|M|frugal"
+        inputs = _agentic(size_bucket="M", tier="frugal")
+        billed = _prior(6, 0.04, cost_p10=0.02, cost_p90=0.08, list_cost_p50=0.05)
+        est = estimate.estimate_inputs(inputs, priors={key: billed})
+        assert (est.expected_list_usd, est.p10_list_usd, est.p90_list_usd) == (
+            pytest.approx(0.05),
+            pytest.approx(0.025),
+            pytest.approx(0.10),
+        )
+        free = _prior(6, 0.0, list_cost_p50=0.05)
+        est = estimate.estimate_inputs(inputs, priors={key: free})
+        assert (est.p10_list_usd, est.p90_list_usd) == (pytest.approx(0.05 * 0.4), pytest.approx(0.05 * 2.2))
+        no_list = _prior(6, 0.04)
+        est = estimate.estimate_inputs(inputs, priors={key: no_list})
+        assert est.expected_list_usd == pytest.approx(0.04)  # no list median: catalog = billed
+
+    def test_list_p90_of_an_estimate_stored_before_the_field(self):
+        old = _fixed(_cell(0, 0, 0)).model_copy(update={"expected_list_usd": 0.2})
+        assert old.p90_list_usd is None
+        assert estimate.list_p90(old) == pytest.approx(0.3)  # 0.2 x (0.15 / 0.10)
+        subscription = old.model_copy(update={"expected_usd": 0.0, "p90_usd": 0.0, "expected_list_usd": 0.1})
+        assert estimate.list_p90(subscription) == pytest.approx(0.22)
+
+
+def _subscription(cell: ResolvedCell) -> CellEstimate:
+    """A list-price endpoint: bills 0, list 0.10 / 0.20 per cell with a 1.5 x list p90."""
+    usd = 0.10 if cell.condition_index == 0 else 0.20
+    return CellEstimate(
+        expected_usd=0.0,
+        expected_list_usd=usd,
+        p10_usd=0.0,
+        p90_usd=0.0,
+        p10_list_usd=usd * 0.5,
+        p90_list_usd=usd * 1.5,
+        cap_usd=0.3,
+        expected_tokens=1000,
+        expected_wall_s=600.0,
+        p90_wall_s=900.0,
+        basis="heuristic",
+    )
+
+
+def _list_policy(**overrides):
+    return policy.apply_overrides(FRUGAL, {"study.cap_basis": "list", **overrides})
+
+
+class TestListPlan:
+    def test_auto_cap_fit_and_by_level_in_list_units(self):
+        est = estimate.estimate_plan(_plan(), policy=_list_policy(), tier="frugal", cell_estimator=_subscription)
+        assert est.cap_basis == "list"
+        assert (est.expected_total, est.p90_total) == (0.0, 0.0)
+        assert est.expected_list_total == pytest.approx(1.8)
+        assert est.p90_list_total == pytest.approx(2.7)
+        # The defect: the billed p90 (0) gave "Cap $0.00". Now round-up(2.7 x 1.1) as on a billed endpoint.
+        assert est.cap_usd == pytest.approx(2.97)
+        assert est.by_level == {"model": {"m0": 0.6, "m1": 1.2}}
+        assert [(c.expected_list_usd, c.p90_list_usd) for c in est.by_condition] == [
+            (pytest.approx(0.6), pytest.approx(0.9)),
+            (pytest.approx(1.2), pytest.approx(1.8)),
+        ]
+        # A repeat costs 0.6 at list price: 2.97 // 0.6 = 4 repeats; all 6 blocks (1.8) fit.
+        assert (est.fit.blocks_under_cap, est.fit.max_repeats_under_cap) == (6, 4)
+        assert estimate.basis_totals(est) == (pytest.approx(1.8), pytest.approx(2.7))
+
+    def test_estimate_exceeds_a_fixed_list_cap(self):
+        est = estimate.estimate_plan(
+            _plan(),
+            policy=_list_policy(**{"study.max_cost_usd": 1.0}),
+            tier="frugal",
+            cell_estimator=_subscription,
+        )
+        issue = est.issues[0]
+        assert (issue.code, issue.severity) == ("estimate_exceeds_cap", "error")
+        assert "list price" in issue.message
+        assert issue.data["cap_basis"] == "list"
+        assert issue.fix[0].params == {"study_cap": 2.97}
+        assert (est.fit.blocks_under_cap, est.fit.max_repeats_under_cap) == (2, 1)
+
+    def test_a_billed_basis_plan_is_unchanged(self):
+        # The same cells under a billed cap: the billed totals are 0, so the cap and the fit stay billed.
+        est = estimate.estimate_plan(_plan(), policy=FRUGAL, tier="frugal", cell_estimator=_fixed)
+        assert est.cap_basis == "billed"
+        assert estimate.basis_totals(est) == (pytest.approx(1.8), pytest.approx(2.7))
+        assert est.p90_list_total == pytest.approx(2.7)
+
+    def test_auto_cap_basis_resolves_from_the_cells_endpoints(self):
+        auto = policy.apply_overrides(FRUGAL, {"study.cap_basis": "auto"})
+        billed = estimate.estimate_plan(_plan(), policy=auto, tier="frugal", cell_estimator=_subscription)
+        assert billed.cap_basis == "billed"
+        plan = _plan()
+        cells = []
+        for cell in plan.cells:
+            body = cell.manifest.model_dump(mode="json")
+            body["model"]["endpoint"]["cost_basis"] = "list_price"
+            cells.append(cell.model_copy(update={"manifest": type(cell.manifest).model_validate(body)}))
+        listed = estimate.estimate_plan(
+            plan.model_copy(update={"cells": cells}),
+            policy=auto,
+            tier="frugal",
+            cell_estimator=_subscription,
+        )
+        assert listed.cap_basis == "list"
+        assert listed.cap_usd == pytest.approx(2.97)
+
+    def test_reestimate_after_pilot_in_list_units(self):
+        est = estimate.estimate_plan(_plan(), policy=_list_policy(), tier="frugal", cell_estimator=_subscription)
+        new, changes = estimate.reestimate_after_pilot(est, {0: [0.2] * 5})
+        assert changes == [
+            {"condition_index": 0, "before": 0.6, "after": pytest.approx(0.6 * math.sqrt(2), rel=1e-5), "n": 5},
+        ]
+        assert new.expected_list_total == pytest.approx(0.6 * math.sqrt(2) + 1.2, rel=1e-5)
+        assert new.p90_list_total == pytest.approx(0.9 * math.sqrt(2) + 1.8, rel=1e-5)

@@ -73,6 +73,8 @@ class ResolveIn(Schema):
 
 class FreezeIn(Schema):
     drop_incompatible: bool = False
+    # E2E-14: a drawing design keeps the parents pinned at its first freeze; true draws them again.
+    redraw_parents: bool = False
 
 
 class LaunchIn(Schema):
@@ -313,7 +315,11 @@ def freeze_plan(request, study_id: str, payload: FreezeIn):
     """Persist the resolved plan as a draft ``StudyPlan`` (``PlanOut``, ``persisted: true``)."""
     study = _study(request, study_id)
     try:
-        row = planner.freeze(study, drop_incompatible=payload.drop_incompatible)
+        row = planner.freeze(
+            study,
+            drop_incompatible=payload.drop_incompatible,
+            redraw_parents=payload.redraw_parents,
+        )
     except DesignError as exc:
         return _error(exc)
     return Status(200, serialize.plan_out(planner.load_bundle(row)))

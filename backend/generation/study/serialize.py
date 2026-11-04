@@ -409,6 +409,7 @@ def cells_payload(study: Study, *, state: str | None, condition: int | None, uni
                 "attempts": attempts.get(cell.pk, 0),
                 "beyond_plan_runs": beyond.get(cell.pk, 0),
                 "estimate_usd": float(cell.estimate_usd),
+                "estimate_list_usd": float(cell.estimate_list_usd),
                 "cap_usd": float(cell.cap_usd),
                 "cell_cap_usd": float(cell.cell_cap_usd),
                 "spent_usd": float(cell.spent_usd),

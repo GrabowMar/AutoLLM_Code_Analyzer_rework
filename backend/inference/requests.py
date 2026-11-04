@@ -606,14 +606,16 @@ def complete(
     error_kind: str = "",
     error_message: str = "",
     upstream_ms: int | None = None,
+    requeue: bool = True,
 ) -> CompleteOutcome:
     """Store a relay/pump result; idempotent and only for the current claim (§E.2 result).
 
     Accepted only while the row is ``leased`` with this ``claim_token`` (and
     to this session / pump owner). ``ok``: ``done`` with the response and
     metrics. ``connect``/``timeout`` with attempts left: back to the queue
-    (``attempt + 1``). ``http``: ``done`` with the error status (the caller
-    maps it). Otherwise ``failed``. Waiters are signalled after commit.
+    (``attempt + 1``), unless ``requeue=False`` (the pump: the call's per-call
+    wall clock is spent, E2E-20). ``http``: ``done`` with the error status (the
+    caller maps it). Otherwise ``failed``. Waiters are signalled after commit.
     """
     try:
         uuid.UUID(str(rid))
@@ -646,7 +648,7 @@ def complete(
             row.response_status = status_code or 200
             for key, value in _usage_fields(payload).items():
                 setattr(row, key, value)
-        elif kind in RETRYABLE_RESULT_KINDS and row.attempt + 1 < row.max_attempts:
+        elif requeue and kind in RETRYABLE_RESULT_KINDS and row.attempt + 1 < row.max_attempts:
             row.status = Status.QUEUED
             row.attempt += 1
             row.error_kind = kind

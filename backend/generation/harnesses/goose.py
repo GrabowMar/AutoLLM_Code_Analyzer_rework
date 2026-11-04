@@ -50,7 +50,7 @@ SYSTEM_PROMPT_PATH: Final = f"{HARNESS_DIR}/goose-system.md"
 COMPACT_THRESHOLD: Final = "0.8"
 
 FACTS: Final = HarnessFacts(
-    facts_version=1,
+    facts_version=2,
     verified_against=(
         f"goose v{VERSION} goose-x86_64-unknown-linux-gnu.tar.bz2 (sha256 e54036f3...): run --help, env scan, "
         "ldd, scripted-upstream smoke run, 2026-11-03"
@@ -100,10 +100,9 @@ FACTS: Final = HarnessFacts(
         r"(?i)^\s*(cwd|working directory|current directory)\s*:.*$",
     ),
     unsupported_knobs=("reasoning", "caching.prompt_cache", "time.command_timeout_s", "tool_policy"),
-    open_questions=(
-        "built-in skills (web-search via DuckDuckGo/Tavily/SearXNG, goose-doc-guide) and the load_skill tool are "
-        "advertised even with --no-profile and no verified switch removes them (smoke run, v1.57.0)",
-    ),
+    # E2E-13: the built-in skills question moved to GooseAdapter.exploratory_only (a tool-surface caveat
+    # recorded with every cell, not a blocker for exploratory studies).
+    open_questions=(),
 )
 
 
@@ -130,8 +129,12 @@ class GooseAdapter(HarnessAdapter):
     image_dir: ClassVar[str] = "agent-goose"
     facts: ClassVar[HarnessFacts] = FACTS
     versions: ClassVar[tuple[str, ...]] = (VERSION,)
-    wants_enabled: ClassVar[bool] = False
-    blocked_reason: ClassVar[str] = "facts verified offline; awaiting a real-model smoke run through the WP-06 gateway"
+    wants_enabled: ClassVar[bool] = True
+    exploratory_only: ClassVar[str] = (
+        "built-in skills (web-search via DuckDuckGo/Tavily/SearXNG, goose-doc-guide) and the load_skill tool are "
+        "advertised even with --no-profile and no verified switch removes them (the sandbox has no web egress, so "
+        "a web search fails); no real-model smoke run is logged yet"
+    )
     option_fields: ClassVar[tuple[OptionField, ...]] = (
         OptionField(
             key="max_tool_repetitions",

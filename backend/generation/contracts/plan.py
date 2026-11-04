@@ -204,10 +204,17 @@ class Design(ContractModel):
 
 
 class CellEstimate(ContractModel):
+    """One cell's estimate. ``*_usd`` is what the endpoint bills (0 on subscription/local endpoints);
+    ``*_list_usd`` is the catalog (list) price, the unit of a ``cap_basis: list`` study. Both are truncated at
+    ``cap_usd``. ``p10_list_usd``/``p90_list_usd`` are ``None`` on estimates stored before they existed
+    (readers fall back to scaling the billed spread, see ``budget.estimate.list_p90``)."""
+
     expected_usd: NonNegFloat
     expected_list_usd: NonNegFloat
     p10_usd: NonNegFloat
     p90_usd: NonNegFloat
+    p10_list_usd: NonNegFloat | None = None
+    p90_list_usd: NonNegFloat | None = None
     cap_usd: NonNegFloat  # theoretical worst case per attempt; what the scheduler reserves
     expected_tokens: NonNegInt
     expected_wall_s: NonNegFloat
@@ -221,6 +228,7 @@ class ConditionEstimate(ContractModel):
     expected_usd: NonNegFloat
     p90_usd: NonNegFloat
     expected_list_usd: NonNegFloat = 0.0
+    p90_list_usd: NonNegFloat = 0.0
 
 
 class EstimateFit(ContractModel):
@@ -243,6 +251,11 @@ class Estimate(ContractModel):
     p90_total: NonNegFloat  # sum of p90 (conservative, documented as such)
     worst_case_total: NonNegFloat
     expected_list_total: NonNegFloat = 0.0
+    p90_list_total: NonNegFloat = 0.0  # sum of cell list p90s
+    # The unit the study cap counts (``study.cap_basis``): ``cap_usd``, ``fit``, ``by_level``, the
+    # ``estimate_exceeds_cap`` issue and the launch confirmation all use the totals of this basis
+    # (billed: ``expected_total``/``p90_total``; list: ``expected_list_total``/``p90_list_total``).
+    cap_basis: Literal["billed", "list"] = "billed"
     expected_tokens_total: NonNegInt = 0
     cap_usd: NonNegFloat | None = None  # resolved from "auto" when applicable
     by_condition: list[ConditionEstimate] = Field(default_factory=list)

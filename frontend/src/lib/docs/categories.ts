@@ -36,7 +36,7 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
   Reference: {
     label: "Reference",
     icon: BookOpen,
-    tagline: "API, analyzers, models, and template specifications.",
+    tagline: "API, analyzers, models, and library specifications.",
     accent: "text-accent-3",
   },
   Operations: {

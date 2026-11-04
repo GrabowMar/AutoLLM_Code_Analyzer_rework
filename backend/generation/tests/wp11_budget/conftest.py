@@ -167,6 +167,8 @@ def make_study(
     cell_cap: float = 0.60,
     cap_usd: float = 0.15,
     estimate_usd: float = 0.10,
+    estimate_list_usd: float | None = None,
+    cap_basis: str = "billed",
     on_exhausted: str = "stop_balanced",
     status: str = "running",
     stage: str = "main",
@@ -191,7 +193,13 @@ def make_study(
     )
     policy = ResourcePolicyFactory(content=content)
     study = StudyFactory(created_by=user, resource_policy=policy, status=status, launched_at=timezone.now())
-    Study.objects.filter(pk=study.pk).update(on_budget_exhausted=on_exhausted, kind=kind, mode=mode, max_parallel=64)
+    Study.objects.filter(pk=study.pk).update(
+        on_budget_exhausted=on_exhausted,
+        kind=kind,
+        mode=mode,
+        max_parallel=64,
+        cap_basis=cap_basis,
+    )
     study.refresh_from_db()
     plan = StudyPlanFactory(
         study=study,
@@ -239,6 +247,7 @@ def make_study(
                     cap_usd=Decimal(str(cap_usd)),
                     cell_cap_usd=Decimal(str(cell_cap)),
                     estimate_usd=Decimal(str(estimate_usd)),
+                    estimate_list_usd=Decimal(str(estimate_usd if estimate_list_usd is None else estimate_list_usd)),
                     state="queued",
                 )
                 run = GenerationRunFactory(

@@ -53,7 +53,7 @@
 		withFactors,
 	} from './design';
 	import { parseFix, type SummaryIssue } from './issues';
-	import { patchPolicy, savePolicy, withStudyCap } from './policy';
+	import { estimateBasisTotals, patchPolicy, savePolicy, withStudyCap } from './policy';
 	import { PinnedPolicy, rememberPolicy } from './pinned.svelte';
 	import Dices from '@lucide/svelte/icons/dices';
 
@@ -386,7 +386,7 @@
 
 	<StartBar
 		runs={b.plan?.n_cells ?? null}
-		maxCost={b.plan?.estimate?.p90_total ?? null}
+		maxCost={b.plan?.estimate ? estimateBasisTotals(b.plan.estimate).p90 : null}
 		errors={errorCount}
 		label="Start…"
 		canStart={b.canStart}
@@ -429,4 +429,4 @@
 	onclose={() => (launchOpen = false)}
 />
 
-<p class="sr-only" aria-live="polite">{b.plan?.estimate ? `Expected ${formatUsd(b.plan.estimate.expected_total)}` : ''}</p>
+<p class="sr-only" aria-live="polite">{b.plan?.estimate ? `Expected ${formatUsd(estimateBasisTotals(b.plan.estimate).expected)}` : ''}</p>

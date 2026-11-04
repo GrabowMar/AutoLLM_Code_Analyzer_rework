@@ -5,7 +5,8 @@ pre-fills the DetectorEditor (``POST /patterns/detectors/from-selection/``). Sav
 API (a new detector version); nothing here writes a library row.
 
 - ``regex``: the selection's tokens, escaped, joined by ``\\s*`` (whitespace-insensitive, literal otherwise);
-- ``ts_query``: the smallest named node covering the selection, rendered as an S-expression up to depth 3,
+- ``ts_query``: the smallest named node covering the selection's code (first to last non-blank byte),
+  rendered as an S-expression up to depth 3,
   with ``#eq?`` predicates pinning identifier texts and the root captured as ``@match``.
 
 ``diff_vs_original`` computes ``contracts.slot.DiffVsOriginal`` for a variant: line diff counts, the
@@ -55,13 +56,41 @@ def regex_for(selection: str) -> str:
     return r"\s*".join(re.escape(token) for token in tokens[:MAX_REGEX_TOKENS])
 
 
-def _covering_node(root: Any, start_line: int, end_line: int) -> Any:
-    """The smallest named node whose rows cover ``[start_line, end_line]`` (1-based)."""
+def _selection_bytes(text: str, start_line: int, end_line: int) -> tuple[int, int]:
+    """The byte range of the selection's code: first non-blank byte of ``start_line`` to the last of ``end_line``."""
+    lines = text.encode("utf-8").splitlines(keepends=True)
+    start = sum(len(line) for line in lines[: start_line - 1])
+    end = sum(len(line) for line in lines[: min(end_line, len(lines))])
+    chunk = b"".join(lines[start_line - 1 : min(end_line, len(lines))])
+    lead = len(chunk) - len(chunk.lstrip())
+    trail = len(chunk) - len(chunk.rstrip())
+    if lead == len(chunk):  # a blank selection: the whole line range
+        return start, end
+    return start + lead, end - trail
+
+
+def _covering_node(root: Any, start_line: int, end_line: int, text: str | None = None) -> Any:
+    """The smallest named node covering the selection's code (E2E-26: bytes, not just rows).
+
+    Covering only the selection's *rows* let any token on a one-line selection win (a ``string_start`` or a
+    single ``identifier``), so a draft from ``if row is None or not check_password_hash(...)`` matched every
+    string. With ``text`` the node must cover the selection from its first to its last non-blank byte.
+    """
+    if text is not None:
+        lo, hi = _selection_bytes(text, start_line, end_line)
+
+        def covers(node: Any) -> bool:
+            return node.start_byte <= lo and node.end_byte >= hi
+    else:
+
+        def covers(node: Any) -> bool:
+            return node.start_point[0] <= start_line - 1 and node.end_point[0] >= end_line - 1
+
     best = root
     stack = [root]
     while stack:
         node = stack.pop()
-        if node.start_point[0] <= start_line - 1 and node.end_point[0] >= end_line - 1:
+        if covers(node):
             if node.is_named and (node.end_byte - node.start_byte) <= (best.end_byte - best.start_byte):
                 best = node
             stack.extend(node.children)
@@ -90,7 +119,7 @@ def ts_query_for(text: str, language: str, start_line: int, end_line: int) -> st
     from tree_sitter import Query
 
     tree = norm.parse(text, language)
-    node = _covering_node(tree.root_node, start_line, end_line)
+    node = _covering_node(tree.root_node, start_line, end_line, text)
     captures: list[tuple[str, str]] = []
     body = _sexp(node, 0, captures)
     predicates = " ".join(

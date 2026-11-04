@@ -311,6 +311,41 @@ class TestResidency:
         make_run(user, b, study=x, sequence=1)
         assert len(_scheduler().tick(slots(), free()).claimed) == 1
 
+    def test_study_residency_does_not_serialize_models_on_a_remote_api(self, user, system_ep):
+        # OpenCode Go shape: openai_compatible, direct, list price, no declared K, job cap 3.
+        endpoint = make_endpoint(
+            user,
+            kind="openai_compatible",
+            api_flavor="openai",
+            connection="direct",
+            base_url="https://example.invalid/v1",
+            cost_basis="list_price",
+            served=[("a", ""), ("b", "")],
+            max_concurrency=2,
+            max_active_jobs=3,
+        )
+        a, b = make_model(endpoint, "a"), make_model(endpoint, "b")
+        x = running_study(user, execution_options={"max_resident_models": 1})
+        y = running_study(user, execution_options={"max_resident_models": 1, "per_endpoint": 1})
+        make_run(user, a, study=x, sequence=0)
+        make_run(user, b, study=x, sequence=1)
+        make_run(user, b, study=y, sequence=0)
+        make_run(user, a, study=y, sequence=1)
+        result = _scheduler().tick(slots(), free())
+        claimed = [GenerationRun.objects.get(id=c.run_id) for c in result.claimed]
+        # Both models of x run at once (no residency wait); y is held at its per_endpoint=1; the
+        # endpoint's max_active_jobs=3 caps the total.
+        assert len(claimed) == 3
+        assert {r.model_id for r in claimed if r.study_id == x.id} == {a.id, b.id}
+        assert [r.model_id for r in claimed if r.study_id == y.id] == [b.id]
+        assert RESIDENCY_WAIT not in {lane.reason for lane in result.lanes.values()}
+        # A fourth run (another study) waits for the endpoint's job cap, not for residency.
+        z = running_study(user, execution_options={"max_resident_models": 1})
+        make_run(user, a, study=z, sequence=0)
+        again = _scheduler().tick(slots(), free())
+        assert again.claimed == []
+        assert again.lanes[(str(z.id), endpoint.pk)].reason == ENDPOINT_FULL
+
 
 class TestOrderAndFairness:
     def test_lane_order_is_the_frozen_sequence(self, user, system_ep):

@@ -22,7 +22,8 @@
 	let error = $state('');
 	let versionDiffs = $state<{ factor: string; from: string; to: string }[]>([]);
 	let unknownModels = $state<string[]>([]);
-	let started = '';
+	// null until the first init: a bare `/studies/new` has the key '' (empty search), which must still init.
+	let started: string | null = null;
 
 	const list = (key: string) =>
 		(page.url.searchParams.get(key) ?? '')

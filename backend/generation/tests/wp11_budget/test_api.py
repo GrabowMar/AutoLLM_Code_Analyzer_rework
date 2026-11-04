@@ -119,6 +119,9 @@ def test_me_and_header(client, user, system_ep, tick):
     assert any(p["period"] == "day" and p["cap"] == 5.0 for p in me["periods"])
     assert {p["period"] for p in me["periods"]} >= {"day", "week", "month"}
     assert [s["id"] for s in me["studies"]] == [str(tree.study.pk)]
+    assert me["studies"][0]["cap_basis"] == "billed"
+    Study.objects.filter(pk=tree.study.pk).update(cap_basis="list")
+    assert client.get("/budget/me/").json()["studies"][0]["cap_basis"] == "list"
     header = client.get("/budget/header/").json()
     assert header["period"] == "day"
     assert header["period_cap"] == 5.0

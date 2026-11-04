@@ -436,7 +436,7 @@
 					<Card.Content class="space-y-3 text-sm">
 						<SlotMeter label="Request slots" used={endpoint.live.inflight_requests} total={endpoint.max_concurrency} />
 						<dl class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-							<dt class="text-muted-foreground">Active jobs</dt>
+							<dt class="text-muted-foreground">Active runs</dt>
 							<dd class="text-right tabular-nums">
 								{endpoint.live.active_jobs} / {endpoint.max_active_jobs_effective.sandbox} agent · {endpoint.max_active_jobs_effective.llm} LLM
 							</dd>

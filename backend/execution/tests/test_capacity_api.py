@@ -195,6 +195,47 @@ class TestApi:
         assert GenerationRun.objects.filter(status=S.RUNNING).count() == 0
         assert client.get(f"{API}/queue/", {"study_id": "nope"}).status_code == 400
 
+    def test_queue_names_a_paused_condition(self, member, system_ep):
+        """E2E-27: a stop rule's paused condition is skipped by the lane SQL; the queue says so."""
+        from backend.generation.testing.factories import StudyConditionFactory
+
+        client, user = member
+        study = running_study(user)
+        model = make_model()
+        paused = StudyConditionFactory(plan__study=study, model=model, paused=True, pause_reason="rule:cost_overrun")
+        active = StudyConditionFactory(plan=paused.plan, model=model)
+        held = make_run(user, model, study=study, condition=paused, sequence=1)
+        ready = make_run(user, model, study=study, condition=active, sequence=2)
+        reasons = {i["run_id"]: i["blocked_reason"] for i in client.get(f"{API}/queue/").json()["items"]}
+        assert reasons == {str(ready.id): None, str(held.id): "condition_paused"}
+
+    def test_every_scheduler_reason_is_a_queue_reason(self):
+        """E2E-27: a reason the queue schema did not list (study_model_cap) made GET /queue/ answer 500."""
+        from typing import get_args
+
+        from backend.execution import scheduler
+        from backend.execution.api_schemas import BlockedReason
+
+        names = [
+            "SANDBOX_FULL",
+            "LLM_THREADS_FULL",
+            "ENDPOINT_OFFLINE",
+            "ENDPOINT_FULL",
+            "MODEL_NOT_SERVED",
+            "RESIDENCY_WAIT",
+            "WARMING_MODEL",
+            "STUDY_CAP",
+            "CIRCUIT_OPEN",
+            "DRAINING",
+            "RETRY_BACKOFF",
+            "STUDY_ENDPOINT_CAP",
+            "STUDY_MODEL_CAP",
+            "STUDY_PROVIDER_CAP",
+            "BUDGET",
+        ]
+        published = {getattr(scheduler, name) for name in names}
+        assert published - set(get_args(BlockedReason)) == set()
+
     def test_post_run_slots_go_up_to_two(self, staff, settings):
         settings.APPS_DIND_MEM_LIMIT = "64g"
         client, _ = staff

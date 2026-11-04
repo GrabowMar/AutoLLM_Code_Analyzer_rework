@@ -14,7 +14,10 @@ statistics are documented per field):
 * ``calibration|<model>|<provider_sort>|*|*``: ``cost_p50`` = median(billed cost / catalog cost) of the
   model under that routing policy (the heuristic's routing calibration);
 * ``overhead|<kind>|<harness>|*|*``: ``price_at = {infra_retry_rate, mean_partial_cost,
-  failed_call_cost_share}`` (the estimator's failure overhead, step 6).
+  mean_partial_list_cost, failed_call_cost_share}`` (the estimator's failure overhead, step 6).
+
+Chain rows carry the billed percentiles (``cost_p*``) and the list ones (``list_cost_p*``): the estimator
+uses the list ones for the list estimate, so a prior of subscription runs (billed 0) still prices a list cap.
 
 Observations are completed runs of the last ``PRIOR_WINDOW_DAYS`` that recorded a cost
 (``metrics.cost_usd``; runs that recorded none are left out, never counted as free). Percentiles are
@@ -108,6 +111,7 @@ class Observation:
     output_per_mtok: float | None
     infra_retries: int
     prior_attempts_cost: float
+    prior_attempts_list_cost: float | None = None
 
     @property
     def keys(self) -> list[str]:
@@ -167,6 +171,7 @@ def _observation(run: Any) -> Observation | None:
         output_per_mtok=_num(pricing.get("output_per_mtok")),
         infra_retries=sum(1 for a in attempts if isinstance(a, dict) and a.get("reason")),
         prior_attempts_cost=_num(execution.get("prior_attempts_cost_usd")) or 0.0,
+        prior_attempts_list_cost=_num(execution.get("prior_attempts_list_cost_usd")),
     )
 
 
@@ -210,7 +215,9 @@ def _stats(rows: list[Observation]) -> dict[str, Any]:
         "cost_p10": percentile(costs, 0.1),
         "cost_p50": percentile(costs, 0.5),
         "cost_p90": percentile(costs, 0.9),
+        "list_cost_p10": percentile([r.list_cost for r in rows if r.list_cost is not None], 0.1),
         "list_cost_p50": _median_or_none([r.list_cost for r in rows]),
+        "list_cost_p90": percentile([r.list_cost for r in rows if r.list_cost is not None], 0.9),
         "requests_p50": _median_or_none([r.requests for r in rows]),
         "prompt_tokens_p50": _median_or_none([r.prompt_tokens for r in rows]),
         "cached_tokens_p50": _median_or_none([r.cached_tokens for r in rows]),
@@ -231,6 +238,11 @@ def _grouped(rows: Iterable[Observation]) -> dict[str, list[Observation]]:
     return groups
 
 
+def _list_partial(row: Observation) -> float:
+    """The list cost of a run's retried attempts (the billed one when no list amount was recorded)."""
+    return row.prior_attempts_list_cost if row.prior_attempts_list_cost is not None else row.prior_attempts_cost
+
+
 def _aux_stats(key: str, rows: list[Observation]) -> dict[str, Any]:
     if key.startswith("calibration|"):
         ratios = [r.cost / r.list_cost for r in rows if r.list_cost]
@@ -242,6 +254,7 @@ def _aux_stats(key: str, rows: list[Observation]) -> dict[str, Any]:
     n = len(rows)
     retried = [r for r in rows if r.infra_retries]
     partial = [r.prior_attempts_cost / r.infra_retries for r in retried if r.infra_retries]
+    partial_list = [_list_partial(r) / r.infra_retries for r in retried if r.infra_retries]
     total = sum(r.cost for r in rows)
     wasted = sum(r.prior_attempts_cost for r in rows)
     return {
@@ -249,6 +262,7 @@ def _aux_stats(key: str, rows: list[Observation]) -> dict[str, Any]:
         "price_at": {
             "infra_retry_rate": (len(retried) / n) if n else 0.0,
             "mean_partial_cost": (sum(partial) / len(partial)) if partial else 0.0,
+            "mean_partial_list_cost": (sum(partial_list) / len(partial_list)) if partial_list else 0.0,
             # Failed upstream calls inside an attempt are not observable per call yet (RunAttempt.usage
             # has no failed-call cost); the wasted cost of retried attempts is carried by the two keys above.
             "failed_call_cost_share": 0.0,
@@ -332,14 +346,24 @@ def calibration(model: str, provider_sort: str, *, priors: Mapping[str, Any] | N
 
 
 def overhead(kind: str, harness: str, *, priors: Mapping[str, Any] | None = None) -> dict[str, float]:
-    """``{infra_retry_rate, mean_partial_cost, failed_call_cost_share}`` (zeros without enough history)."""
+    """``{infra_retry_rate, mean_partial_cost, mean_partial_list_cost, failed_call_cost_share}`` (zeros
+    without enough history; ``mean_partial_list_cost`` falls back to ``mean_partial_cost`` on rows written
+    before it existed)."""
     key = f"overhead|{kind}|{harness or W}|*|*"
     row = priors.get(key) if priors is not None else _row(key)
-    empty = {"infra_retry_rate": 0.0, "mean_partial_cost": 0.0, "failed_call_cost_share": 0.0}
+    empty = {
+        "infra_retry_rate": 0.0,
+        "mean_partial_cost": 0.0,
+        "mean_partial_list_cost": 0.0,
+        "failed_call_cost_share": 0.0,
+    }
     if row is None or (row.n or 0) < k.PRIOR_MIN_N:
         return empty
     data = row.price_at if isinstance(row.price_at, dict) else {}
-    return {name: float(data.get(name) or 0.0) for name in empty}
+    out = {name: float(data.get(name) or 0.0) for name in empty}
+    if data.get("mean_partial_list_cost") is None:
+        out["mean_partial_list_cost"] = out["mean_partial_cost"]
+    return out
 
 
 def _row(key: str) -> Any:

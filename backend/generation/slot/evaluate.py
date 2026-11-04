@@ -24,6 +24,7 @@ targets and for anything not measured: never 0 for a missing measurement).
 
 from __future__ import annotations
 
+import logging
 from pathlib import PurePosixPath
 from typing import Any
 from typing import Final
@@ -57,6 +58,8 @@ _INTERPRETED: Final = frozenset({"python", "javascript", "typescript"})
 _FRONTEND_EXTS: Final = frozenset({".jsx", ".tsx", ".vue", ".svelte", ".css", ".scss", ".html"})
 _FRONTEND_DIRS: Final = frozenset({"frontend", "client", "web", "ui"})
 _VALIDATION_SUITE_KEY: Final = "slot_validation_suite"
+
+logger = logging.getLogger(__name__)
 
 
 class Selection:
@@ -258,7 +261,12 @@ def _live_score(run: GenerationRun) -> None:
         return
     from backend.generation.patterns import live
 
-    live.score_variant(run)
+    try:
+        live.score_variant(run)
+    except Exception:
+        # Live scores are provisional (the PatternRun recomputes everything); a scorer failure must not turn the
+        # variant's evaluation into an executor crash (``infra_error:eval_lost``).
+        logger.exception("live pattern scoring failed for run %s", run.pk)
 
 
 def evaluate_variant(run: GenerationRun, *, mode: str | None = None) -> RunEvaluation:

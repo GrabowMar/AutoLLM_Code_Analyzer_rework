@@ -646,7 +646,7 @@
 <Tabs.Root bind:value={activeTab} class="space-y-4">
 	<PageHeader
 		title="Analyzers"
-		description="Choose the tools that measure your generated apps. Their findings are what analysis runs, experiments, reports and rankings compare across models."
+		description="Choose the tools that measure your generated apps. Their findings are what analysis runs, studies, reports and rankings compare across models."
 	>
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={loadAll} disabled={loading}>

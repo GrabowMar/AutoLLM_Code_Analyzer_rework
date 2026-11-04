@@ -72,6 +72,12 @@
 	);
 	const kinds = $derived([...new Set(steps.map((s) => s.kind))].sort());
 	const trajectory = $derived(data?.trajectory ?? null);
+	// Parsers record `started` as the harness's own timestamp (epoch seconds for opencode and
+	// mini-swe-agent), so the column shows the offset from the first timed step.
+	const t0 = $derived.by(() => {
+		const times = steps.map((s) => s.started).filter((t): t is number => typeof t === 'number');
+		return times.length ? Math.min(...times) : 0;
+	});
 	const observed = $derived(data?.observed_inputs ?? null);
 </script>
 
@@ -143,7 +149,7 @@
 							<th>Kind</th>
 							<th>Tool</th>
 							<th>Result</th>
-							<th class="num">Start</th>
+							<th class="num" title="Since the first step">Start</th>
 							<th class="num">Duration</th>
 							<th class="num">Tokens in</th>
 							<th class="num">Tokens out</th>
@@ -162,7 +168,7 @@
 								<td>
 									{#if step.ok === true}<span class="text-xs">ok</span>{:else if step.ok === false}<Badge variant="destructive">failed</Badge>{:else}<span class="text-muted-foreground">—</span>{/if}
 								</td>
-								<td class="num">{fmtSeconds(step.started)}</td>
+								<td class="num">{step.started == null ? '—' : fmtSeconds(step.started - t0)}</td>
 								<td class="num">{fmtSeconds(step.duration_s)}</td>
 								<td class="num">{fmtInt(step.tokens_in)}</td>
 								<td class="num">{fmtInt(step.tokens_out)}</td>

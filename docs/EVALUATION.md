@@ -226,6 +226,16 @@ artifacts and `jdbc:<kind>:` URLs in Java sources and `.properties`/`.yml` files
   The 17 probe kinds' mutant pairs validate on the docker runtime as well as locally. Two seed checks
   needed an explicit setup actor (WP-04): `file_share_multipart` `shares.revoked` and `team_roles_multitenant`
   `projects.cross_tenant`.
+- **dev1 E2E run (2026-11-04, CHANGES E2E-25).** Kit references for go-stdlib and spring-boot (`go-none`,
+  `spring-boot-none`; ports of the Flask references, written by an AI coding assistant, see their PROVENANCE.md)
+  pass `conformance_kit`, so `coverage()` is true for all six frameworks. Oracle references now also exist for
+  `notes_markdown_render` (all six `-none` stacks) and for `crud_todo_list`, `file_share_multipart` and
+  `notes_markdown_render` on `flask-react` and `express-react` (the react starter plus the `-none` backend, the
+  starter's placeholder UI); every one passes `oracle_validate --runs 3`. Validating `notes_markdown_render`
+  found a compiler defect: the setup of a public (`anon`) check sent the boolean sample `false`, so it created an
+  unpublished note and expected its public page to answer 200. The setup of an `anon` check now sends visibility
+  flags (`published`, `is_active`, `public`, ... `_VISIBILITY_FLAGS`) as `true`; owner-only checks are unchanged,
+  and so are the snapshot tasks' plans.
 - **Test-retest.** `retest.run_retests(study)` re-evaluates a seeded random `retest_fraction` of the study's
   tested runs under the same suite and selection (`retest_of` set); `GET /eval/retest/?study=` reports per-check
   and per-run agreement and Cohen's kappa (`None` when nothing was compared).

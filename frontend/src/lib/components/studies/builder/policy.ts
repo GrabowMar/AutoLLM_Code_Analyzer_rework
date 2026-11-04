@@ -6,7 +6,11 @@
  * scheduler), so changing them does not change `prompt_hash`; class C/R knobs do change the treatment.
  */
 import { createLibraryItem, createLibraryVersion } from "$lib/api/v3/library";
-import type { LibraryItemOut, ResourcePolicyContent } from "$lib/api/v3/types";
+import type {
+  Estimate,
+  LibraryItemOut,
+  ResourcePolicyContent,
+} from "$lib/api/v3/types";
 import { parseRef } from "$lib/api/v3/types";
 import {
   getKnob,
@@ -157,4 +161,28 @@ export function launchStudyCap(
   if (cap === null || !Number.isFinite(cap)) return null;
   if (!presetAuto && Math.abs(Number(policyCap) - cap) < 0.005) return null;
   return cap;
+}
+
+/**
+ * The estimate totals in the study cap's unit (`Estimate.cap_basis`): list-price totals for a list-basis
+ * study (a subscription or local endpoint bills $0, so its billed totals say nothing about the cap), else
+ * the billed ones. The server confirms a launch against this p90, so the launch dialog does too.
+ */
+export function estimateBasisTotals(estimate: Estimate): {
+  basis: "billed" | "list";
+  expected: number;
+  p90: number;
+} {
+  if (estimate.cap_basis === "list") {
+    return {
+      basis: "list",
+      expected: estimate.expected_list_total,
+      p90: estimate.p90_list_total ?? estimate.expected_list_total,
+    };
+  }
+  return {
+    basis: "billed",
+    expected: estimate.expected_total,
+    p90: estimate.p90_total,
+  };
 }

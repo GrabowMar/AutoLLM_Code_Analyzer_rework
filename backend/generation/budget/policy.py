@@ -688,13 +688,25 @@ def lint(
             )
     if ctx.mode == "slot" and ctx.executor == "single_shot" and ctx.slot_original_tokens is not None:
         cap = policy.slot.max_output_tokens or call.max_output_tokens
-        need = k.SLOT_OUTPUT_FACTOR * ctx.slot_original_tokens + _r_avg(policy)
+        r_avg = _r_avg(policy)
+        unbounded = facts is not None and (facts.supports_reasoning or facts.reasoning_model)
+        if unbounded:
+            # E2E-15: the single-shot body sends no reasoning parameter, so a reasoning model reasons at its
+            # provider default however the policy sets ``reasoning``; reserve the observed headroom.
+            r_avg = max(r_avg, float(k.R_UNBOUNDED_REASONING))
+        need = k.SLOT_OUTPUT_FACTOR * ctx.slot_original_tokens + r_avg
         if need > cap:
+            why = (
+                f"; {facts.slug} is a reasoning model and single-shot calls do not bound its reasoning"
+                if unbounded and facts is not None
+                else ""
+            )
             issues.append(
                 _issue(
                     "slot_output_cap_tight",
                     kind,
-                    f"1.6 x original ({ctx.slot_original_tokens}) + reasoning = {int(need)} > slot output cap {cap}",
+                    f"1.6 x original ({ctx.slot_original_tokens}) + reasoning ({int(r_avg)}) = {int(need)} > "
+                    f"slot output cap {cap}{why}",
                     path="slot.max_output_tokens",
                 ),
             )

@@ -319,8 +319,10 @@ def run_schedule_action(schedule_id: int, *, now: datetime | None = None) -> dic
 
 def _auto_confirm(bundle: Any) -> float | None:
     """A scheduled launch confirms its own estimate (the schedule's owner approved the source study)."""
+    from backend.generation.budget.estimate import basis_totals
+
     estimate = bundle.plan.estimate
-    return estimate.p90_total if estimate is not None else None
+    return basis_totals(estimate)[1] if estimate is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +336,6 @@ def _publish(post_run: StudyPostRun) -> None:
     event = {
         "type": "post_run",
         "id": post_run.pk,
-        "kind": post_run.kind,
         "status": post_run.status,
         "progress": dict(post_run.progress or {}),
     }

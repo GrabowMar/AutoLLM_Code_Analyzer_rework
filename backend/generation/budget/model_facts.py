@@ -4,6 +4,16 @@
 policy clamps, the lint, the estimator and the gateway config all see the same facts. Prices are USD per
 million tokens. Unknown values stay ``None`` (never 0): an unknown context length is not a clamp, and an
 unknown price makes the estimate say so instead of returning a free run.
+
+A model on a local or remote endpoint (OpenCode Go, Ollama, ...) often has no capability metadata of its
+own (0 context / output, no ``supported_parameters``). When it is linked to a catalog row, the link keeps
+the **serving provider's** own catalogue record (``metadata.catalog_twin.provider_record``, e.g. models.dev's
+``opencode-go`` entry): its ``limit`` fills the unknown context / output limits and its ``reasoning_options``
+mark the model as a ``reasoning_model`` (:func:`serving_record_facts`, E2E-15). The record describes the
+endpoint actually called, so it is used instead of the catalog twin's OpenRouter limits; a row's own values
+always win. It does **not** set ``supports_reasoning``: the gateway forwards the policy's reasoning control
+as OpenRouter's ``reasoning`` object, which OpenCode Go accepts and ignores (it honours ``reasoning_effort``),
+so the policy keeps clamping such a model to ``provider_default`` and the recorded treatment stays true.
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ __all__ = [
     "ModelFacts",
     "is_model_alias",
     "model_facts",
+    "serving_record_facts",
 ]
 
 _MTOK: Final = 1_000_000
@@ -39,7 +50,10 @@ class ModelFacts:
     provider: str = ""
     context_length: int | None = None
     max_output: int | None = None
-    supports_reasoning: bool = False
+    supports_reasoning: bool = False  # the reasoning control the gateway sends is honoured (policy keeps it)
+    # The model reasons (spends reasoning tokens) even when the control is not honoured: an endpoint model whose
+    # serving provider lists reasoning options (E2E-15). Implied by ``supports_reasoning``.
+    reasoning_model: bool = False
     supports_tools: bool = True
     input_per_mtok: float | None = None
     output_per_mtok: float | None = None
@@ -117,6 +131,41 @@ def is_model_alias(slug: str) -> bool:
     return lowered.endswith(("-latest", ":latest")) or lowered.startswith(_ROUTER_PREFIXES)
 
 
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return int(value)
+
+
+def serving_record_facts(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Capabilities from the serving provider's catalogue record of a linked endpoint model.
+
+    ``{"source", "context_length", "max_output", "supports_reasoning", "reasoning_options"}`` with only the
+    values the record states (``{}`` without a record). ``supports_reasoning`` is true when the provider
+    lists any reasoning option (toggle, effort or budget), false for an empty list, and absent when the
+    record says nothing about reasoning.
+    """
+    twin = (metadata or {}).get("catalog_twin")
+    record = twin.get("provider_record") if isinstance(twin, Mapping) else None
+    if not isinstance(record, Mapping):
+        return {}
+    out: dict[str, Any] = {"source": str(twin.get("source") or "metadata.catalog_twin.provider_record")}
+    limit = record.get("limit") if isinstance(record.get("limit"), Mapping) else {}
+    context = _positive_int(limit.get("context"))
+    output = _positive_int(limit.get("output"))
+    if context is not None:
+        out["context_length"] = context
+    if output is not None:
+        out["max_output"] = output
+    options = record.get("reasoning_options")
+    if isinstance(record.get("reasoning"), bool):
+        out["supports_reasoning"] = record["reasoning"]
+    if isinstance(options, list):
+        out["reasoning_options"] = [dict(o) for o in options if isinstance(o, Mapping)]
+        out.setdefault("supports_reasoning", bool(out["reasoning_options"]))
+    return out
+
+
 def _from_row(model: Any) -> ModelFacts:
     raw = model.capabilities_json if isinstance(getattr(model, "capabilities_json", None), dict) else {}
     meta = model.metadata if isinstance(getattr(model, "metadata", None), dict) else {}
@@ -134,13 +183,31 @@ def _from_row(model: Any) -> ModelFacts:
     tools = bool(getattr(model, "supports_function_calling", False)) or "tools" in params
     if endpoint is not None and not params:
         tools = bool(getattr(model, "supports_function_calling", True))
+    context_length = int(model.context_window) if getattr(model, "context_window", 0) else None
+    max_output = int(model.max_output_tokens) if getattr(model, "max_output_tokens", 0) else None
+    extra: dict[str, Any] = {}
+    reasoning_model = reasoning
+    if endpoint is not None:
+        # The serving provider's catalogue record fills what the endpoint row leaves unknown (E2E-15).
+        served = serving_record_facts(meta)
+        if served:
+            if context_length is None:
+                context_length = served.get("context_length")
+            if max_output is None:
+                max_output = served.get("max_output")
+            if not params and "supports_reasoning" not in meta and served.get("supports_reasoning"):
+                reasoning_model = True
+            extra = {"capability_source": served["source"]}
+            if "reasoning_options" in served:
+                extra["reasoning_options"] = served["reasoning_options"]
     return ModelFacts(
         slug=slug,
         family=family,
         provider=str(getattr(model, "provider", "") or ""),
-        context_length=int(model.context_window) if getattr(model, "context_window", 0) else None,
-        max_output=int(model.max_output_tokens) if getattr(model, "max_output_tokens", 0) else None,
+        context_length=context_length,
+        max_output=max_output,
         supports_reasoning=reasoning,
+        reasoning_model=reasoning_model,
         supports_tools=tools,
         input_per_mtok=None if unknown_price else (input_price or 0.0) * _MTOK,
         output_per_mtok=None if unknown_price else (output_price or 0.0) * _MTOK,
@@ -151,6 +218,7 @@ def _from_row(model: Any) -> ModelFacts:
         cost_basis=str(getattr(endpoint, "cost_basis", "billed")) if endpoint is not None else "billed",
         served_model_name=str(getattr(model, "served_model_name", "") or ""),
         supports_batch=bool(meta.get("supports_batch", False)),
+        extra=extra,
     )
 
 

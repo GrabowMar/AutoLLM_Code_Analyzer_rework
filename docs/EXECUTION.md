@@ -63,7 +63,7 @@ A pending run that is not admitted reports why (tick events, `GET /api/execution
 | `circuit_open` | Three infra failures on the endpoint within 5 minutes; closed again after 60 s. |
 | `endpoint_full` | The endpoint is at its job cap (`max_active_jobs`, else `max_concurrency`). |
 | `model_not_served` | The live session does not serve the frozen `(name, digest)`. |
-| `residency_wait` | Starting this model would exceed the resident-model limit (the endpoint's, or the study's `max_resident_models`). After `EXECUTOR_STARVATION_S` the starvation guard drains the endpoint for a swap. |
+| `residency_wait` | Starting this model would exceed the resident-model limit (the endpoint's, or the study's `max_resident_models`). After `EXECUTOR_STARVATION_S` the starvation guard drains the endpoint for a swap. Residency applies only to endpoints that host models themselves (`execution.sequence.hosts_models_locally`: Ollama, a relay, `cost_basis` free, or an endpoint that declares its own K); a remote API such as OpenCode Go or Anthropic never waits for residency, only for its job cap and the study's `per_endpoint`/`per_model`. |
 | `warming_model` | An Ollama prefetch (warm-up) of the model is in progress. |
 | `study_cap` | `Study.max_parallel` (`concurrency.study_max_parallel`) is reached. |
 | `study_endpoint_cap`, `study_model_cap`, `study_provider_cap` | The study's `concurrency.per_endpoint` / `per_model` / `per_provider` (pinned `routing.only` provider) limit is reached. |

@@ -339,3 +339,28 @@ def test_a_launch_attached_post_run_without_a_pattern_run(detectors, fake_semgre
     assert post.pattern_run_id == pattern_run.pk
     assert pattern_run.status == "completed"
     assert StudyPostRun.objects.filter(study=synthetic.study).count() == 1  # no second post-run queued
+
+
+def test_column_docs_cover_exactly_the_written_columns():
+    """E2E-16: every fixed CSV column has a README text, and no text names a column that is not written."""
+    assert set(export.COLUMN_DOCS) == set(export.CSV_COLUMNS)
+    for name, columns in export.CSV_COLUMNS.items():
+        assert set(export.COLUMN_DOCS[name]) == set(columns), name
+        assert len(set(columns)) == len(columns), name
+
+
+def test_export_readme_names_every_column_of_every_csv(completed):
+    """E2E-16: the README documents each header of each CSV in the zip, feature columns included."""
+    _, pattern_run = completed
+    with zipfile.ZipFile(io.BytesIO(export.build_export(pattern_run))) as zf:
+        readme = zf.read("README.md").decode()
+        csvs = sorted(n for n in zf.namelist() if n.endswith(".csv"))
+        headers = {n: next(csv.reader(io.StringIO(zf.read(n).decode()))) for n in csvs}
+    assert set(csvs) == set(export.CSV_COLUMNS)
+    sections = readme.split("### ")
+    for name, header in headers.items():
+        section = next(s for s in sections if s.startswith(f"`{name}`"))
+        for column in header:
+            assert f"| `{column}` |" in section, (name, column)
+    assert "| `f:py-sql-fstring@span` |" in readme
+    assert "detector `py-sql-fstring@" in readme

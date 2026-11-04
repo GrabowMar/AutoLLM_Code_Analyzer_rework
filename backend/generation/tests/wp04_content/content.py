@@ -83,8 +83,9 @@ FORBIDDEN_PHRASES: Final = ("evaluat", "test suite", "graded", "admin/admin", "d
 FORBIDDEN_PROMPT_PHRASES: Final = (*FORBIDDEN_PHRASES, "tested", "test cases", "score", "token budget", "$")
 
 HARNESSES: Final = ("opencode", "mini-swe-agent", "aider", "goose", "qwen-code", "claude-code", "codex", "gemini-cli")
-# Enabled in wave 2 as ported adapters (section 5.3); the other five are seeded archived (11.6).
-ENABLED_HARNESSES: Final = ("opencode", "mini-swe-agent", "aider")
+# Enabled in wave 2 as ported adapters (section 5.3), plus claude-code and goose since E2E-19 (they run on
+# OpenCode Go); the other three are seeded archived (11.6).
+ENABLED_HARNESSES: Final = ("opencode", "mini-swe-agent", "aider", "goose", "claude-code")
 STYLE_SLUGS: Final = (
     "model-choice",
     "tailwind",

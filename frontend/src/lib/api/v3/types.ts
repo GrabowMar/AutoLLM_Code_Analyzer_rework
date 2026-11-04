@@ -1295,6 +1295,9 @@ export interface CellEstimate {
   expected_list_usd: number;
   p10_usd: number;
   p90_usd: number;
+  /** List-price spread; null on estimates stored before E2E-13. */
+  p10_list_usd?: number | null;
+  p90_list_usd?: number | null;
   cap_usd: number;
   expected_tokens: number;
   expected_wall_s: number;
@@ -1308,6 +1311,7 @@ export interface ConditionEstimate {
   expected_usd: number;
   p90_usd: number;
   expected_list_usd: number;
+  p90_list_usd?: number;
 }
 
 export interface EstimateFit {
@@ -1329,6 +1333,10 @@ export interface Estimate {
   p90_total: number;
   worst_case_total: number;
   expected_list_total: number;
+  p90_list_total?: number;
+  /** The study cap's unit: `cap_usd`, `fit`, `by_level` and the launch confirmation use the totals of this
+   * basis (`estimateBasisTotals`). Absent on plans estimated before E2E-13 (= billed). */
+  cap_basis?: "billed" | "list";
   expected_tokens_total: number;
   cap_usd: number | null;
   by_condition: ConditionEstimate[];
@@ -1672,6 +1680,8 @@ export interface StudyCellOut {
   /** A replicate cell (`add_replicates`): listed with `stage: "main"`, but NOT in the planned sample. */
   beyond_plan: boolean;
   estimate_usd: number;
+  /** Expected list-price cost (what a list-basis study's gates compare with). */
+  estimate_list_usd?: number;
   cap_usd: number;
   cell_cap_usd: number;
   spent_usd: number;
@@ -2028,6 +2038,8 @@ export interface BudgetMeOut {
     spent: number;
     spent_list: number;
     cap: number | null;
+    /** The cap's unit: `list` caps are measured against `spent_list`. */
+    cap_basis?: "billed" | "list";
   }[];
 }
 

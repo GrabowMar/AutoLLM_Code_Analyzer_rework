@@ -144,6 +144,27 @@ def test_analysis_post_run_without_tools_runs_the_study_report(make_study, fake_
     assert post_run.report.config == {"study_id": str(study.pk)}
 
 
+def test_post_run_events_match_the_study_event_contract(
+    make_study,
+    fake_study,
+    monkeypatch,
+    django_capture_on_commit_callbacks,
+):
+    # E2E-22: the event carried ``kind``, which the contract forbids, so every post_run event was refused.
+    from backend.generation.contracts.events import parse_study_event
+    from backend.realtime import events as realtime_events
+
+    published = []
+    monkeypatch.setattr(realtime_events, "publish_study_event", lambda study_id, event: published.append(event))
+    study = _launched(make_study)
+    with django_capture_on_commit_callbacks(execute=True):
+        post_run = automation.create_post_run(study, kind="analysis", trigger="manual", config={"report": True})
+        automation._publish(post_run)
+    assert published
+    for event in published:
+        assert parse_study_event(event).type == "post_run"
+
+
 def test_a_failed_patterns_post_run_is_recorded_not_silent(make_study, fake_study):
     study = _launched(make_study)  # an app study: pattern analysis needs slot variants
     post_run = automation.create_post_run(study, kind="patterns", trigger="manual", config={})

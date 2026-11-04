@@ -60,7 +60,7 @@ class StudyDeps:
     effective_policy: Callable[..., EffectivePolicy]
     treatment_view: Callable[[EffectivePolicy], dict[str, Any]]
     estimate_cell: Callable[[ResolvedCell], CellEstimate]
-    estimate_plan: Callable[[ResolvedPlan], Estimate]
+    estimate_plan: Callable[..., Estimate]  # (plan, *, study_kind=...)
     environment: Callable[[EnvironmentRequest], CellEnvironment]
     resolve_slot_context: Callable[..., ResolvedContext]
     slot_issues: Callable[..., list[Any]]
@@ -116,10 +116,10 @@ def _estimate_cell(cell: ResolvedCell) -> CellEstimate:
     return estimate_cell(cell)
 
 
-def _estimate_plan(plan: ResolvedPlan) -> Estimate:
+def _estimate_plan(plan: ResolvedPlan, *, study_kind: str = "exploratory") -> Estimate:
     from backend.generation.budget.estimate import estimate_plan
 
-    return estimate_plan(plan)
+    return estimate_plan(plan, study_kind=study_kind)
 
 
 def _environment(request: EnvironmentRequest) -> CellEnvironment:

@@ -88,6 +88,34 @@ def test_price_table_when_usage_cost_is_missing(user, system_ep, tick):
     assert adjust.source == "price_table"
 
 
+def test_a_call_settled_at_its_reservation_counts_what_the_gateway_charged(user, system_ep, tick):
+    # E2E-29: a usage-less record the gateway charged (``usage_estimated``) was skipped, so the ledger fell
+    # short of the calls.jsonl sum (run 1f08e760: 0.0652 booked, 0.0755 charged).
+    _tree, run = _claimed_run(user, tick, manifests=True)
+    path = Path(settings.GENERATION_RUNS_ROOT) / str(run.pk) / "a1"
+    path.mkdir(parents=True)
+    ok = canned_call(1, cost=0.03)
+    estimated = canned_call(2, status=200)
+    estimated.update(
+        usage=None,
+        usage_estimated=True,
+        cost=0.02,
+        list_cost=0.025,
+        cost_source="price_table",
+        reserved_prompt_tokens=1000,
+        upstream_max_tokens=500,
+    )
+    list_priced = dict(estimated, cost=0.01, list_cost=0.01, cost_source="list_price")
+    refused = canned_call(3, status=400)
+    refused.update(usage=None, usage_estimated=False, cost=0.0, list_cost=0.0)
+    calls = [ok, estimated, list_priced, refused]
+    (path / "calls.jsonl").write_text("\n".join(json.dumps(c) for c in calls) + "\n")
+    final = ledger.final_usage(run, 1)
+    listed = D(str(ok["list_cost"])) + D("0.025") + D("0.01")
+    assert (final.cost, final.list_cost) == (D("0.03") + D("0.02"), listed)  # a list-price charge bills 0
+    assert (final.tokens_in, final.tokens_out, final.requests) == (1200 + 2 * 1000, 300 + 2 * 500, 3)
+
+
 def test_attempt_usage_then_metrics_fallbacks(user, system_ep, tick):
     _tree, run = _claimed_run(user, tick)
     RunAttemptFactory(run=run, attempt=1, usage={"cost_usd": 0.02, "list_cost_usd": 0.03, "prompt_tokens": 5})

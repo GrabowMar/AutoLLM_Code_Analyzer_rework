@@ -62,6 +62,11 @@ AUX_SHARE_OF_MAIN: Final = 0.1  # auxiliary calls (subagent/compaction) as a sha
 # --- 4.4 steps 3-4: slot ----------------------------------------------------------------------------------------
 SLOT_OUTPUT_FACTOR: Final = 1.6  # OUT = min(slot cap, 1.6 x est_tokens(original) + 150) + r_avg
 SLOT_OUTPUT_SLACK: Final = 150
+# E2E-15: reasoning tokens to expect from a reasoning model whose reasoning the call does not bound. A
+# single-shot slot call sends no reasoning parameter (``slot/executors/single_shot.build_request``), so the
+# provider default applies whatever ``reasoning`` the policy says; the slot pilot saw qwen3.8-flash spend 5051
+# reasoning tokens of 5457 and deepseek-v4.1-flash a full 8192 cap. ``slot_output_cap_tight`` uses at least this.
+R_UNBOUNDED_REASONING: Final = 5_000
 SLOT_P10: Final = 0.7
 SLOT_P90: Final = 1.6
 SLOT_AGENT_R0_FACTOR: Final = 0.5

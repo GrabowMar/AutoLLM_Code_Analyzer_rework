@@ -11,7 +11,12 @@ export type BlockedReason =
   | "study_cap"
   | "circuit_open"
   | "draining"
-  | "retry_backoff";
+  | "retry_backoff"
+  | "condition_paused"
+  | "study_endpoint_cap"
+  | "study_model_cap"
+  | "study_provider_cap"
+  | "budget";
 
 export interface UsedTotal {
   used: number;

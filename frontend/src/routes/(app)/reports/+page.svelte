@@ -29,6 +29,7 @@
 	import {
 		getReports,
 		deleteReport,
+		REPORT_TYPE_LABELS,
 		type ReportSummary,
 		type ReportStatus,
 		type ReportType
@@ -51,13 +52,13 @@
 	}
 
 	const typeConfig: Record<ReportType, { label: string; icon: typeof Brain }> = {
-		model_analysis: { label: 'Model Analysis', icon: Brain },
-		template_comparison: { label: 'Template Comparison', icon: GitCompareArrows },
-		tool_analysis: { label: 'Tool Analysis', icon: Wrench },
-		generation_analytics: { label: 'Generation Analytics', icon: TrendingUp },
-		comprehensive: { label: 'Comprehensive', icon: Layers },
-		experiment_report: { label: 'Experiment Report', icon: FlaskConical },
-		study_report: { label: 'Study Report', icon: Microscope }
+		model_analysis: { label: REPORT_TYPE_LABELS.model_analysis, icon: Brain },
+		template_comparison: { label: REPORT_TYPE_LABELS.template_comparison, icon: GitCompareArrows },
+		tool_analysis: { label: REPORT_TYPE_LABELS.tool_analysis, icon: Wrench },
+		generation_analytics: { label: REPORT_TYPE_LABELS.generation_analytics, icon: TrendingUp },
+		comprehensive: { label: REPORT_TYPE_LABELS.comprehensive, icon: Layers },
+		experiment_report: { label: REPORT_TYPE_LABELS.experiment_report, icon: FlaskConical },
+		study_report: { label: REPORT_TYPE_LABELS.study_report, icon: Microscope }
 	};
 
 	async function load() {
@@ -140,7 +141,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Reports" description="Generated insights across models, templates and analysis tools.">
+	<PageHeader title="Reports" description="Generated insights across models, studies, tasks and analysis tools.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
 				<RefreshCw class="mr-2 h-4 w-4" />Refresh
@@ -212,7 +213,7 @@
 				compact
 				icon={GitCompareArrows}
 				title="No reports yet"
-				description="Generate your first report to get insights across models, templates and tools."
+				description="Generate your first report to get insights across models, studies, tasks and tools."
 			>
 				{#snippet action()}
 					<Button size="sm" onclick={() => goto('/reports/create')}>

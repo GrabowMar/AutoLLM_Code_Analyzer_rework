@@ -329,7 +329,10 @@ export function toSlotTargetIn(
   if (form.keep_docstring !== null)
     body.default_keep_docstring = form.keep_docstring;
   if (form.context_policy !== null)
-    body.default_context_policy = structuredClone(form.context_policy);
+    // JSON copy, not structuredClone: the picker's form is a $state proxy (DataCloneError).
+    body.default_context_policy = JSON.parse(
+      JSON.stringify(form.context_policy),
+    ) as typeof form.context_policy;
   if (form.edit_policy !== null) body.edit_policy = form.edit_policy;
   if (form.allowlist !== null) {
     const list = uniqueSorted([...form.allowlist, selection.path]);

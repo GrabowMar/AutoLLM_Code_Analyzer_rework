@@ -38,6 +38,7 @@ from backend.execution.models import ExecutorSettings
 from backend.execution.scheduler import Scheduler
 from backend.generation.models import GenerationRun
 from backend.generation.models import Study
+from backend.generation.models import StudyCondition
 from backend.generation.models import StudyPostRun
 from backend.generation.models.choices import RunPhase
 from backend.generation.models.choices import RunStatus
@@ -269,12 +270,19 @@ def get_queue(
         .order_by("-priority", "sequence", "queued_at", "id")[: limit * 4],
     )
     now = timezone.now()
+    condition_ids = {run.condition_id for run in runs if run.condition_id is not None}
+    paused_conditions = set(
+        StudyCondition.objects.filter(pk__in=condition_ids, paused=True).values_list("pk", flat=True),
+    )
     items = []
     for run in runs:
         ep_id = run.endpoint_id or system_ep
         key = (str(run.study_id) if run.study_id else f"adhoc:{run.created_by_id}", ep_id)
         if str(run.id) in admitted:
             reason = None
+        elif run.condition_id is not None and run.condition_id in paused_conditions:
+            # E2E-27: the lane SQL skips a paused condition's runs, so the dry run never names a reason.
+            reason = "condition_paused"
         elif run.run_after and run.run_after > now:
             reason = "retry_backoff"
         else:

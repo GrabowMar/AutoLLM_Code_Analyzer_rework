@@ -16,6 +16,13 @@ Ephemeral resolves write nothing (:func:`drawn_units` with ``create=False`` only
 exist and reports what is still missing); ``plan.resolve_bundle(persist=True)`` calls :func:`materialize`
 first, so the frozen plan has every (parent, template) unit and a later ephemeral resolve equals it.
 ``rule="manual"`` keeps the listed slot sets / targets as units (the researcher's picks).
+
+**Pinned draw (E2E-14).** The pool grows while other studies add tested runs of the task, so the same seed
+over a later pool can pick different parents. The first freeze (``create=True`` with a study) therefore
+records the drawn run ids in ``Study.parent_draw`` together with a hash of the seeded selection; every later
+resolve or freeze of that study reuses exactly those parents. Only an explicit redraw
+(:func:`forget_draw`, ``freeze-plan`` with ``redraw_parents``) or a changed ``parent_selection`` (another
+selection hash) draws again.
 """
 
 from __future__ import annotations
@@ -36,9 +43,19 @@ if TYPE_CHECKING:
     from backend.generation.models import GenerationRun
     from backend.generation.models import SlotSet
     from backend.generation.models import SlotTarget
+    from backend.generation.models import Study
     from backend.users.models import User
 
-__all__ = ["DrawnUnits", "drawn_units", "materialize", "selection_seed", "uses_draw"]
+__all__ = [
+    "DrawnUnits",
+    "drawn_units",
+    "forget_draw",
+    "materialize",
+    "pinned_draw",
+    "selection_hash",
+    "selection_seed",
+    "uses_draw",
+]
 
 _SEED_MODULUS: Final = 2**31
 _SEED_HEX_DIGITS: Final = 12
@@ -62,6 +79,51 @@ def selection_seed(design: Design) -> int:
 def _seeded(design: Design) -> ParentSelection:
     assert design.parent_selection is not None
     return design.parent_selection.model_copy(update={"seed": selection_seed(design)})
+
+
+def selection_hash(design: Design) -> str:
+    """Identity of the seeded ``parent_selection`` a pinned draw belongs to (a changed selection redraws)."""
+    return identity.H({"parent_selection": _seeded(design).model_dump(mode="json")})
+
+
+def pinned_draw(study: Study | None, design: Design) -> dict[str, Any] | None:
+    """The study's pinned draw when it belongs to this design's selection, else ``None``."""
+    record = getattr(study, "parent_draw", None) or {}
+    if record.get("selection_hash") == selection_hash(design) and isinstance(record.get("parents"), list):
+        return record
+    return None
+
+
+def forget_draw(study: Study) -> bool:
+    """Drop the pinned draw (an explicit redraw: the next freeze draws from the current pool)."""
+    if not study.parent_draw:
+        return False
+    study.parent_draw = {}
+    study.save(update_fields=["parent_draw", "updated_at"])
+    return True
+
+
+def _pin(study: Study, design: Design, out: DrawnUnits) -> None:
+    from django.utils import timezone
+
+    study.parent_draw = {
+        "selection_hash": selection_hash(design),
+        "seed": out.seed,
+        "pool_size": out.pool_size,
+        "parents": [str(p.pk) for p in out.parents],
+        "at": timezone.now().isoformat(),
+    }
+    study.save(update_fields=["parent_draw", "updated_at"])
+
+
+def _pinned_parents(record: dict[str, Any]) -> list[GenerationRun]:
+    """The pinned runs in draw order (a run deleted since is left out)."""
+    from backend.generation.models import GenerationRun
+
+    ids = [str(i) for i in record["parents"]]
+    rows = GenerationRun.objects.select_related("model", "task_version__task", "stack_profile", "harness_preset")
+    by_id = {str(run.pk): run for run in rows.filter(pk__in=ids)}
+    return [by_id[i] for i in ids if i in by_id]
 
 
 def _runs_for(user: User | None) -> QuerySet[GenerationRun] | None:
@@ -96,6 +158,7 @@ class DrawnUnits:
     missing_sets: list[str] = field(default_factory=list)  # parent run ids without a slot set of this draw
     missing_targets: list[dict[str, str]] = field(default_factory=list)  # {slot_set, template, reason}
     created: int = 0  # rows created by this call (slot sets + targets)
+    pinned: bool = False  # the parents come from the study's pinned draw (not a fresh draw of the pool)
 
     @property
     def complete(self) -> bool:
@@ -124,16 +187,38 @@ def _target_in(slot_set: SlotSet, template: SlotTarget) -> SlotTarget | None:
     return slot_set.targets.filter(match_key=template.match_key).order_by("created_at", "pk").first()
 
 
-def drawn_units(design: Design, *, user: User | None, create: bool = False) -> DrawnUnits:
-    """Draw the parents and collect the matched targets (``create`` freezes sets and matches templates)."""
+def drawn_units(
+    design: Design,
+    *,
+    user: User | None,
+    create: bool = False,
+    study: Study | None = None,
+) -> DrawnUnits:
+    """Draw the parents and collect the matched targets (``create`` freezes sets and matches templates).
+
+    With ``study``, its pinned draw (``Study.parent_draw``) is reused when it belongs to this selection;
+    otherwise the pool is drawn, and with ``create`` the draw is pinned on the study.
+    """
     from backend.generation.slot import freeze as slot_freeze
     from backend.generation.slot import parents as slot_parents
     from backend.generation.slot import selection as slot_selection
 
     selection = _seeded(design)
     seed = int(selection.seed or 0)
-    result = slot_parents.draw_with_record(selection, base=_runs_for(user))
-    out = DrawnUnits(seed=seed, pool_size=result.pool_size, parents=list(result.parents))
+    record = pinned_draw(study, design)
+    if record is not None:
+        out = DrawnUnits(
+            seed=seed,
+            pool_size=int(record.get("pool_size") or 0),
+            parents=_pinned_parents(record),
+            pinned=True,
+        )
+    else:
+        result = slot_parents.draw_with_record(selection, base=_runs_for(user))
+        out = DrawnUnits(seed=seed, pool_size=result.pool_size, parents=list(result.parents))
+        if create and study is not None and out.parents:
+            _pin(study, design, out)
+            out.pinned = True
     template_rows = templates(design)
     for parent in out.parents:
         slot_set = _draw_set(parent, selection, seed)
@@ -143,7 +228,7 @@ def drawn_units(design: Design, *, user: User | None, create: bool = False) -> D
                 name=f"{parent.task_version} parent {str(parent.pk)[:8]} (draw {seed})",
                 user=user,
                 selection=selection,
-                pool_size=result.pool_size,
+                pool_size=out.pool_size,
                 seed=seed,
             )
             out.created += 1
@@ -173,6 +258,9 @@ def drawn_units(design: Design, *, user: User | None, create: bool = False) -> D
     return out
 
 
-def materialize(design: Design, *, user: User | None) -> DrawnUnits:
-    """Freeze the drawn parents and match the templates into them (freeze / launch; idempotent)."""
-    return drawn_units(design, user=user, create=True)
+def materialize(design: Design, *, user: User | None, study: Study | None = None) -> DrawnUnits:
+    """Freeze the drawn parents and match the templates into them (freeze / launch; idempotent).
+
+    With ``study`` the first call pins the draw on it and later calls reuse the pinned parents.
+    """
+    return drawn_units(design, user=user, create=True, study=study)

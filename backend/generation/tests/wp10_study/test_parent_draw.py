@@ -147,3 +147,97 @@ def test_manual_rule_keeps_the_listed_targets(pool, user, fake_study):
     plan = planner.resolve(study)
     assert [u.slot_target for u in plan.units] == [str(pool["template"].pk)]
     assert pool["calls"] == {"freeze": 0, "match": 0}
+
+
+def test_the_draw_is_pinned_at_the_first_freeze_and_redrawn_only_on_request(pool, user, fake_study):
+    """E2E-14: a re-freeze after the pool grew reuses the parents of the first freeze."""
+    study = svc.create_study(user=user, name="pinned", design=_design(pool))
+    row = planner.freeze(study)
+    study.refresh_from_db()
+    pin = dict(study.parent_draw)
+    selection = study_parents._seeded(parse_design(study.design))
+    before = slot_parents.draw_with_record(selection).pool_size  # the four parents and the template's parent
+    assert pin["pool_size"] == before
+    assert pin["seed"] == study_parents.selection_seed(parse_design(study.design))
+    assert pin["selection_hash"] == study_parents.selection_hash(parse_design(study.design))
+    first = list(pin["parents"])
+    assert len(first) == 3
+
+    # Another study adds tested runs of the task (new authors): the pool grows by 12.
+    task = pool["task"]
+    newcomers = [LLMModelFactory.create(model_id=f"author/new{i}") for i in range(3)]
+    for i in range(12):
+        GenerationRunFactory.create(tested=True, task_version=task, model=newcomers[i % 3], created_by=user)
+    assert slot_parents.draw_with_record(selection).pool_size == before + 12
+
+    # Ephemeral resolve and re-freeze keep the pinned parents: same plan, nothing new frozen.
+    calls = dict(pool["calls"])
+    planner.clear_cache()
+    assert planner.resolve(study).plan_hash == row.plan_hash
+    again = planner.freeze(study)
+    assert again.plan_hash == row.plan_hash
+    assert pool["calls"] == calls
+    study.refresh_from_db()
+    assert study.parent_draw == pin
+    units = planner.load_bundle(again).plan.units
+    parents = SlotTarget.objects.filter(pk__in=[u.slot_target for u in units]).values_list(
+        "slot_set__parent_run_id",
+        flat=True,
+    )
+    assert {str(p) for p in parents} == set(first)
+
+    # An explicit redraw draws from the current pool and pins the new draw.
+    planner.freeze(study, redraw_parents=True)
+    study.refresh_from_db()
+    assert study.parent_draw["pool_size"] == before + 12
+    assert study.parent_draw["parents"] == [str(p.pk) for p in slot_parents.draw_with_record(selection).parents]
+
+    # A changed parent_selection is another selection: the old pin is not reused.
+    changed = parse_design({**_design(pool, k=2)})
+    assert study_parents.pinned_draw(study, changed) is None
+
+
+def test_redraw_is_refused_once_launched(pool, user, fake_study):
+    study = svc.create_study(user=user, name="pinned", design=_design(pool, k=2))
+    row = planner.freeze(study)
+    svc.launch(study, row.plan_hash, pilot_override=True)
+    study.refresh_from_db()
+    pin = dict(study.parent_draw)
+    with pytest.raises(DesignError) as refused:
+        planner.freeze(study, redraw_parents=True)
+    assert refused.value.path == "parent_selection"
+    study.refresh_from_db()
+    assert study.parent_draw == pin
+
+
+def test_a_refreeze_after_target_validation_replaces_the_stale_draft(pool, user, fake_study, monkeypatch):
+    """E2E-21: with the draw pinned the plan hash stays the same, so the stored issues must be refreshed."""
+    pending = {"status": "pending", "dropped_checks": []}
+
+    def match_pending(target, slot_sets, *, user=None):
+        created = [
+            SlotTargetFactory.create(slot_set=s, validation=pending, match_key=target.match_key) for s in slot_sets
+        ]
+        return {"created": created, "unmatched": []}
+
+    monkeypatch.setattr(slot_selection, "match", match_pending)
+    study = svc.create_study(user=user, name="validate", design=_design(pool, k=2))
+    first = planner.freeze(study)
+    errors = [i for i in first.issues if i["severity"] == "error"]
+    assert {i["code"] for i in errors} == {"slot_tests_uninformative"}
+    with pytest.raises(svc.StudyError) as refused:
+        svc.launch(study, first.plan_hash, pilot_override=True)
+    assert refused.value.code == "plan_has_errors"
+
+    # The matched targets finish validation; the re-freeze (same pinned parents) has the same hash.
+    SlotTarget.objects.filter(validation__status="pending").update(validation=VALID)
+    again = planner.freeze(study)
+    assert again.plan_hash == first.plan_hash
+    assert again.pk != first.pk
+    assert not [i for i in again.issues if i["severity"] == "error"]
+    assert not type(first).objects.filter(pk=first.pk).exists()
+    # Unchanged diagnostics keep the row.
+    assert planner.freeze(study).pk == again.pk
+    svc.launch(study, again.plan_hash, pilot_override=True)
+    study.refresh_from_db()
+    assert study.active_plan_id == again.pk

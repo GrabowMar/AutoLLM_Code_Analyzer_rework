@@ -10,6 +10,7 @@ from backend.generation.models import GenerationRun
 from backend.generation.models import StudyPostRun
 from backend.generation.study import launch as svc
 from backend.generation.study import plan as planner
+from backend.generation.testing.factories import PatternDetectorFactory
 from backend.generation.testing.factories import SlotSetFactory
 from backend.generation.testing.factories import SlotTargetFactory
 
@@ -94,6 +95,7 @@ def test_slot_launch_creates_variants_and_attaches_a_patterns_post_run(golden, u
 
 
 def test_a_confirmatory_single_parent_study_is_blocked_unless_conditional(golden, user, slot_set, fake_study):
+    PatternDetectorFactory(slug="sqli")
     plan = {"primary_metric": "pattern_prevalence", "research_questions": [{"question": "q"}]}
     design = _slot_design(slot_set, kind="confirmatory", analysis_plan=plan, slot_primary_features=["sqli"])
     study = svc.create_study(user=user, name="slot", design=design)
@@ -108,3 +110,31 @@ def test_a_confirmatory_single_parent_study_is_blocked_unless_conditional(golden
     other = svc.create_study(user=user, name="slot2", design=conditional)
     codes = {i.code: i.severity for i in planner.resolve(other).issues}
     assert codes["single_parent"] == "info"
+
+
+def test_primary_features_are_pinned_on_create_and_unknown_ones_refused(golden, user, slot_set, fake_study):
+    """E2E-12: a bare detector slug is pinned (the live scorer only resolves slug@version refs)."""
+    detector = PatternDetectorFactory(slug="py-plaintext-password-compare")
+    study = svc.create_study(
+        user=user,
+        name="slot-pin",
+        design=_slot_design(slot_set, slot_primary_features=["py-plaintext-password-compare"]),
+    )
+    pinned = f"py-plaintext-password-compare@{detector.version}#{detector.content_hash[:12]}"
+    assert study.design["slot_primary_features"] == [pinned]
+    kept = svc.create_study(
+        user=user,
+        name="slot-pinned",
+        design=_slot_design(slot_set, slot_primary_features=[pinned]),
+    )
+    assert kept.design["slot_primary_features"] == [pinned]
+    with pytest.raises(svc.StudyError) as unknown:
+        svc.create_study(user=user, name="slot-unknown", design=_slot_design(slot_set, slot_primary_features=["nope"]))
+    assert unknown.value.code == "unknown_detector"
+    with pytest.raises(svc.StudyError) as missing_version:
+        svc.create_study(
+            user=user,
+            name="slot-bad-version",
+            design=_slot_design(slot_set, slot_primary_features=["py-plaintext-password-compare@99"]),
+        )
+    assert missing_version.value.code == "unknown_detector"

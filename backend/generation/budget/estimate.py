@@ -8,7 +8,11 @@ picker's cost hint and the tests share it.
 Conventions:
 
 * Amounts are USD. ``expected_usd`` is what the endpoint bills (0 for subscription and local endpoints);
-  ``expected_list_usd`` is always priced from the manifest's frozen catalog prices.
+  ``expected_list_usd`` (and ``p10_list_usd``/``p90_list_usd``) is always priced from the manifest's frozen
+  catalog prices (a prior's list percentiles, or the heuristic before calibration).
+* The plan's cap side is in the study's ``cap_basis`` (``Estimate.cap_basis``): the ``auto`` cap, the fit,
+  ``by_level`` and ``estimate_exceeds_cap`` use the list totals for a list-basis study and the billed ones
+  otherwise (``basis_totals``).
 * Estimates are truncated at the cell's per-attempt worst case ``cap_usd`` (the gateway refuses calls past
   ``run.max_cost_usd``), so ``p90 <= cap_usd``.
 * A model without known prices gets the run cap as its estimate (``basis`` ends ``:unpriced``), never 0.
@@ -28,6 +32,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Final
 from typing import Literal
 
 from backend.generation.budget import constants as k
@@ -52,11 +57,14 @@ if TYPE_CHECKING:
 __all__ = [
     "CellInputs",
     "auto_cap",
+    "basis_totals",
     "est_tokens",
     "estimate_cell",
     "estimate_inputs",
     "estimate_plan",
     "inputs_from_cell",
+    "list_p90",
+    "plan_cap_basis",
     "reestimate_after_pilot",
     "resolve_study_cap",
 ]
@@ -268,6 +276,8 @@ def estimate_inputs(
             expected_list_usd=0.0,
             p10_usd=0.0,
             p90_usd=0.0,
+            p10_list_usd=0.0,
+            p90_list_usd=0.0,
             cap_usd=0.0,
             expected_tokens=0,
             expected_wall_s=0.0,
@@ -280,7 +290,7 @@ def estimate_inputs(
         expected = float(prior.cost_p50) * drift
         p10 = float(prior.cost_p10 if prior.cost_p10 is not None else prior.cost_p50 * k.AGENTIC_P10) * drift
         p90 = float(prior.cost_p90 if prior.cost_p90 is not None else prior.cost_p50 * k.AGENTIC_P90) * drift
-        list_ratio = (prior.list_cost_p50 / prior.cost_p50) if prior.list_cost_p50 and prior.cost_p50 else 1.0
+        lists = _prior_list(prior, drift, expected, p10, p90)
         tokens = (prior.prompt_tokens_p50 or 0) + (prior.completion_tokens_p50 or 0)
         basis = f"prior:{found[0] if found else ''}({prior.n})"
     else:
@@ -288,20 +298,25 @@ def estimate_inputs(
         sort = policy.routing.provider_sort
         calib = prior_store.calibration(model.slug, sort, priors=source) if source != {} else 1.0
         expected, p10, p90 = terms["expected"] * calib, terms["p10"] * calib, terms["p90"] * calib
-        list_ratio = 1.0 / calib if calib else 1.0
+        # The heuristic prices tokens at the catalog (list) price; the calibration maps it to billed.
+        lists = (terms["expected"], terms["p10"], terms["p90"])
         tokens = terms["tokens"]
         basis = "heuristic"
     # 6. failure overhead: x (1 + failed-call share) + infra_retry_rate x mean partial-run cost.
     over = prior_store.overhead(inputs.kind, inputs.harness, priors=source) if source != {} else None
     if over is not None:
         extra = over["infra_retry_rate"] * over["mean_partial_cost"]
+        extra_list = over["infra_retry_rate"] * over["mean_partial_list_cost"]
         factor = 1 + over["failed_call_cost_share"]
         expected, p10, p90 = expected * factor + extra, p10 * factor + extra, p90 * factor + extra
+        lists = tuple(v * factor + extra_list for v in lists)
     if not model.priced:
         expected, p10, p90 = cap, 0.0, cap
+        lists = (cap, 0.0, cap)
         basis = f"{basis}:unpriced"
     expected, p10, p90 = min(expected, cap), min(p10, cap), min(p90, cap)
-    list_expected = expected * list_ratio
+    # ``cap_usd`` is priced at the catalog price, so it bounds the list amounts too.
+    list_expected, list_p10, list_p90 = (min(v, cap) for v in lists)
     if inputs.cost_basis in ("list_price", "free"):
         # Subscription and local endpoints bill nothing per call; list price is tracked against caps.
         billed_expected, billed_p10, billed_p90 = 0.0, 0.0, 0.0
@@ -313,12 +328,44 @@ def estimate_inputs(
         expected_list_usd=round(list_expected, 8),
         p10_usd=round(billed_p10, 8),
         p90_usd=round(billed_p90, 8),
+        p10_list_usd=round(list_p10, 8),
+        p90_list_usd=round(list_p90, 8),
         cap_usd=round(cap, 8),
         expected_tokens=int(min(tokens, policy.run.max_total_tokens)),
         expected_wall_s=round(wall, 2),
         p90_wall_s=round(wall_p90, 2),
         basis=basis,
     )
+
+
+def _prior_list(prior: Any, drift: float, expected: float, p10: float, p90: float) -> tuple[float, float, float]:
+    """``(expected, p10, p90)`` at list price from a prior.
+
+    The list percentiles of the prior when it has them. Otherwise the list median with the billed spread
+    (or the default agentic spread when nothing was billed, as on a subscription endpoint), and without a
+    list median the billed amounts (catalog = billed). A prior made of subscription runs bills 0 but has a
+    real list cost, which a ratio to the billed amount would lose (the E2E-11 defect).
+    """
+    list_p50 = getattr(prior, "list_cost_p50", None)
+    if list_p50 is None:
+        return expected, p10, p90
+    list_expected = float(list_p50) * drift
+    list_p10 = getattr(prior, "list_cost_p10", None)
+    list_p90 = getattr(prior, "list_cost_p90", None)
+    if list_p10 is not None and list_p90 is not None:
+        return list_expected, float(list_p10) * drift, float(list_p90) * drift
+    if expected > 0:
+        return list_expected, list_expected * p10 / expected, list_expected * p90 / expected
+    return list_expected, list_expected * k.AGENTIC_P10, list_expected * k.AGENTIC_P90
+
+
+def list_p90(estimate: CellEstimate) -> float:
+    """The list p90 of a cell estimate (estimates stored before the field scale the billed spread)."""
+    if estimate.p90_list_usd is not None:
+        return estimate.p90_list_usd
+    if estimate.expected_usd > 0:
+        return estimate.expected_list_usd * estimate.p90_usd / estimate.expected_usd
+    return min(estimate.cap_usd or math.inf, estimate.expected_list_usd * k.AGENTIC_P90)
 
 
 def _drift(prior: Any, model: ModelFacts) -> float:
@@ -434,19 +481,70 @@ def resolve_study_cap(policy: Any, p90_total: float, tier: str) -> float:
     return auto_cap(p90_total, tier) if cap == "auto" else float(cap)
 
 
-def _fit(cells: list[tuple[ResolvedCell, CellEstimate]], cap: float, repeats: int) -> EstimateFit:
+def plan_cap_basis(content: Any, pairs: Iterable[tuple[ResolvedCell, CellEstimate]] = ()) -> Literal["billed", "list"]:
+    """The study cap's unit: the policy's ``study.cap_basis``; ``auto`` (an unclamped preset) resolves as
+    ``budget.policy`` does: ``list`` when any cell's endpoint is not billed."""
+    basis = content.study.cap_basis if content is not None else "billed"
+    if basis == "auto":
+        non_billed = any(
+            cell.manifest.model is not None and cell.manifest.model.endpoint.cost_basis != "billed"
+            for cell, _ in pairs
+        )
+        return "list" if non_billed else "billed"
+    return "list" if basis == "list" else "billed"
+
+
+def basis_totals(estimate: Estimate) -> tuple[float, float]:
+    """``(expected, p90)`` of a plan estimate in its cap's unit (what the cap and the launch confirm use)."""
+    if estimate.cap_basis == "list":
+        return estimate.expected_list_total, estimate.p90_list_total
+    return estimate.expected_total, estimate.p90_total
+
+
+_STAGE_ORDER: Final = {"pilot": 0, "main": 1}
+
+
+def _block_amounts(
+    cells: list[tuple[ResolvedCell, CellEstimate]],
+    amount: Callable[[CellEstimate], float],
+) -> list[tuple[float, float]]:
+    """``(expected, reserved)`` per replicate block in admission order (pilot blocks, then main blocks).
+
+    ``reserved`` is what ``budget.claims`` reserves when the block's first run is admitted: every run's
+    per-attempt worst case (``CellEstimate.cap_usd``, = ``ledger.run_need``)."""
+    blocks: dict[tuple[int, int], list[float]] = defaultdict(lambda: [0.0, 0.0])
+    for cell, est in cells:
+        row = blocks[(_STAGE_ORDER.get(cell.stage, 1), cell.block_index)]
+        row[0] += amount(est)
+        row[1] += est.cap_usd
+    return [(expected, reserved) for _key, (expected, reserved) in sorted(blocks.items())]
+
+
+def _admitted_blocks(blocks: list[tuple[float, float]], cap: float) -> int:
+    """How many blocks the scheduler admits under ``cap`` (E2E-28): a block is claimed only while the
+    expected spend of the blocks before it plus the block's whole worst-case reservation fits."""
+    committed, admitted = 0.0, 0
+    for expected, reserved in blocks:
+        if committed + reserved > cap + 1e-12:
+            break
+        committed += expected
+        admitted += 1
+    return admitted
+
+
+def _fit(
+    cells: list[tuple[ResolvedCell, CellEstimate]],
+    cap: float,
+    repeats: int,
+    amount: Callable[[CellEstimate], float] = lambda e: e.expected_usd,
+    run_cells: list[tuple[ResolvedCell, CellEstimate]] | None = None,
+) -> EstimateFit:
+    """``run_cells`` are the cells that become runs (a reused pilot cell once); default ``cells``."""
     main = [(c, e) for c, e in cells if c.stage == "main"] or cells
-    blocks: dict[int, float] = defaultdict(float)
     by_unit_repeat: dict[tuple[int, int], float] = defaultdict(float)
     for cell, est in main:
-        blocks[cell.block_index] += est.expected_usd
-        by_unit_repeat[(cell.unit_index, cell.repeat_index)] += est.expected_usd
-    running, blocks_fit = 0.0, 0
-    for index in sorted(blocks):
-        running += blocks[index]
-        if running > cap + 1e-12:
-            break
-        blocks_fit += 1
+        by_unit_repeat[(cell.unit_index, cell.repeat_index)] += amount(est)
+    blocks_fit = _admitted_blocks(_block_amounts(run_cells if run_cells is not None else cells, amount), cap)
     n_repeats = max(1, repeats or len({r for _, r in by_unit_repeat}))
     per_unit: dict[int, float] = defaultdict(float)
     for (unit, _repeat), usd in by_unit_repeat.items():
@@ -494,28 +592,40 @@ def estimate_plan(
         first_cell = next((c for c in plan.cells if c.manifest.resources is not None), None)
         resources = first_cell.manifest.resources if first_cell is not None else None
         tier = _policy_tier(resources.ref) if resources is not None else "custom"
+    plan_pairs = pairs
+    pairs = _run_pairs(pairs, content, study_kind)
     expected = sum(e.expected_usd for _, e in pairs)
     p90 = sum(e.p90_usd for _, e in pairs)
     list_total = sum(e.expected_list_usd for _, e in pairs)
+    list_p90_total = sum(list_p90(e) for _, e in pairs)
     tokens = sum(e.expected_tokens for _, e in pairs)
     infra_retries = content.retries.infra_retries if content else 0
     cell_cap = content.cell.max_cost_usd if content else math.inf
     worst = sum(min(cell_cap, e.cap_usd * (1 + infra_retries)) for _, e in pairs)
     cap: float | None = None
     raw_cap = cap_override if cap_override is not None else (content.study.max_cost_usd if content else None)
-    cap_basis_total = (
-        p90
-        if (content is None or content.study.cap_basis != "list")
-        else p90 * (list_total / expected if expected else 1.0)
-    )
+    basis = plan_cap_basis(content, pairs)
+    # Everything compared with the study cap is in the cap's unit (E2E-13): a list-basis cap is priced
+    # against list amounts, a billed one against billed amounts.
+    if basis == "list":
+        basis_expected, basis_p90 = list_total, list_p90_total
+
+        def amount(e: CellEstimate) -> float:
+            return e.expected_list_usd
+    else:
+        basis_expected, basis_p90 = expected, p90
+
+        def amount(e: CellEstimate) -> float:
+            return e.expected_usd
+
     if raw_cap == "auto":
-        cap = auto_cap(cap_basis_total, tier)
+        cap = auto_cap(basis_p90, tier)
     elif raw_cap is not None:
         cap = float(raw_cap)
     if cap is not None:
         worst = min(worst, cap)
 
-    by_condition: dict[int, list[float]] = defaultdict(lambda: [0, 0.0, 0.0, 0.0])
+    by_condition: dict[int, list[float]] = defaultdict(lambda: [0, 0.0, 0.0, 0.0, 0.0])
     by_level: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for cell, est in pairs:
         row = by_condition[cell.condition_index]
@@ -523,8 +633,9 @@ def estimate_plan(
         row[1] += est.expected_usd
         row[2] += est.p90_usd
         row[3] += est.expected_list_usd
+        row[4] += list_p90(est)
         for factor, level in cell.levels.items():
-            by_level[factor][level] += est.expected_usd
+            by_level[factor][level] += amount(est)
     conditions = [
         ConditionEstimate(
             condition_index=index,
@@ -532,12 +643,13 @@ def estimate_plan(
             expected_usd=round(values[1], 6),
             p90_usd=round(values[2], 6),
             expected_list_usd=round(values[3], 6),
+            p90_list_usd=round(values[4], 6),
         )
         for index, values in sorted(by_condition.items())
     ]
     levels = {factor: {lvl: round(usd, 6) for lvl, usd in values.items()} for factor, values in by_level.items()}
-    n_repeats = repeats or (max((c.repeat_index for c, _ in pairs if c.stage == "main"), default=0) + 1)
-    fit = _fit(pairs, cap, n_repeats) if cap is not None else EstimateFit()
+    n_repeats = repeats or (max((c.repeat_index for c, _ in plan_pairs if c.stage == "main"), default=0) + 1)
+    fit = _fit(plan_pairs, cap, n_repeats, amount, run_cells=pairs) if cap is not None else EstimateFit()
 
     parallel = effective_parallel or (content.concurrency.study_max_parallel if content else 1)
     wall = sum(e.expected_wall_s for _, e in pairs)
@@ -553,12 +665,16 @@ def estimate_plan(
     method: Literal["priors", "heuristic", "mixed"] = (
         "mixed" if len(bases) > 1 else ("priors" if bases == {"prior"} else "heuristic")
     )
-    issues = _cap_issues(expected, p90, cap, raw_cap, fit, study_kind)
+    issues = _cap_issues(basis_expected, basis_p90, cap, raw_cap, fit, study_kind, basis)
+    if cap is not None and not any(i.severity == "error" for i in issues):
+        issues += _block_issues(_block_amounts(pairs, amount), cap, fit, study_kind)
     return Estimate(
         expected_total=round(expected, 6),
         p90_total=round(p90, 6),
         worst_case_total=round(worst, 6),
         expected_list_total=round(list_total, 6),
+        p90_list_total=round(list_p90_total, 6),
+        cap_basis=basis,
         expected_tokens_total=int(tokens),
         cap_usd=cap,
         by_condition=conditions,
@@ -578,6 +694,69 @@ def estimate_plan(
     )
 
 
+def _run_pairs(
+    pairs: list[tuple[ResolvedCell, CellEstimate]],
+    content: Any,
+    study_kind: str,
+) -> list[tuple[ResolvedCell, CellEstimate]]:
+    """The cells that become runs (E2E-28): an exploratory study with ``pilot.reuse_as_main`` flips each
+    pilot cell to main at expand, so the main cell of the same (condition, unit, repeat) is no second run
+    and is counted once (``study.launch.expand_pilot``)."""
+    pilot = content.pilot if content is not None else None
+    if pilot is None or not (pilot.enabled and pilot.reuse_as_main) or study_kind != "exploratory":
+        return pairs
+    piloted = {(c.condition_index, c.unit_index, c.repeat_index) for c, _ in pairs if c.stage == "pilot"}
+    return [
+        (c, e)
+        for c, e in pairs
+        if not (c.stage == "main" and (c.condition_index, c.unit_index, c.repeat_index) in piloted)
+    ]
+
+
+def _block_issues(
+    blocks: list[tuple[float, float]],
+    cap: float,
+    fit: EstimateFit,
+    study_kind: str,
+) -> list[Issue]:
+    """``cap_admits_fewer_blocks`` (E2E-28): the scheduler reserves a whole block at its worst case before
+    the block's first run starts, so a cap above the expected total can still stop the study early."""
+    admitted = fit.blocks_under_cap if fit.blocks_under_cap is not None else len(blocks)
+    if admitted >= len(blocks):
+        return []
+    committed = sum(expected for expected, _reserved in blocks[:admitted])
+    reserved = blocks[admitted][1] if admitted < len(blocks) else 0.0
+    needed = math.ceil(round((committed + reserved) * 100, 6)) / 100
+    # The smallest cap that admits every block: max over blocks of (expected before it + its reservation).
+    running, full = 0.0, 0.0
+    for expected, block_reserved in blocks:
+        full = max(full, running + block_reserved)
+        running += expected
+    full = math.ceil(round(full * 100, 6)) / 100
+    return [
+        make_issue(
+            "cap_admits_fewer_blocks",
+            "confirmatory" if study_kind == "confirmatory" else "exploratory",
+            severity="warn",
+            message=(
+                f"the study cap ${cap:.2f} admits {admitted} of {len(blocks)} replicate blocks: block "
+                f"{admitted + 1} needs ${committed:.2f} expected spend before it plus its worst-case "
+                f"reservation ${reserved:.2f} (= ${needed:.2f}); the study stops there "
+                f"(on_budget_exhausted)"
+            ),
+            path="study.max_cost_usd",
+            fix=[
+                IssueFix(
+                    label=f"raise cap to ${full:.2f}",
+                    action="set_study_cap",
+                    params={"study_cap": full},
+                ),
+            ],
+            data={"blocks": len(blocks), "admitted": admitted, "cap": cap, "cap_for_all_blocks": full},
+        ),
+    ]
+
+
 def _cap_issues(
     expected: float,
     p90: float,
@@ -585,6 +764,7 @@ def _cap_issues(
     raw_cap: Any,
     fit: EstimateFit,
     study_kind: str,
+    basis: str = "billed",
 ) -> list[Issue]:
     if cap is None or raw_cap == "auto":
         return []  # an auto cap is derived from p90 and always covers it
@@ -602,6 +782,8 @@ def _cap_issues(
             ),
         )
     which = "expected total" if severity == "error" else "p90 total"
+    if basis == "list":
+        which = f"{which} at list price"
     value = expected if severity == "error" else p90
     return [
         make_issue(
@@ -610,7 +792,7 @@ def _cap_issues(
             severity=severity,  # type: ignore[arg-type]
             message=f"the {which} ${value:.2f} exceeds the study cap ${cap:.2f}",
             path="study.max_cost_usd",
-            data={"expected_total": expected, "p90_total": p90, "cap": cap},
+            data={"expected_total": expected, "p90_total": p90, "cap": cap, "cap_basis": basis},
             fix=fixes,
         ),
     ]
@@ -629,16 +811,19 @@ def reestimate_after_pilot(
 ) -> tuple[Estimate, list[dict[str, Any]]]:
     """Update each condition's expected cost with its pilot costs (log-normal, weighted by n).
 
-    ``observations`` is ``{condition_index: [cost of each finished pilot attempt]}``. The prior mean on the
-    log scale is ``ln(expected per cell)`` with weight ``prior_weight``; the posterior per-cell mean is the
-    n-weighted mean of the two. Returns the new estimate and ``[{condition_index, before, after, n}]`` to
+    ``observations`` is ``{condition_index: [cost of each finished pilot attempt]}``, in the estimate's
+    ``cap_basis`` (list costs for a list-basis study). The prior mean on the log scale is
+    ``ln(expected per cell)`` with weight ``prior_weight``; the posterior per-cell mean is the n-weighted mean
+    of the two. Returns the new estimate and ``[{condition_index, before, after, n}]`` (in the cap's unit) to
     show before the expansion approval. Costs of 0 (free endpoints) keep the condition's estimate.
     """
+    listed = estimate.cap_basis == "list"
     changes = []
     conditions = []
     for row in estimate.by_condition:
         costs = [c for c in observations.get(row.condition_index, []) if c > 0]
-        per_cell = row.expected_usd / row.n_cells if row.n_cells else 0.0
+        basis_expected = row.expected_list_usd if listed else row.expected_usd
+        per_cell = basis_expected / row.n_cells if row.n_cells else 0.0
         if not costs or per_cell <= 0:
             conditions.append(row)
             continue
@@ -654,14 +839,15 @@ def reestimate_after_pilot(
                 "expected_usd": round(row.expected_usd * ratio, 6),
                 "p90_usd": round(row.p90_usd * ratio, 6),
                 "expected_list_usd": round(row.expected_list_usd * ratio, 6),
+                "p90_list_usd": round(row.p90_list_usd * ratio, 6),
             },
         )
         conditions.append(updated)
         changes.append(
             {
                 "condition_index": row.condition_index,
-                "before": row.expected_usd,
-                "after": updated.expected_usd,
+                "before": basis_expected,
+                "after": updated.expected_list_usd if listed else updated.expected_usd,
                 "n": n,
             },
         )
@@ -672,6 +858,8 @@ def reestimate_after_pilot(
             "by_condition": conditions,
             "expected_total": round(expected, 6),
             "p90_total": round(p90, 6),
+            "expected_list_total": round(sum(c.expected_list_usd for c in conditions), 6),
+            "p90_list_total": round(sum(c.p90_list_usd for c in conditions), 6),
             "inputs": {**estimate.inputs, "reestimated_after_pilot": True},
         },
     )

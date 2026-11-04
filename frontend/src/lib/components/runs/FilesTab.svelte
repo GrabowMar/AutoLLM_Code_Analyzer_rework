@@ -273,7 +273,8 @@
 					<details>
 						<summary class="cursor-pointer"><span class="font-mono">{ecosystem}</span> · {packages.length} packages</summary>
 						<div class="mt-1 grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
-							{#each packages as pkg (pkg.name)}
+							<!-- npm locks hold one name at several versions (and nested copies): the index keeps keys unique -->
+							{#each packages as pkg, i (`${i}:${pkg.name}@${pkg.version}`)}
 								<span class="font-mono">{pkg.name}=={pkg.version}</span>
 							{/each}
 						</div>

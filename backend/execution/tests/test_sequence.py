@@ -121,6 +121,26 @@ def test_resident_limit_takes_the_tighter_bound():
     assert resident_limit(SimpleNamespace(is_system=False, max_resident_models=None), None) is None
 
 
+def test_study_residency_applies_only_to_endpoints_that_host_models_locally():
+    frugal = SimpleNamespace(execution_options={"max_resident_models": 1})
+
+    def ep(**kw):
+        base = {"is_system": False, "max_resident_models": None, "kind": "openai_compatible"}
+        return SimpleNamespace(**{**base, "connection": "direct", "cost_basis": "billed", **kw})
+
+    # A remote API (OpenCode Go: direct, list price, no declared K) serves every model at once.
+    assert resident_limit(ep(cost_basis="list_price"), frugal) is None
+    assert resident_limit(ep(), frugal) is None
+    # Local hosts: Ollama, a relay (GPU box), a tokens-only endpoint, or one that declares its own K.
+    assert resident_limit(ep(kind="ollama", connection="relay"), frugal) == 1
+    assert resident_limit(ep(connection="relay"), frugal) == 1
+    assert resident_limit(ep(cost_basis="free"), frugal) == 1
+    assert resident_limit(ep(max_resident_models=3), frugal) == 1
+    # The endpoint's own declared K always applies; the explicit options mapping overrides the study.
+    assert resident_limit(ep(max_resident_models=2, cost_basis="list_price"), None) == 2
+    assert resident_limit(ep(kind="ollama"), None, options={"max_resident_models": 2}) == 2
+
+
 @pytest.mark.django_db
 def test_condition_info_reads_models_and_endpoints():
     from backend.execution.tests.conftest import make_endpoint

@@ -784,10 +784,11 @@ def test_a_starter_that_never_starts_gives_no_baseline(golden: Any, monkeypatch:
 
 def test_queue_oracle_runs_records_missing_references(golden: Any) -> None:
     version = golden.get("task", "crud_todo_list")
-    queued = baseline.queue_oracle_runs(version, [golden.get("stack", "flask-react")], suite=suite_of(golden))
+    stack = golden.get("stack", "fastapi-vue")  # crud_todo_list has no fastapi-vue reference tree
+    queued = baseline.queue_oracle_runs(version, [stack], suite=suite_of(golden))
     assert queued == []
     version.refresh_from_db()
-    assert version.oracle[golden.get("stack", "flask-react").pinned_ref]["status"] == "missing"
+    assert version.oracle[stack.pinned_ref]["status"] == "missing"
 
 
 def test_conformance_coverage(golden: Any) -> None:

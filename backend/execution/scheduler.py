@@ -48,6 +48,8 @@ from backend.execution import capacity
 from backend.execution.capacity import CapacitySnapshot
 from backend.execution.capacity import EffectiveSlots
 from backend.execution.capacity import residency_key
+from backend.execution.sequence import hosts_models_locally
+from backend.execution.sequence import resident_limit
 
 logger = logging.getLogger(__name__)
 
@@ -618,10 +620,11 @@ class Scheduler:
         # 3. the live session / pump serves the frozen (name, digest)
         if not ep.is_system and not ep.serves(head.served_name, head.digest):
             return MODEL_NOT_SERVED, None
-        # 4. residency (every policy) with the starvation guard
+        # 4. residency (every policy) with the starvation guard, only on an endpoint that hosts its models
+        # (sequence.hosts_models_locally): a remote API serves every model at once.
         model = head.model_key
         on_ep = resident.setdefault(ep.id, set())
-        if not ep.is_system:
+        if hosts_models_locally(ep):
             k = _resident_limit(ep, head)
             starved = swap.get(ep.id)
             if starved is not None and starved[1] != model:
@@ -772,6 +775,4 @@ def warmup_body(served_name: str, access, ep) -> dict[str, Any]:
 
 
 def _resident_limit(ep, head: LaneRow) -> int | None:
-    limits = [ep.max_resident_models, (head.execution_options or {}).get("max_resident_models")]
-    finite = [int(v) for v in limits if isinstance(v, int) and not isinstance(v, bool) and v > 0]
-    return min(finite) if finite else None
+    return resident_limit(ep, options=head.execution_options or {})
