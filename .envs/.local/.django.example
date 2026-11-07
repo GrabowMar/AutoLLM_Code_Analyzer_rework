@@ -40,6 +40,20 @@ HUGGINGFACE_API_TOKEN=
 # ------------------------------------------------------------------------------
 FRONTEND_PUBLIC_ORIGIN=http://localhost:8000
 
+# Self-registration and confirmation links (local emails are captured by Mailpit).
+DJANGO_ACCOUNT_ALLOW_REGISTRATION=True
+ACCOUNT_EMAIL_VERIFICATION=mandatory
+
+# Outgoing email. Mailpit captures local mail by default. `just postal-setup`
+# provisions Postal; `just postal-enable` switches the app after DNS verification.
+# EMAIL_HOST=postal-smtp
+# EMAIL_PORT=2525
+# EMAIL_HOST_USER=llmlab
+# EMAIL_HOST_PASSWORD=generated-by-postal-setup
+# EMAIL_USE_TLS=False
+# EMAIL_USE_SSL=False
+# DJANGO_DEFAULT_FROM_EMAIL=LLM Eval Lab <noreply@notify.example.com>
+
 # Sample-app subdomain routing (see /docs/deployment-guide).
 # Serve each generated app at https://llm-<hex>.<APPS_DOMAIN>/ through a
 # wildcard edge route (*.<APPS_DOMAIN> → Django) instead of raw host ports.

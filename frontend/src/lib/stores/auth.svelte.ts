@@ -161,7 +161,9 @@ function createAuth() {
     const parsed = parseAllauthAuthResponse(
       res,
       body,
-      `Sign up failed (HTTP ${res.status}).`,
+      res.status === 403 && body.status === 403
+        ? "Registration is currently closed. Contact the site administrator."
+        : `Sign up failed (HTTP ${res.status}).`,
     );
 
     // Signup success: 200 with user logged in immediately

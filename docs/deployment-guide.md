@@ -11,9 +11,12 @@ Two ways to put LLM Lab on a server: the deploy script that runs the local stack
 | Edge | Existing Caddy or nginx proxies to port 8000 | Traefik on 80/443/5555 with Let's Encrypt |
 | App URLs | `/apps/<name>/` path proxy, or subdomains through Django | `https://<container>.<APPS_DOMAIN>/` via Traefik |
 | Local-model agent runs | Supported | Refused (no route from host-daemon gateways to the executor's LLM proxy) |
-| Email | mailpit | Mailgun (django-anymail) when `MAILGUN_API_KEY` is set, otherwise SMTP from `EMAIL_*` |
+| Email | Mailpit by default; optional Postal SMTP | Postal SMTP, Mailgun (django-anymail) or SMTP from `EMAIL_*` |
 
 The deploy script is the quicker and better-isolated path today; the production stack is hardened at the HTTP layer but runs untrusted generated code on the host daemon.
+
+For self-hosted confirmation and password-reset emails, use the [Postal workflow](/docs/EMAIL).
+It generates DNS records, verifies the sending domain, and connects Django over a private SMTP network.
 
 ## Path A: the deploy script
 

@@ -20,6 +20,7 @@ You pick an app spec and a set of models, from OpenRouter or from your own Ollam
 | [Experiments](/docs/EXPERIMENTS) | Designed runs: conditions, comparability, launch, monitor, results, schedules, post-run, export |
 | [Human evaluation](/docs/HUMAN_EVALUATION) | Manual testing studies: task design, participants and the evaluation portal, hosting apps for testers, blinded results, exports |
 | [Execution](/docs/EXECUTION) | The executor: leases, pools and lanes, fair-share ordering, blocked reasons, capacity settings, drain |
+| [Sample builds](/docs/SAMPLE_BUILDS) | Shared sample images, BuildKit caches, resource caps, refresh and rollout |
 | [Analysis pipeline](/docs/ANALYSIS_PIPELINE) | Analyzer workspaces, tool execution, result statuses, the AI reviewer, measurement rules |
 | [Background services](/docs/BACKGROUND_SERVICES) | Executor, web-process threads, Celery, and the SSE event stream |
 | **Reference** | |
@@ -33,6 +34,7 @@ You pick an app spec and a set of models, from OpenRouter or from your own Ollam
 | [Automation guide](/docs/AUTOMATION_GUIDE) | Where the retired automation hub went: experiment schedules and post-runs |
 | **Operations** | |
 | [Deployment guide](/docs/deployment-guide) | The deploy script and the production Traefik stack |
+| [Application email](/docs/EMAIL) | Postal setup, sending-domain DNS, confirmation emails and delivery checks |
 | [Troubleshooting](/docs/TROUBLESHOOTING) | Symptom-first fixes for common failures |
 
 ## Where things live

@@ -1,14 +1,19 @@
+# syntax=docker/dockerfile:1.19
 # Stage 1: build the frontend (no lockfile: package.json pins exact versions)
 FROM node:24-alpine AS frontend-builder
 WORKDIR /frontend
+ARG SAMPLE_CACHE_NAMESPACE=sample
 COPY frontend/package*.json ./
-RUN npm install --no-audit --no-fund
+ARG SAMPLE_DEPENDENCY_REFRESH=0
+RUN --mount=type=cache,id=${SAMPLE_CACHE_NAMESPACE}-npm,target=/root/.npm \
+    : "$SAMPLE_DEPENDENCY_REFRESH" && npm install --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: FastAPI (uvicorn) serves the API + the built SPA from ./static
 FROM python:3.13-slim
 WORKDIR /app
+ARG SAMPLE_CACHE_NAMESPACE=sample
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -17,18 +22,20 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Whole backend tree (multi-module apps); .dockerignore keeps out
-# node_modules, build output and local data.
-COPY . .
-COPY --from=frontend-builder /frontend/dist ./static
-RUN mkdir -p data
-
 RUN addgroup --system appgroup \
     && adduser --system --ingroup appgroup appuser \
-    && chown -R appuser:appgroup /app
+    && mkdir -p /app/data \
+    && chown appuser:appgroup /app /app/data
+
+COPY requirements.txt ./
+ARG SAMPLE_DEPENDENCY_REFRESH=0
+RUN --mount=type=cache,id=${SAMPLE_CACHE_NAMESPACE}-pip,target=/root/.cache/pip \
+    : "$SAMPLE_DEPENDENCY_REFRESH" && pip install -r requirements.txt
+
+# Preserve multi-module backend files without copying frontend source into
+# the runtime image. Ownership is set while copying, avoiding a full tree walk.
+COPY --chown=appuser:appgroup --exclude=frontend . .
+COPY --from=frontend-builder --chown=appuser:appgroup /frontend/dist ./static
 USER appuser
 
 EXPOSE 8000

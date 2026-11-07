@@ -69,10 +69,14 @@ export interface PaginatedContainers {
 
 export async function buildContainerForJob(
   jobId: string,
+  forceRebuild = false,
 ): Promise<GenericResponse> {
-  const res = await apiFetch(`/runtime/jobs/${jobId}/build/`, {
-    method: "POST",
-  });
+  const res = await apiFetch(
+    `/runtime/jobs/${jobId}/build/${forceRebuild ? "?force_rebuild=true" : ""}`,
+    {
+      method: "POST",
+    },
+  );
   return res.json();
 }
 

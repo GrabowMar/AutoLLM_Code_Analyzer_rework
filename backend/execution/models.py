@@ -72,3 +72,18 @@ class ExecutorSettings(models.Model):
             defaults={"sandbox_slots": _initial_sandbox_slots()},
         )
         return obj
+
+
+class RuntimeBuildLease(models.Model):
+    """A preview build admitted against the executor's evaluation capacity.
+
+    Keep the lease until the worker finishes, including after cancellation, so
+    another build cannot spend its memory while Docker is still unwinding.
+    """
+
+    action = models.OneToOneField("runtime.ContainerAction", on_delete=models.CASCADE, primary_key=True)
+    owner = models.CharField(max_length=80, db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+
+    def __str__(self) -> str:
+        return f"{self.action_id} ({self.owner})"

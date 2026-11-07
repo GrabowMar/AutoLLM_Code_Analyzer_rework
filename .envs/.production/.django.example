@@ -46,6 +46,8 @@ MAILGUN_DOMAIN=
 # EMAIL_HOST_PASSWORD=
 # EMAIL_USE_TLS=True
 # EMAIL_USE_SSL=False
+# Self-hosted Postal: see docs/EMAIL.md. `just postal-enable --environment production`
+# verifies sending DNS, writes these SMTP settings and adds the private mail network.
 
 # Sentry (optional) — error reporting is enabled only when SENTRY_DSN is set.
 # ------------------------------------------------------------------------------

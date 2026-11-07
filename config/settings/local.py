@@ -37,7 +37,16 @@ CACHES = {
 # https://docs.djangoproject.com/en/dev/ref/settings/#email-host
 EMAIL_HOST = env("EMAIL_HOST", default="mailpit")
 # https://docs.djangoproject.com/en/dev/ref/settings/#email-port
-EMAIL_PORT = 1025
+EMAIL_PORT = env.int("EMAIL_PORT", default=1025)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
+DEFAULT_FROM_EMAIL = env(
+    "DJANGO_DEFAULT_FROM_EMAIL",
+    default=f"LLM Eval Lab <noreply@{DJANGO_DOMAIN}>",  # noqa: F405
+)
+SERVER_EMAIL = env("DJANGO_SERVER_EMAIL", default="") or DEFAULT_FROM_EMAIL
 
 # WhiteNoise
 # ------------------------------------------------------------------------------
@@ -104,10 +113,10 @@ CSRF_COOKIE_HTTPONLY = False  # SvelteKit needs to read the CSRF token from the 
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 
-# django-allauth — optional locally so you can log in without Mailpit during dev.
-# Production stays mandatory via base.py. Override: ACCOUNT_EMAIL_VERIFICATION=mandatory
+# django-allauth — confirm new accounts using the link captured by Mailpit.
+# Set ACCOUNT_EMAIL_VERIFICATION=optional to skip confirmation during development.
 # ------------------------------------------------------------------------------
-ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="optional")
+ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="mandatory")
 
 # django-allauth headless — absolute email links (see base.build_headless_frontend_urls)
 # ------------------------------------------------------------------------------

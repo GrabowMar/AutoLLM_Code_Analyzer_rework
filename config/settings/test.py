@@ -37,3 +37,4 @@ MEDIA_URL = "http://media.testserver/"
 # Your stuff...
 # ------------------------------------------------------------------------------
 TESTING = True
+SAMPLE_BUILD_BACKEND = "legacy"

@@ -95,7 +95,7 @@ There are no length targets and no style coaching.
 
 Every sample is graded the same way by the platform, never by its own report (`services/evaluation/runner.py`):
 
-1. **Build:** `prepare_build_dir(job)` plus the stack's own Dockerfile on apps-dind. The build is retried once, and only when the log shows a registry/network signature. A repeated infra failure is `infra_error`, not a failed sample.
+1. **Build:** `prepare_build_dir(job)` plus the stack's own Dockerfile on apps-dind, through the shared [sample image cache](/docs/SAMPLE_BUILDS). An unchanged owner/stack/context reuses its immutable image for seven days; a miss uses a resource-limited BuildKit builder. Every evaluation still starts a fresh container. Infrastructure failures retry once; repeated infrastructure failure is `infra_error`, not a failed sample. Explicit dependency refresh bypasses image and build-layer reuse.
 2. **Run:** the image runs on an internal network with no egress, under memory/CPU caps and with a random `ADMIN_PASSWORD`.
 3. **Grade:** `images/conformance-tester/tester.py` (stdlib, `VERSION` 3, in its own container on the same network) checks only what the brief states, in a fixed order:
    - runtime: health,
@@ -306,7 +306,7 @@ When you change something, version it:
 
 - `BRIEF_VERSION` (`services/agent/brief.py`, currently 4) for the brief. v3 added the "Additional context" section and user-stack start commands. v4 lists every model of a multi-model spec under "Data models", states an endpoint's access level, query parameters and success status when the spec gives them, and names the current runtimes in the builtin stack summaries, and prints its JSON blocks without HTML escaping (keys stay sorted, so a brief does not depend on how the spec was loaded); briefs of single-model specs without the new endpoint fields differ from v3 only in those summaries.
 - `CONTRACT_VERSION` (`services/evaluation/contract.py`, 1) for the contract.
-- The tester's `VERSION` (3) or `EVALUATOR_VERSION` (2) for grading. Build healing (`runtime/services/scaffolding.py`: patches, inferred requirements, placeholder entry files) is part of the grading procedure, so a change to it bumps `EVALUATOR_VERSION` too; 2 is the generation-library modernization's healing.
+- The tester's `VERSION` (3) or `EVALUATOR_VERSION` (3) for grading. Build healing (`runtime/services/scaffolding.py`: patches, inferred requirements, placeholder entry files) is part of the grading procedure, so a change to it bumps `EVALUATOR_VERSION` too; 2 is the generation-library modernization's healing, and 3 adds bounded BuildKit builds and immutable image reuse.
 - `SANDBOX_REVISION` (`harnesses/base.py`, 4) when the sandbox environment changes without an image change.
 - To move OpenCode to a new release, first capture its default prompt into `data/agent/harness_prompts/opencode-<version>-default.md`. Jobs refuse to snapshot otherwise.
 

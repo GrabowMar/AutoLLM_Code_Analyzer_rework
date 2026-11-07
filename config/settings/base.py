@@ -559,6 +559,16 @@ DOCKER_APPS_NETWORK = env("DOCKER_APPS_NETWORK", default="")
 # mutual-TLS client cert (ca.pem, cert.pem, key.pem) for that daemon.
 APPS_DOCKER_HOST = env("APPS_DOCKER_HOST", default="")
 APPS_DOCKER_CERT_PATH = env("APPS_DOCKER_CERT_PATH", default="")
+# Sample builds share immutable images between conformance evaluation and previews.
+# BuildKit state lives in a named volume on the apps daemon, not in the web worker.
+SAMPLE_BUILD_BACKEND = env.str("SAMPLE_BUILD_BACKEND", default="buildkit")
+SAMPLE_BUILDER_NAME = env.str("SAMPLE_BUILDER_NAME", default="llmlab-samples")
+SAMPLE_BUILD_MEMORY = env.str("SAMPLE_BUILD_MEMORY", default="1536m")
+SAMPLE_BUILD_CPUS = env.float("SAMPLE_BUILD_CPUS", default=2.0)
+SAMPLE_BUILD_TIMEOUT_S = env.int("SAMPLE_BUILD_TIMEOUT_S", default=1200)
+SAMPLE_BUILD_CACHE_BYTES = env.int("SAMPLE_BUILD_CACHE_BYTES", default=5 * 1024**3)
+SAMPLE_IMAGE_CACHE_BYTES = env.int("SAMPLE_IMAGE_CACHE_BYTES", default=5 * 1024**3)
+SAMPLE_IMAGE_CACHE_TTL_S = env.int("SAMPLE_IMAGE_CACHE_TTL_S", default=7 * 24 * 3600)
 # Local-model (non-OpenRouter) agent runs: their gateway reaches the executor's
 # LLM proxy only through apps-dind's llmproxy attachment + firewall exception
 # (compose/local/apps-dind/entrypoint.sh). Without apps-dind (production compose,

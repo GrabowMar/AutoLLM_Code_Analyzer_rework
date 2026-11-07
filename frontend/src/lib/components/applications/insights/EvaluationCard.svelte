@@ -66,11 +66,11 @@
 	let evaluating = $state(false);
 	let evaluateMessage = $state('');
 
-	async function evaluate() {
+	async function evaluate(forceRebuild = false) {
 		evaluating = true;
 		evaluateMessage = '';
 		try {
-			await evaluateGenerationJob(job.id);
+			await evaluateGenerationJob(job.id, forceRebuild);
 			evaluateMessage = 'Evaluation queued — reload the page in a few minutes.';
 		} catch (e) {
 			evaluateMessage = formatApiError(e, 'Could not queue the evaluation');
@@ -103,7 +103,7 @@
 				<EmptyState compact icon={ClipboardCheck} title="Not evaluated yet" description={job.status === 'completed' ? 'Build and grade this app against its spec’s conformance suite.' : job.status === 'failed' || job.status === 'cancelled' ? `Not evaluated: generation ${job.status === 'failed' ? 'failed' : 'was cancelled'}, so there is no app to grade.` : 'Evaluation runs once generation has finished.'}>
 					{#snippet action()}
 						{#if job.status === 'completed'}
-							<Button variant="outline" size="sm" onclick={evaluate} disabled={evaluating}><RefreshCw class="h-3.5 w-3.5" />Evaluate</Button>
+							<Button variant="outline" size="sm" onclick={() => evaluate()} disabled={evaluating}><RefreshCw class="h-3.5 w-3.5" />Evaluate</Button>
 						{/if}
 					{/snippet}
 				</EmptyState>
@@ -172,7 +172,7 @@
 					<dl class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-4">
 						<div>
 							<dt class="text-[11px] text-muted-foreground">Image build</dt>
-							<dd><StatusBadge status={build.ok ? 'passed' : 'failed'} label={build.ok ? 'built' : 'failed'} /></dd>
+							<dd><StatusBadge status={build.ok ? 'passed' : 'failed'} label={build.ok ? build.cache_hit ? 'reused' : 'built' : 'failed'} /></dd>
 						</div>
 						<div>
 							<dt class="text-[11px] text-muted-foreground">Build attempts</dt>
@@ -202,6 +202,12 @@
 							<dt class="text-[11px] text-muted-foreground" title="Python packages installed in the image (pip freeze)">Resolved Python deps</dt>
 							<dd class="font-mono tabular-nums">{resolved.length || '—'}</dd>
 						</div>
+						{#if build.cpu_seconds != null}
+							<div><dt class="text-[11px] text-muted-foreground">Build CPU time</dt><dd class="font-mono tabular-nums">{fmtSeconds(build.cpu_seconds)}</dd></div>
+						{/if}
+						{#if build.peak_memory_bytes != null}
+							<div><dt class="text-[11px] text-muted-foreground">Build peak memory (sampled)</dt><dd class="font-mono tabular-nums">{fmtBytes(build.peak_memory_bytes)}</dd></div>
+						{/if}
 					</dl>
 				</div>
 			{/if}
@@ -254,7 +260,8 @@
 
 			{#if job.status === 'completed'}
 				<div class="flex flex-wrap items-center gap-2">
-					<Button variant="outline" size="sm" onclick={evaluate} disabled={evaluating}><RefreshCw class="h-3.5 w-3.5" />Re-evaluate</Button>
+					<Button variant="outline" size="sm" onclick={() => evaluate()} disabled={evaluating}><RefreshCw class="h-3.5 w-3.5" />Re-evaluate</Button>
+					<Button variant="outline" size="sm" onclick={() => evaluate(true)} disabled={evaluating}>Re-evaluate with refreshed dependencies</Button>
 					{#if evaluateMessage}<span class="text-[11px] text-muted-foreground">{evaluateMessage}</span>{/if}
 				</div>
 			{/if}
