@@ -1,0 +1,116 @@
+name: llmlab-postal
+
+x-postal: &postal
+  image: ghcr.io/postalserver/postal:3.3.7
+  restart: unless-stopped
+  volumes:
+    - ${POSTAL_STATE_DIR:?Run scripts/postal.py setup first}/config:/config:ro
+    - ./provision.rb:/workflow/provision.rb:ro
+  depends_on:
+    db:
+      condition: service_healthy
+  networks:
+    - database
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  pids_limit: 256
+  cpus: 1
+
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Run scripts/postal.py setup first}
+      MARIADB_DATABASE: postal
+    command: ["--innodb-log-file-size=256M", "--max-allowed-packet=32M"]
+    volumes:
+      - database:/var/lib/mysql
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 768m
+    cpus: 1
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    <<: *postal
+    command: ["postal", "web-server"]
+    ports:
+      - "127.0.0.1:${POSTAL_WEB_PORT:-8026}:5000"
+    networks:
+      - database
+      - ingress
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://127.0.0.1:5000/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    mem_limit: 512m
+
+  smtp:
+    <<: *postal
+    command: ["postal", "smtp-server"]
+    ports:
+      # Receive delivery failures for Postal's return-path domain.
+      - "${POSTAL_SMTP_BIND:-0.0.0.0}:25:2525"
+    networks:
+      database: {}
+      ingress: {}
+      application:
+        aliases: ["postal-smtp"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "2525"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    mem_limit: 512m
+
+  worker:
+    <<: *postal
+    command: ["postal", "worker"]
+    networks:
+      - database
+      - delivery
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9090/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    mem_limit: 768m
+
+  runner:
+    <<: *postal
+    profiles: ["tools"]
+    restart: "no"
+    command: ["postal", "version"]
+    networks:
+      - database
+      - delivery
+    mem_limit: 768m
+
+volumes:
+  database: {}
+
+networks:
+  database:
+    internal: true
+  application:
+    name: llmlab_postal_application
+    internal: true
+  delivery: {}
+  ingress: {}

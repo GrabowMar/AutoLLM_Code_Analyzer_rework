@@ -1,4 +1,5 @@
-export COMPOSE_FILE := "docker-compose.local.yml"
+set dotenv-load
+export COMPOSE_FILE := env_var_or_default("COMPOSE_FILE", "docker-compose.local.yml")
 
 ## Just does not yet manage signals for subprocesses reliably, which can lead to unexpected behavior.
 ## Exercise caution before expanding its usage in production environments.
@@ -56,3 +57,27 @@ frontend-dev:
 # frontend-build: Build frontend for production.
 frontend-build:
     @docker compose run --rm frontend npm run build
+
+# postal-setup: Provision Postal and generate the sending-domain DNS records.
+postal-setup +args:
+    @python3 scripts/postal.py setup {{args}}
+
+# postal-dns: Display the exact DNS records for this Postal installation.
+postal-dns:
+    @python3 scripts/postal.py dns
+
+# postal-status: Show Postal's persistent services.
+postal-status:
+    @python3 scripts/postal.py status
+
+# postal-verify: Check sending-domain authentication and server reverse DNS.
+postal-verify:
+    @python3 scripts/postal.py verify
+
+# postal-enable: Verify DNS and switch the app to Postal SMTP.
+postal-enable *args:
+    @python3 scripts/postal.py configure-app {{args}}
+
+# postal-test: Send a test email through Django and Postal to a real recipient.
+postal-test recipient:
+    @python3 scripts/postal.py test-email {{recipient}}

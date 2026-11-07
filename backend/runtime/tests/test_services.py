@@ -40,6 +40,7 @@ def test_build_action_completes():
             "backend.runtime.services.docker_manager.client",
             return_value=mock_client,
         ),
+        patch("backend.execution.api.wake_preview_build") as wake,
     ):
         user = UserFactory()
         container = ContainerInstanceFactory(
@@ -51,6 +52,10 @@ def test_build_action_completes():
             ContainerAction.ActionType.BUILD,
             user,
         )
+        assert action.status == ContainerAction.Status.PENDING
+        wake.assert_called_once_with(action.id)
+        # The executor, rather than an unbounded web thread, owns cache misses.
+        container_service._execute(action.id)
 
         deadline = time.time() + 10
         while time.time() < deadline:

@@ -69,12 +69,14 @@ def test_wake_survives_redis_outage():
         wake()  # never raises: the executor's tick still runs
 
 
-def test_dispatch_evaluation_queues_a_reevaluation():
+@pytest.mark.parametrize("force_rebuild", [False, True])
+def test_dispatch_evaluation_queues_a_reevaluation(force_rebuild):
     job = _job(status=GenerationJob.Status.COMPLETED)
     with mock.patch("backend.execution.api.wake"):
-        assert dispatcher.dispatch_evaluation(job) is True
+        assert dispatcher.dispatch_evaluation(job, force_rebuild=force_rebuild) is True
     job.refresh_from_db()
     assert (job.status, job.phase, job.execution["reeval_prev_status"]) == ("running", "eval_queued", "completed")
+    assert job.execution["force_rebuild"] is force_rebuild
 
 
 def test_view_patch_targets_keep_resolving():

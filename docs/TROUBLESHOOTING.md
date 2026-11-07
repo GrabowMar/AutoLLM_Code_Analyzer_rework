@@ -16,7 +16,13 @@ The local stack binds 8000 (frontend), 8001 (django), 8025 (mailpit) and 5555 (f
 
 ### No verification email arrives
 
-Locally nothing sends real email: everything lands in mailpit at http://localhost:8025, and verification is optional (`ACCOUNT_EMAIL_VERIFICATION=optional`). If the link in the email points at the wrong host, set `FRONTEND_PUBLIC_ORIGIN` to the URL you actually open. In production, see the email gap in [Deployment guide](/docs/deployment-guide#path-b-production-compose).
+Local email defaults to Mailpit at http://localhost:8025. To deliver to real inboxes, set up the [Postal workflow](/docs/EMAIL) or configure an SMTP provider through `EMAIL_*`. New accounts must follow the confirmation link before login (`ACCOUNT_EMAIL_VERIFICATION=mandatory`); development can opt into `optional`. If the link points at the wrong host, set `FRONTEND_PUBLIC_ORIGIN` to the URL you actually open. Production also supports Mailgun.
+
+For Postal, run `just postal-verify` and `just postal-status`. Publish the records in `var/postal/dns-records.md`, including the hosting provider's reverse-DNS entry. The workflow keeps Mailpit active until verification passes and `just postal-enable` switches delivery. Once enabled, check Postal's UI for queues and delivery failures; SMTP acceptance alone does not prove inbox delivery.
+
+### Sign up returns HTTP 403
+
+Check `DJANGO_ACCOUNT_ALLOW_REGISTRATION` in `.envs/.local/.django` (or `.envs/.production/.django`). `False` closes self-registration; set it to `True` to allow new accounts. Recreate the Django service after changing env files (`docker compose -f docker-compose.local.yml up -d --no-deps --force-recreate django`); a restart alone keeps the old environment. A CSRF rejection is a separate cause, covered below.
 
 ### 403, CSRF or CORS errors from a non-localhost address
 

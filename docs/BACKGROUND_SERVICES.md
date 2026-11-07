@@ -12,7 +12,9 @@ Which work runs where: the executor process, threads inside the web process, Cel
 | Internal LLM proxy and direct-endpoint pumps for local models | `executor` threads | Yes |
 | Interactive analysis runs | Daemon thread in `django` (`analysis.services.runner.dispatch`) | No |
 | Analyzer workspace provisioning, tool installs | Daemon threads in `django` | No |
-| Report generation, container start/stop/build actions | Daemon threads in `django` | No |
+| Preview image builds (cache misses) | `executor` evaluation pool, claimed from Postgres | Yes; interrupted builds fail with a rebuild instruction |
+| Cached preview startup | Daemon thread in `django`, with a recoverable startup lease | No; expired startup leases are failed by the executor |
+| Report generation, container start/stop actions | Daemon threads in `django` | No |
 | Catalog enrichment after a model sync | Celery `enrich_catalog_task` | Yes (queued in Redis) |
 | OpenRouter per-call stats after a generation stage | Celery `fetch_call_stats_task` | Yes (queued in Redis) |
 | Outbound webhook deliveries | Celery `deliver_webhook`, retried with backoff | Yes |
@@ -31,7 +33,7 @@ One instance, compose service `executor`, command `python manage.py run_executor
 | --- | --- |
 | Main loop | Wait on `executor:wake` up to `EXECUTOR_TICK_SECONDS` (2 s), requeue lost jobs, claim work, reconcile every 15 s, schedules and post-runs every 30 s, purge old LLM request rows daily |
 | Heartbeat | Every `EXECUTOR_HEARTBEAT_SECONDS` (20 s): instance `last_seen_at`, lease renewal for jobs it is running |
-| `sandbox`, `eval`, `llm`, `post`, `schedule` pools | Agent runs, evaluations, scaffolding/custom jobs, post-runs, schedule actions |
+| `sandbox`, `eval`, `llm`, `post`, `schedule` pools | Agent runs, evaluations and preview builds, scaffolding/custom jobs, post-runs, schedule actions/cache GC |
 | LLM proxy | `inference.proxy_server` on `LLM_PROXY_BIND` (`172.30.99.2:8090` on the internal `llmproxy` network) |
 | Direct pumps | Workers that forward queued LLM requests to direct local endpoints |
 
@@ -107,3 +109,8 @@ Two management commands keep the container fleet honest, useful from cron in pro
 - `just manage reconcile_app_routes`: rewrites the per-app Traefik route files and drops stale ones ([Deployment guide](/docs/deployment-guide)).
 
 The executor's reconciler separately reaps lost agent sandboxes and evaluation containers on the apps daemon. **System → Maintenance** offers "Purge Orphan Containers" for container rows whose Docker container is gone, and "Clear Stuck Generation Jobs" as a manual backstop for executor-owned jobs whose lease expired long ago.
+
+The executor also recovers interrupted preview build/startup leases and runs
+reference-aware sample-image cleanup hourly. BuildKit keeps its package/layer
+cache volume between builds and stops afterward to release RAM. See
+[Sample builds](/docs/SAMPLE_BUILDS) for retention, resource limits and refresh.

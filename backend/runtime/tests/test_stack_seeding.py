@@ -39,7 +39,10 @@ def test_seed_stacks_creates_builtin_rows():
 
 @pytest.mark.django_db
 def test_seed_stacks_bumps_version_on_content_change():
-    flask = Stack.objects.get(slug="flask-react", is_builtin=True)
+    flask = Stack.objects.filter(slug="flask-react", is_builtin=True).order_by("-version").first()
+    previous_versions = list(
+        Stack.objects.filter(slug="flask-react").order_by("version").values_list("version", flat=True),
+    )
     flask.content_hash = "stale"
     flask.save(update_fields=["content_hash"])
 
@@ -50,7 +53,7 @@ def test_seed_stacks_bumps_version_on_content_change():
     versions = list(
         Stack.objects.filter(slug="flask-react").order_by("version").values_list("version", flat=True),
     )
-    assert versions == [1, 2]
+    assert versions == [*previous_versions, flask.version + 1]
 
 
 @pytest.mark.django_db
@@ -83,11 +86,12 @@ def test_apply_scaffold_materializes_from_db_row(tmp_path: Path):
 
 @pytest.mark.django_db
 def test_apply_scaffold_honors_pinned_stack_version(tmp_path: Path):
-    # Freeze a doctored v2 of flask-react and pin a job to v1.
+    # Preserve the original version even when later builtin recipes already exist.
     v1 = Stack.objects.get(slug="flask-react", version=1)
+    latest = Stack.objects.filter(slug="flask-react").order_by("-version").first()
     Stack.objects.create(
         slug="flask-react",
-        version=2,
+        version=latest.version + 1,
         is_builtin=True,
         has_frontend=v1.has_frontend,
         default_port=v1.default_port,
@@ -112,7 +116,8 @@ def test_apply_scaffold_honors_pinned_stack_version(tmp_path: Path):
 
     svc.apply_scaffold(job, dest, phase=svc.ScaffoldPhase.BUILD)
 
-    assert not (dest / "MARKER.txt").exists()  # v2-only file must not appear
+    assert not (dest / "MARKER.txt").exists()
+    assert (dest / "Dockerfile").read_text() == v1.files["Dockerfile"]
 
 
 @pytest.mark.django_db

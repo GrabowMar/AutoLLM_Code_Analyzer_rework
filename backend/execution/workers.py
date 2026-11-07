@@ -78,6 +78,32 @@ run_sandbox_job = run_job
 run_eval = run_job
 
 
+def run_preview_build(ctx: WorkerContext, action_id) -> None:
+    """Build a preview on the eval pool, retaining its lease through cleanup."""
+    from backend.execution import runtime_builds
+    from backend.runtime.services import container_service
+
+    entry = ctx.registry.add(action_id, 0, "preview")
+    try:
+        if runtime_builds.cancelled(action_id, ctx.executor_id):
+            runtime_builds.submission_failed(action_id, ctx.executor_id, "build lease expired before work started")
+            return
+        container_service._execute(  # noqa: SLF001 — the executor owns BUILD action dispatch
+            action_id,
+            claimed=True,
+            cancelled=lambda: runtime_builds.cancelled(action_id, ctx.executor_id),
+        )
+    except Exception:
+        logger.exception("Preview worker %s failed", action_id)
+        runtime_builds.submission_failed(action_id, ctx.executor_id, "worker exited unexpectedly")
+    finally:
+        try:
+            runtime_builds.release(action_id, ctx.executor_id)
+        finally:
+            ctx.registry.remove(action_id, entry)
+            close_db()
+
+
 def run_post_run(ctx: WorkerContext) -> None:
     """Claim and run one pending experiment post-run (analyses, then the report)."""
     try:
@@ -102,5 +128,17 @@ def run_schedule_action(schedule_id: int) -> None:
         logger.debug("run_schedule_action is not implemented yet")
     except Exception:
         logger.exception("Schedule %s failed", schedule_id)
+    finally:
+        close_db()
+
+
+def cleanup_sample_images() -> None:
+    """Run cache GC away from the leader loop and heartbeat."""
+    try:
+        from backend.runtime.services.sample_builds import cleanup_sample_images as cleanup
+
+        cleanup()
+    except Exception:
+        logger.exception("Sample image cache cleanup failed")
     finally:
         close_db()

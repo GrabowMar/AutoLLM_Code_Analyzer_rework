@@ -138,12 +138,12 @@ def get_container(request: HttpRequest, container_id: str):
     "/jobs/{job_id}/build/",
     response={200: ContainerInstanceSchema, 400: GenericResponse, 503: GenericResponse},
 )
-def build_container_for_job(request: HttpRequest, job_id: str):
+def build_container_for_job(request: HttpRequest, job_id: str, force_rebuild: bool = False):
     """Kick off a container build for the given generation job."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
     job = get_object_or_404(_job_qs(request.auth), id=job_id)
-    instance = container_service.build_for_job(job, request.auth)
+    instance = container_service.build_for_job(job, request.auth, force_rebuild=force_rebuild)
     return 200, instance
 
 

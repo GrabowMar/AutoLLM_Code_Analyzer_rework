@@ -44,6 +44,7 @@ from django.utils import timezone
 
 from backend.execution import capacity
 from backend.execution import reconciler
+from backend.execution import runtime_builds
 from backend.execution import transitions
 from backend.execution import workers
 from backend.execution.api import WAKE_KEY
@@ -65,6 +66,7 @@ SCHEDULE_THREADS = 1  # schedule actions (top up / replicates / clone): short DB
 CAPACITY_EVENT_EVERY_S = 5.0
 SHUTDOWN_LLM_GRACE_S = 20.0
 ORPHAN_EVERY_N_RECONCILES = 4
+SAMPLE_CACHE_GC_EVERY_S = 3600.0
 
 S = GenerationJob.Status
 
@@ -306,7 +308,9 @@ class Executor:
         )
         logger.info("Executor %s is leader (code %s)", self.executor_id, self.code_version[:12])
         report = reconciler.reconcile(self.executor_id, self.registry, docker_factory=self._docker_factory)
+        runtime_builds.recover(self.executor_id, [])
         self._last["reconcile"] = time.monotonic()
+        self._last["sample_cache_gc"] = time.monotonic()
         if report.expired or report.lost:
             logger.info("Startup reconcile: %s expired, %s lost", report.expired, report.lost)
         self._start_thread("heartbeat", self._heartbeat_loop)
@@ -380,6 +384,9 @@ class Executor:
         now = timezone.now()
         with transaction.atomic():
             GenerationJob.objects.filter(lease_owner=self.executor_id).update(lease_expires_at=now)
+            from backend.execution.models import RuntimeBuildLease
+
+            RuntimeBuildLease.objects.filter(owner=self.executor_id).update(expires_at=now)
             ExperimentPostRun.objects.filter(lease_owner=self.executor_id).update(lease_expires_at=now)
             LLMRequest.objects.filter(status=LLMRequest.Status.LEASED, pump_owner=self.executor_id).update(
                 lease_expires_at=now,
@@ -441,10 +448,20 @@ class Executor:
         self.slots = capacity.effective_slots(ExecutorSettings.get())
         self._resize_pools(self.slots)
         reconciler.requeue_lost(self.executor_id, self.registry)
+        runtime_builds.recover(
+            self.executor_id,
+            [entry.job_id for entry in self.registry.entries() if entry.lane == "preview"],
+        )
         free = {name: pool.free() for name, pool in self.pools.items()}
         result = self.scheduler.tick(self.slots, free)
         for claimed in result.claimed:
             self._submit(claimed)
+        for action_id in result.preview_builds:
+            try:
+                self.pools["eval"].submit(workers.run_preview_build, self.ctx, action_id)
+            except Exception as exc:
+                logger.exception("Submitting preview build %s failed", action_id)
+                runtime_builds.submission_failed(action_id, self.executor_id, str(exc))
         now = time.monotonic()
         if now - self._last.get("reconcile", 0) >= RECONCILE_EVERY_S:
             self._last["reconcile"] = now
@@ -461,6 +478,14 @@ class Executor:
         if now - self._last.get("purge", 0) >= PURGE_EVERY_S:
             self._last["purge"] = now
             self._purge()
+        if (
+            now - self._last.get("sample_cache_gc", now) >= SAMPLE_CACHE_GC_EVERY_S
+            and self.pools["eval"].idle()
+            and self.pools["sandbox"].idle()
+            and self.pools["schedule"].free()
+        ):
+            self._last["sample_cache_gc"] = now
+            self.pools["schedule"].submit(workers.cleanup_sample_images)
         self._publish(result)
         return result
 
@@ -533,11 +558,7 @@ class Executor:
         if post.free() <= 0 or not claimable_post_runs().exists():
             return
         if self.slots.defer_post_runs:
-            snap_busy = (
-                self.pools["sandbox"].free() == 0
-                and self.pools["eval"].free() == 0
-                and (self.slots.sandbox_slots + self.slots.eval_slots) > 0
-            )
+            snap_busy = not self.pools["sandbox"].idle() or not self.pools["eval"].idle()
             if snap_busy:
                 return
         with contextlib.suppress(PoolFullError):
@@ -555,6 +576,13 @@ class Executor:
 
     def _idle(self) -> bool:
         if any(not pool.idle() for pool in self.pools.values()):
+            return False
+        from backend.runtime.models import ContainerAction
+
+        if ContainerAction.objects.filter(
+            action_type=ContainerAction.ActionType.BUILD,
+            status__in=[ContainerAction.Status.PENDING, ContainerAction.Status.RUNNING],
+        ).exists():
             return False
         from backend.generation.models import ExperimentPostRun
 
@@ -611,6 +639,10 @@ class Executor:
                 lease_owner=self.executor_id,
                 status=ExperimentPostRun.Status.RUNNING,
             ).update(lease_expires_at=now + lease)
+        runtime_builds.renew(
+            self.executor_id,
+            [entry.job_id for entry in self.registry.entries() if entry.lane == "preview"],
+        )
         return renewed
 
     def _status_config(self) -> dict[str, Any]:

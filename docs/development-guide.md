@@ -58,7 +58,7 @@ Other settings read from the environment, with their defaults (`config/settings/
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ACCOUNT_EMAIL_VERIFICATION` | `optional` (local), `mandatory` (production) | allauth email verification |
+| `ACCOUNT_EMAIL_VERIFICATION` | `mandatory` | Require the confirmation link before login; local development can opt into `optional` |
 | `DJANGO_ACCOUNT_ALLOW_REGISTRATION` | `True` | Allow self sign-up |
 | `GENERATION_DEFAULT_STACK` | `flask-react` | Stack used when neither the request nor its profile names one |
 | `AGENT_DEFAULT_HARNESS` | `opencode` | Harness for agent runs (`opencode`, `mini-swe-agent`, `aider`) |
@@ -69,6 +69,7 @@ Other settings read from the environment, with their defaults (`config/settings/
 | `AGENT_NETWORK_POLICY`, `AGENT_SAMPLING_POLICY` | `packages`, `provider_default` | Sandbox egress and sampling defaults |
 | `EXECUTOR_TICK_SECONDS`, `EXECUTOR_LEASE_SECONDS`, `EXECUTOR_HEARTBEAT_SECONDS` | `2.0`, `90`, `20` | Executor loop timing |
 | `APPS_DIND_MEM_LIMIT`, `APPS_DIND_APP_RESERVE` | `4g`, `1g` | Memory rule for executor slots; keep the first equal to apps-dind's `mem_limit` |
+| `SAMPLE_BUILD_BACKEND`, `SAMPLE_BUILD_MEMORY`, `SAMPLE_BUILD_CPUS` | `buildkit`, `1536m`, `2` | Cached sample builds and resource caps ([Sample builds](/docs/SAMPLE_BUILDS)) |
 | `ANALYSIS_MAX_WORKERS` | `4` | Analyzer tools run in parallel per analysis run |
 | `LLM_LOCAL_AGENT_RUNS` | on when `APPS_DOCKER_HOST` is set | Allow agent runs on local (non-OpenRouter) endpoints |
 | `INFERENCE_DIRECT_ALLOWED_TARGETS`, `INFERENCE_HOST_PUBLIC_IPS`, `INFERENCE_EXTRA_BLOCKED_CIDRS` | empty | Direct-endpoint allow and block lists ([Local models](/docs/LOCAL_MODELS)) |
