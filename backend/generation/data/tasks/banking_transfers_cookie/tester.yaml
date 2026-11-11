@@ -1,0 +1,41 @@
+schema: 1
+notes: |
+  Instrument overlay for banking_transfers_cookie (eval-v2@2). No sample, no endpoint patch, no skip and
+  no expectation change. Compiler v2 already samples a valid transfer everywhere
+  (`to_username: {user_c_username}` = an existing third account that never acts in the plan,
+  `amount: 1.0`, `memo` within 140 characters) and targets `memo` in `.invalid.too_long`; the v1 artefact
+  (recipient "llmlab to_username" does not exist) is gone without an overlay.
+
+  The single entry repairs the prerequisite of the hand-written check `transfers.insufficient`
+  (setup and recipient only; `expect: {status: 409}` is unchanged):
+    The check needs a recipient that is "another existing account" (exhaustive prose, Validation:
+    "`to_username` required, the recipient's username (another existing account)"). As written in the
+    frozen task.yaml it obtains one by registering the fixed account
+    {"username": "zz_recipient", "password": "s3cret-pass"} in a setup step sent with user_b's credential.
+    The spec states no password policy ("`password` is required"), so a stricter but reasonable app may
+    refuse this lower-case password, and it may refuse a registration sent by an already signed-in
+    client; the setup would then fail and the check would be failed for a reason unrelated to the balance
+    rule (P2). The fixed username also makes the step depend on earlier state (hence its [201, 409]).
+    The recipient is replaced by `{user_c_username}`: the account the tester registers itself with its
+    own conventional credentials and the same recipient every compiled transfer of this plan uses. It is
+    not user_a (the sender), and it never reads a transfer, so no ownership check is affected.
+    The request stays POST /api/transfers with amount 1000.01 (a valid amount: two decimals, <= 10000)
+    against a balance of at most 1000.00 (all variants: "Every new account starts with a balance of
+    1000.00; money moves only through transfers"; user_a only ever sends), so the only rule the request
+    breaks is the balance rule ("409 when the balance is too low", exhaustive prose).
+    Not fitted to an app: both Claude apps accept the original setup; they answer the request the same
+    way (400) with and without the patch.
+checks:
+  transfers.insufficient:
+    why: >-
+      Prerequisite repair, expectation unchanged (409). The recipient must be "another existing account"
+      (exhaustive prose, Validation). The hand-written setup creates it by registering a fixed username
+      with the password "s3cret-pass" through a signed-in client; the spec states no password policy, so
+      a stricter but reasonable app can refuse that registration and the check would then fail for a
+      reason unrelated to the balance rule (P2). The recipient becomes {user_c_username}, the existing
+      third account that every compiled transfer of this plan uses; the setup step is dropped. Method,
+      path and amount (1000.01 against a starting balance of 1000.00) are unchanged.
+    setup: []
+    request:
+      json:
+        to_username: "{user_c_username}"

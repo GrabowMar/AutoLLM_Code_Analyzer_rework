@@ -14,6 +14,9 @@ endpoint actually called, so it is used instead of the catalog twin's OpenRouter
 always win. It does **not** set ``supports_reasoning``: the gateway forwards the policy's reasoning control
 as OpenRouter's ``reasoning`` object, which OpenCode Go accepts and ignores (it honours ``reasoning_effort``),
 so the policy keeps clamping such a model to ``provider_default`` and the recorded treatment stays true.
+``metadata.supports_reasoning`` (set by ``manage.py go_reasoning_effort``) overrides that; its companion
+``metadata.reasoning_modes`` (``["effort"]``) limits which forced modes the policy keeps
+(``extra["reasoning_modes"]``).
 """
 
 from __future__ import annotations
@@ -200,6 +203,11 @@ def _from_row(model: Any) -> ModelFacts:
             extra = {"capability_source": served["source"]}
             if "reasoning_options" in served:
                 extra["reasoning_options"] = served["reasoning_options"]
+    modes = meta.get("reasoning_modes")
+    if isinstance(modes, list) and modes and all(isinstance(m, str) for m in modes):
+        # The reasoning modes the route honours (``go_reasoning_effort`` writes ``["effort"]``): the policy
+        # clamps any other forced mode to provider default (OpenCode Go takes only ``reasoning_effort``).
+        extra = {**extra, "reasoning_modes": sorted(set(modes))}
     return ModelFacts(
         slug=slug,
         family=family,

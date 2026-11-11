@@ -31,7 +31,8 @@ def test_task_directories_hold_only_the_documented_layout():
     for slug in SLUGS:
         directory = content.TASKS_ROOT / slug
         names = {path.name for path in directory.iterdir() if path.name != "__pycache__"}
-        assert names <= {"task.yaml", "prose", "reference"}, slug
+        # ``tester.yaml``: the instrument overlay of the acceptance compiler (never part of the task content)
+        assert names <= {"task.yaml", "prose", "reference", "tester.yaml"}, slug
         assert {path.name for path in (directory / "prose").iterdir()} == {f"{v}.md" for v in PROSE_VARIANTS}, slug
 
 

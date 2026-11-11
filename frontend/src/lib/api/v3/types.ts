@@ -1984,6 +1984,22 @@ export interface AdhocOut {
   [key: string]: unknown;
 }
 
+/** `POST /studies/dry-run/` (`launch.dry_run`): resolve a design and render its cells; nothing is kept. */
+export interface DryRunIn {
+  design: Design;
+  /** 1–12 (default 12): how many cells get the full detail. */
+  max_cells?: number;
+}
+
+export interface DryRunOut {
+  /** The resolved plan (`persisted` is always false; `cells_sample` is empty). */
+  plan: PlanOut;
+  /** Full detail of the first `max_cells` cells, in plan order. */
+  cells: ResolvedCellDetailOut[];
+  /** More cells exist than were rendered. */
+  truncated: boolean;
+}
+
 // ── Budget (9.8, 4.7) ──────────────────────────────────────────────────────
 
 /** `GET /budget/studies/{id}/` (`budget/report.py:study_payload`). */
@@ -2317,8 +2333,42 @@ export interface RunListQuery {
   model?: string;
   usable?: boolean;
   beyond_plan?: boolean;
+  /** Task slug, model id or run id prefix (case-insensitive). */
+  q?: string;
+  /** One status or a comma list. */
+  status?: string;
+  /** Task slug. */
+  task?: string;
+  /** Harness preset `slug@version` (or a bare slug). */
+  harness?: string;
+  /** Stack profile `slug@version` (or a bare slug). */
+  stack?: string;
+  /** created (default, newest first) | pass_rate | cost | wall; a leading "-" sorts descending. */
+  sort?: string;
   page?: number;
   page_size?: number;
+}
+
+export interface RunFacetValue {
+  value: string;
+  label: string;
+  count: number;
+}
+
+/** `GET /runs/facets/`: filter values with counts (each facet ignores its own filter) and a summary. */
+export interface RunFacetsOut {
+  summary: {
+    total: number;
+    tested: number;
+    measured: number;
+    mean_pass_rate: number | null;
+  };
+  outcomes: RunFacetValue[];
+  models: RunFacetValue[];
+  tasks: RunFacetValue[];
+  harnesses: RunFacetValue[];
+  stacks: RunFacetValue[];
+  studies: RunFacetValue[];
 }
 
 export interface RunAttemptOut {
@@ -2421,6 +2471,8 @@ export interface EvalProbeResult {
     | "positive_control_failed"
     | "disabled"
     | "level"
+    | "not_applicable"
+    | "not_measurable"
     | null;
 }
 

@@ -18,9 +18,18 @@ from typing import Any
 from typing import Literal
 from uuid import UUID
 
+from django.db.models import Avg
+from django.db.models import Case
 from django.db.models import CharField
+from django.db.models import Count
+from django.db.models import F
+from django.db.models import FloatField
 from django.db.models import Q
 from django.db.models import QuerySet
+from django.db.models import Value
+from django.db.models import When
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.fields.json import KeyTransform
 from django.db.models.functions import Cast
 from django.http import HttpRequest
 from django.http import HttpResponse
@@ -39,10 +48,13 @@ from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationRun
 from backend.generation.models import RunAttempt
 from backend.generation.models import RunEvaluation
+from backend.generation.models import TaskSpecVersion
+from backend.generation.models.choices import Outcome
 from backend.generation.models.choices import RunStatus
 from backend.generation.runs.view import RunView
 from backend.generation.runs.view import run_view
 from backend.generation.runs.view import run_views
+from backend.generation.services import token_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -237,8 +249,37 @@ class RunFilters(Schema):
     model: str | None = None
     usable: bool | None = None
     beyond_plan: bool | None = None
+    task: str | None = None  # task slug
+    harness: str | None = None  # harness preset ``slug@version`` (or a bare slug: every version)
+    stack: str | None = None  # stack profile ``slug@version`` (or a bare slug)
+    # created (default, newest first), pass_rate, cost or wall; a leading "-" sorts descending
+    sort: str | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(50, ge=1, le=PAGE_SIZE_MAX)
+
+
+class FacetValueOut(Schema):
+    value: str
+    label: str
+    count: int
+
+
+class RunFacetsSummaryOut(Schema):
+    total: int
+    tested: int
+    # agent pass rate over measured runs (``null`` when none is measured; never a 0 stand-in)
+    measured: int
+    mean_pass_rate: float | None = None
+
+
+class RunFacetsOut(Schema):
+    summary: RunFacetsSummaryOut
+    outcomes: list[FacetValueOut]
+    models: list[FacetValueOut]
+    tasks: list[FacetValueOut]
+    harnesses: list[FacetValueOut]
+    stacks: list[FacetValueOut]
+    studies: list[FacetValueOut]
 
 
 # =====================================================================================
@@ -371,9 +412,46 @@ def _refused(exc: actions.ActionRefused) -> Status:
 # =====================================================================================
 
 
-@router.get("/runs/", response={200: RunPageOut, 400: ErrorOut})
-def list_runs(request: HttpRequest, filters: Query[RunFilters]) -> Any:
-    """Runs visible to the caller, newest first, filtered and paginated."""
+def _metric(*path: str) -> Cast:
+    """A numeric metrics value; JSON null / missing become SQL NULL (so they sort last, not first)."""
+    expr: Any = "metrics"
+    for key in path[:-1]:
+        expr = KeyTransform(key, expr)
+    return Cast(KeyTextTransform(path[-1], expr), FloatField())
+
+
+def _sort_expr(name: str) -> Any:
+    """Sort keys of ``GET /runs/?sort=``. The pass rate counts only measured evaluations, as in the rows."""
+    if name == "created":
+        return F("created_at")
+    if name == "pass_rate":
+        return Case(
+            When(
+                metrics__eval__status="measured",
+                metrics__eval__measured=True,
+                then=_metric("eval", "agent_pass_rate"),
+            ),
+            default=Value(None),
+            output_field=FloatField(),
+        )
+    if name == "cost":
+        return _metric("cost_usd")
+    if name == "wall":
+        return _metric("wall_s")
+    return None
+
+
+def _ref_filter(runs: QuerySet[GenerationRun], field: str, ref: str) -> QuerySet[GenerationRun]:
+    """``slug@version`` pins one library version; a bare slug matches every version."""
+    slug, _, version = ref.strip().partition("@")
+    runs = runs.filter(**{f"{field}__slug": slug})
+    if version:
+        runs = runs.filter(**{f"{field}__version": int(version)}) if version.isdigit() else runs.none()
+    return runs
+
+
+def _filtered(request: HttpRequest, filters: RunFilters) -> QuerySet[GenerationRun] | Status:
+    """The caller's runs with every list filter applied (no ordering, no paging)."""
     runs = _visible(request)
     if filters.status:
         statuses = [part.strip() for part in filters.status.split(",") if part.strip()]
@@ -397,13 +475,97 @@ def list_runs(request: HttpRequest, filters: Query[RunFilters]) -> Any:
         runs = runs.filter(usable=filters.usable)
     if filters.beyond_plan is not None:
         runs = runs.filter(beyond_plan=filters.beyond_plan)
-    runs = runs.order_by("-created_at", "pk")
+    if filters.task:
+        runs = runs.filter(task_version__task__slug=filters.task.strip())
+    if filters.harness:
+        runs = _ref_filter(runs, "harness_preset", filters.harness)
+    if filters.stack:
+        runs = _ref_filter(runs, "stack_profile", filters.stack)
+    return runs
+
+
+@router.get("/runs/", response={200: RunPageOut, 400: ErrorOut})
+def list_runs(request: HttpRequest, filters: Query[RunFilters]) -> Any:
+    """Runs visible to the caller, newest first (or ``sort``), filtered and paginated."""
+    runs = _filtered(request, filters)
+    if isinstance(runs, Status):
+        return runs
+    key = (filters.sort or "-created").strip()
+    descending = key.startswith("-")
+    expr = _sort_expr(key.lstrip("-"))
+    if expr is None:
+        return Status(400, {"detail": f"unknown sort: {key}", "code": "invalid_filter"})
+    order = expr.desc(nulls_last=True) if descending else expr.asc(nulls_last=True)
+    runs = runs.order_by(order, "-created_at", "pk")
     total = runs.count()
     start = (filters.page - 1) * filters.page_size
     page = list(runs[start : start + filters.page_size])
     views = run_views(page)
     items = [_list_item(view) for view in views]
     return {"items": items, "total": total, "page": filters.page, "page_size": filters.page_size}
+
+
+@router.get("/runs/facets/", response={200: RunFacetsOut, 400: ErrorOut})
+def run_facets(request: HttpRequest, filters: Query[RunFilters]) -> Any:
+    """Filter values with counts for the runs list, plus a summary, over the caller's filtered runs.
+
+    Each facet ignores its own filter (so a chosen outcome still lists the other outcomes with their counts);
+    paging and sorting are ignored.
+    """
+
+    def scope(**drop: Any) -> QuerySet[GenerationRun] | Status:
+        return _filtered(request, filters.model_copy(update=drop))
+
+    base = scope()
+    if isinstance(base, Status):
+        return base
+
+    def counts(qs: QuerySet[GenerationRun] | Status, *fields: str) -> list[tuple[tuple[Any, ...], int]]:
+        if isinstance(qs, Status):
+            return []
+        rows = qs.values(*fields).annotate(n=Count("id")).order_by("-n")
+        return [(tuple(row[f] for f in fields), row["n"]) for row in rows if row[fields[0]] not in (None, "")]
+
+    outcomes = [{"value": v[0], "label": v[0], "count": n} for v, n in counts(scope(outcome=None), "outcome")]
+    models = [{"value": v[0], "label": v[0], "count": n} for v, n in counts(scope(model=None), "model__model_id")]
+    task_rows = counts(scope(task=None), "task_version__task__slug")
+    titles: dict[str, str] = {}
+    for version in TaskSpecVersion.objects.filter(task__slug__in=[v[0] for v, _ in task_rows]).order_by("version"):
+        titles[version.task.slug] = (version.content or {}).get("title") or version.name or version.task.slug
+    tasks = [{"value": v[0], "label": titles.get(v[0], v[0]), "count": n} for v, n in task_rows]
+    harnesses = [
+        {"value": f"{v[0]}@{v[1]}", "label": f"{v[0]}@{v[1]}", "count": n}
+        for v, n in counts(scope(harness=None), "harness_preset__slug", "harness_preset__version")
+    ]
+    stacks = [
+        {"value": f"{v[0]}@{v[1]}", "label": f"{v[0]}@{v[1]}", "count": n}
+        for v, n in counts(scope(stack=None), "stack_profile__slug", "stack_profile__version")
+    ]
+    studies = [
+        {"value": str(v[0]), "label": v[1] or str(v[0]), "count": n}
+        for v, n in counts(scope(study=None), "study_id", "study__name")
+    ]
+
+    measured = base.filter(metrics__eval__status="measured", metrics__eval__measured=True)
+    agg = measured.aggregate(
+        n=Count("id"),
+        mean=Avg(_metric("eval", "agent_pass_rate")),
+    )
+    summary = {
+        "total": base.count(),
+        "tested": base.filter(outcome=Outcome.TESTED).count(),
+        "measured": agg["n"] or 0,
+        "mean_pass_rate": agg["mean"] if agg["n"] else None,
+    }
+    return {
+        "summary": summary,
+        "outcomes": outcomes,
+        "models": models,
+        "tasks": tasks,
+        "harnesses": harnesses,
+        "stacks": stacks,
+        "studies": studies,
+    }
 
 
 @router.get("/runs/{run_id}/", response={200: RunOut, 404: ErrorOut})
@@ -600,7 +762,9 @@ def list_run_calls(request: HttpRequest, run_id: UUID, attempt: int | None = Non
                 "provider": telemetry.get("provider"),
                 "response_model": telemetry.get("response_model"),
                 "ms": round(duration * 1000, 3) if duration is not None else None,
-                "tokens_per_s": _number(telemetry.get("tokens_per_s")),
+                # Derived on read (services.token_metrics): the end-to-end output rate, never a stored
+                # value an older runner copied from the gateway.
+                "tokens_per_s": token_metrics.telemetry_tokens_per_s(telemetry),
                 "front_protocol": telemetry.get("front_protocol"),
                 "protocol_mode": telemetry.get("protocol_mode"),
                 "serving_tier": telemetry.get("serving_tier"),

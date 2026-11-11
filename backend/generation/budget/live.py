@@ -3,7 +3,8 @@
 The sandbox supervisor (WP-08) calls :func:`poll` every :func:`poll_interval_s` seconds for a running
 attempt, passing the parsed ``state.json`` (or a reader such as :func:`docker_state_reader`). ``poll``
 turns the gateway's running totals into ledger ``usage`` deltas: the delta is the state minus what the
-ledger already holds for that attempt's live rows, written as ``live:{run}:{a}:{seq}``. Two concurrent
+ledger already holds for that attempt's live and proxy rows (a gateway call through the local proxy is
+booked by the proxy too), written as ``live:{run}:{a}:{seq}``. Two concurrent
 polls compute the same ``seq`` and the second write is a no-op, so usage is never counted twice. The
 final settlement (``ledger.settle_attempt``) replaces the live deltas with the billed total.
 
@@ -118,7 +119,16 @@ def _record(
 ) -> dict[str, Any]:
     a = attempt
     live = SpendLedgerEntry.objects.filter(run=run, attempt=a, kind=LedgerKind.USAGE, source=LedgerSource.GATEWAY_LIVE)
-    agg = live.aggregate(
+    # The gateway's totals include the calls it sent through the local LLM proxy, which the proxy already
+    # booked per request (``proxy:{id}``, :func:`record_proxy_usage`): the delta is the state minus every
+    # usage row of the attempt, so a proxied call is never counted twice while the run is in flight.
+    booked = SpendLedgerEntry.objects.filter(
+        run=run,
+        attempt=a,
+        kind=LedgerKind.USAGE,
+        source__in=(LedgerSource.GATEWAY_LIVE, LedgerSource.PROXY),
+    )
+    agg = booked.aggregate(
         s=Sum("amount_usd"),
         lst=Sum("list_cost_usd"),
         tin=Sum("tokens_in"),
@@ -165,8 +175,9 @@ def _record(
 
 
 def record_proxy_usage(llm_request: Any, *, publish: bool = True) -> SpendLedgerEntry | None:
-    """Usage of one completed local-proxy request (``proxy:{id}``): 0 billed USD, list price per the
-    manifest pricing, tokens against token caps. ``None`` for requests without a run."""
+    """Usage of one completed local-proxy request (``proxy:{id}``): the list price per the manifest pricing
+    (cache-aware when it freezes cache prices), billed for a ``billed`` endpoint and 0 billed USD for
+    ``free`` / ``list_price`` ones, tokens against token caps. ``None`` for requests without a run."""
     run_id = getattr(llm_request, "job_id", None)
     if run_id is None:
         return None
@@ -175,8 +186,7 @@ def record_proxy_usage(llm_request: Any, *, publish: bool = True) -> SpendLedger
         return None
     prompt = int(getattr(llm_request, "prompt_tokens", 0) or 0)
     completion = int(getattr(llm_request, "completion_tokens", 0) or 0)
-    pricing = ledger._pricing(run)  # noqa: SLF001
-    list_cost = (prompt * pricing[0] + completion * pricing[1]) / 1_000_000 if pricing else 0.0
+    list_cost = _proxy_list_cost(run, llm_request, prompt, completion)
     basis = _cost_basis(run)
     billed = 0.0 if basis in ("free", "list_price") else list_cost
     before = ledger.study_totals(run.study_id) if run.study_id else None
@@ -194,6 +204,40 @@ def record_proxy_usage(llm_request: Any, *, publish: bool = True) -> SpendLedger
     if publish:
         publish_spend(run, delta=billed if (before and before.cap_basis == "billed") else list_cost, before=before)
     return entry
+
+
+def _proxy_list_cost(run: GenerationRun, llm_request: Any, prompt: int, completion: int) -> float:
+    """The list cost of one proxied request at the manifest's frozen pricing, cache-aware.
+
+    With cache-read / cache-write prices in the manifest (the native Anthropic route), the response's
+    ``prompt_tokens_details`` split is priced by the gateway's own ``budget_rules.Pricing``; without them
+    this is ``prompt * input + completion * output``, as before.
+    """
+    pricing = ledger._pricing(run)  # noqa: SLF001
+    if not pricing:
+        return 0.0
+    frozen = ((run.manifest.manifest or {}).get("model") or {}).get("pricing") or {}
+    cached_price = frozen.get("cached_input_per_mtok")
+    write_price = frozen.get("cache_write_per_mtok")
+    response = getattr(llm_request, "response", None)
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if (cached_price is None and write_price is None) or not isinstance(usage, dict):
+        return (prompt * pricing[0] + completion * pricing[1]) / 1_000_000
+    from backend.inference.proxy_server import budget_rules
+
+    rules = budget_rules()
+    split = rules.chat_usage(usage) or {}
+    return rules.Pricing(
+        input_per_mtok=pricing[0],
+        output_per_mtok=pricing[1],
+        cached_input_per_mtok=None if cached_price is None else float(cached_price),
+        cache_write_per_mtok=None if write_price is None else float(write_price),
+    ).price(
+        int(split.get("prompt_tokens") or prompt),
+        int(split.get("completion_tokens") or completion),
+        int(split.get("cached_tokens") or 0),
+        int(split.get("cache_write_tokens") or 0),
+    )
 
 
 def publish_spend(run: GenerationRun, *, delta: float, before: ledger.StudyTotals | None = None) -> None:

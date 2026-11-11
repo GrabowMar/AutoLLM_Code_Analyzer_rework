@@ -94,7 +94,7 @@ Path-proxy mode (the local default, `APPS_PROXY_PATH=True`) serves the app under
 
 ### apps-dind runs out of memory or disk
 
-apps-dind is capped at `APPS_DIND_MEM_LIMIT` (4 GB) and hosts sample apps, agent sandboxes (3 GB each by default) and analyzer workspaces together. Stop apps you no longer need before agent runs. It prunes unused images older than a week every hour; to reclaim more, `docker compose exec apps-dind docker system prune`.
+apps-dind is capped at `APPS_DIND_MEM_LIMIT` (4 GB) and hosts sample apps, agent sandboxes (3 GB each by default) and analyzer workspaces together. Stop apps you no longer need before agent runs. It does not prune images by default (pinned evaluation and base images would be lost; `APPS_DIND_IMAGE_PRUNE=1` turns the hourly week-old prune on). To reclaim space remove images by name; `docker system prune` there also deletes the pinned images.
 
 ### Webhooks are not delivered
 

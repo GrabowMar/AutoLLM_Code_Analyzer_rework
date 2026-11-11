@@ -102,6 +102,19 @@ _LINT_CLASSES: dict[str, str] = {
     "eslint-security:security/detect-non-literal-regexp": "redos",
     "eslint-security:security/detect-unsafe-regex": "redos",
     "eslint-security:security/detect-non-literal-fs-filename": "path-traversal",
+    # CodeQL rules whose first CWE tag differs from the class the other tools use
+    # (its security rules otherwise match on that CWE, see _CWE_CLASSES).
+    "codeql:py/unused-import": "unused-import",
+    "codeql:py/unused-local-variable": "unused-variable",
+    "codeql:py/unused-global-variable": "unused-variable",
+    "codeql:js/unused-local-variable": "unused-variable",
+    "codeql:py/unreachable-statement": "unreachable-code",
+    "codeql:js/unreachable-statement": "unreachable-code",
+    "codeql:py/empty-except": "try-except-pass",
+    "codeql:py/flask-debug": "flask-debug",
+    "codeql:py/bind-socket-all-network-interfaces": "bind-all-interfaces",
+    "codeql:py/code-injection": "eval-used",
+    "codeql:js/code-injection": "eval-used",
     # A file the linter could not parse: several linters report the one broken file.
     "ruff:syntax-error": "syntax-error",
     "ruff:invalid-syntax": "syntax-error",

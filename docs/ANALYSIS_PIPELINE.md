@@ -36,7 +36,7 @@ Container tools never run on the host. Each user gets one long-lived container (
 | Property | Value |
 | --- | --- |
 | Capabilities | all dropped, `no-new-privileges` |
-| Limits | 1 GB memory, 1 CPU, 256 PIDs |
+| Limits | 2 GB memory, 2 CPUs (`ANALYZER_WORKSPACE_MEMORY`, `ANALYZER_WORKSPACE_CPUS`; applied when the workspace is provisioned), 256 PIDs |
 | Ports | none published |
 | Network | `DOCKER_APPS_NETWORK` when set, else the daemon's default bridge (installs and advisory databases need outbound access) |
 
@@ -213,7 +213,8 @@ These are bug fixes to metric definitions, not new metrics. Results and reports 
 
 ## Known limits
 
-- ESLint, eslint-security and eslint-react read `.js`, `.jsx`, `.cjs` and `.mjs` only. `.ts`/`.tsx` files reach only Semgrep and Lizard, and `.vue`/`.svelte` single-file components are counted in LOC but linted by no tool, which understates issue density for those stacks.
+- The ESLint tools (eslint, eslint-security, eslint-react, eslint-a11y, eslint-sonarjs) parse TypeScript with `@typescript-eslint/parser` but without type information: the app's `node_modules` are not installed in the workspace, so type-aware rules do not run. `.vue`/`.svelte` single-file components are counted in LOC but linted by no tool, which understates issue density for those stacks.
+- CodeQL extracts Python and JavaScript/TypeScript from source (`--build-mode=none`) without the app's dependencies; flows through third-party packages are modelled only where CodeQL ships a model for the library (Flask, SQLAlchemy, React and the other common ones).
 - DAST crawls only what is linked from the start page. ZAP's spider and Wapiti's crawler do not run JavaScript, and Nuclei requests only its templates' paths, so the API endpoints of a React or Vue single-page app are not exercised and DAST results are mostly header checks. Study tables count them as runtime issues, apart from code issues.
 - osv-scanner and Trivy read npm dependencies only from a lockfile; a `package.json` without one is listed in the result's warnings. Retire.js reads only `.js` files and `bower.json`: a library loaded from a CDN by a script tag is not checked.
 - Mypy runs without the app's dependencies installed, so an ORM base class held in a variable is `Any`. `Name "db.Model" is not defined` and the `valid-type` + `Invalid base class` pair on a `declarative_base()` model class are dropped and counted in a warning on the result; other errors that involve third-party types can still be missed.

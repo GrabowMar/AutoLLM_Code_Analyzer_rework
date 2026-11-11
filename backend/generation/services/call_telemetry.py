@@ -13,6 +13,7 @@ an absent key (or ``None``) means *unknown*, never zero::
      "error": {"status", "code", "message"},          # failed calls only
      "failed_attempts": [{"status", "kind"}],          # template calls, retried attempts
      "local": {...},                                   # proxied/local calls (LLMRequest)
+     "upstream": {"api": "anthropic_messages", "effort", ...},  # native Anthropic route
      "openrouter": {...}}                              # services.openrouter_stats
 
 Sources:
@@ -27,6 +28,12 @@ Sources:
 * ``local_from_llm_request`` / ``from_llm_request`` -- the executor proxy's
   ``LLMRequest`` row of a local/proxied call (OpenCode Go, Ollama, ...).
   :func:`link_llm_requests` pairs agent gateway calls with those rows.
+* ``agentic.runner.call_telemetry`` -- a v3 agent run's gateway call. Besides
+  the keys above it stores ``rate_wait_s`` (time in the gateway's rate
+  limiter, part of ``duration_s``), ``first_byte_ms`` (time to the first
+  upstream byte of any kind: not a time to first token) and the derived
+  ``tokens_per_s`` with ``tokens_per_s_basis: "e2e"``; the definition is in
+  :mod:`backend.generation.services.token_metrics`.
 
 ``cost`` is the billed amount the response reported (``usage.cost``: 0.0 on
 subscription/local endpoints, whose list price, when the provider reports one,
@@ -42,6 +49,8 @@ from datetime import UTC
 from datetime import datetime
 from typing import Any
 from typing import Self
+
+from backend.generation.services import token_metrics
 
 SCHEMA = 1
 # Retry slack when pairing a gateway call with its proxy request (seconds).
@@ -120,6 +129,34 @@ def _billing(out: dict[str, Any], usage: dict[str, Any]) -> None:
         # reports what the call would cost at list price.
         out["list_cost"] = _num(opencode.get("list_cost"))
         _put(out, "billing_source", opencode.get("billing_source"))
+    _anthropic(out, usage)
+
+
+# What the native Anthropic route chose for a call (``usage.anthropic.request``), kept in telemetry.
+_ANTHROPIC_REQUEST_KEYS = (
+    "effort",
+    "effort_source",
+    "effort_clamped",
+    "thinking",
+    "thinking_replay",
+    "tool_choice",
+    "cache",
+    "stripped",
+)
+
+
+def _anthropic(out: dict[str, Any], usage: dict[str, Any]) -> None:
+    """``upstream`` of a call proxied to Anthropic's native Messages API (effort, cache, stop reason)."""
+    native = usage.get("anthropic")
+    if not isinstance(native, dict):
+        return
+    request = native.get("request") if isinstance(native.get("request"), dict) else {}
+    upstream: dict[str, Any] = {"api": "anthropic_messages"}
+    for key in _ANTHROPIC_REQUEST_KEYS:
+        _put(upstream, key, request.get(key))
+    _put(upstream, "stop_reason", native.get("stop_reason"))
+    _put(upstream, "stop_details", native.get("stop_details"))
+    out["upstream"] = upstream
 
 
 def short_error(err: Any, status: int | None = None) -> dict[str, Any]:
@@ -266,6 +303,12 @@ def local_from_llm_request(row: Any) -> dict[str, Any]:
     attempt = _int(getattr(row, "attempt", None))
     if attempt is not None:
         out["relay_attempts"] = attempt + 1
+    # The pump's re-submissions of a transient upstream error (OpenCode Go ``[server_error]``, C1).
+    response = getattr(row, "response", None)
+    retried = response.get("llmlab_upstream_retries") if isinstance(response, dict) else None
+    if isinstance(retried, dict) and _int(retried.get("count")):
+        out["transient_retries"] = _int(retried.get("count"))
+        _put(out, "transient_retry_reason", retried.get("reason"))
     created, leased = getattr(row, "created_at", None), getattr(row, "leased_at", None)
     completed, delivered = getattr(row, "completed_at", None), getattr(row, "delivered_at", None)
     if created and leased:
@@ -412,6 +455,18 @@ def link_llm_requests(calls: list[dict[str, Any]], rows: list[Any]) -> dict[int,
     return links
 
 
+def _response_usage(row: Any) -> dict[str, Any]:
+    """The ``usage`` of a proxy row's stored answer (``{}`` once ``purge_old`` cleared it).
+
+    The gateway's ``calls.jsonl`` keeps only the normalized token counts, so what the native Anthropic route
+    chose for a call (effort, thinking, tool_choice, stripped params, stop reason) survives only here: it is
+    copied into the call's durable telemetry at ingestion, before the row's body and answer are purged.
+    """
+    response = getattr(row, "response", None)
+    usage = response.get("usage") if isinstance(response, dict) else None
+    return usage if isinstance(usage, dict) else {}
+
+
 def proxy_requests(run: Any, attempt: int | None = None) -> list[Any]:
     """The executor-proxy ``LLMRequest`` rows of ``run``'s agent attempt (``attempt`` defaults to the run's)."""
     from backend.inference.models import LLMRequest
@@ -440,6 +495,7 @@ def telemetry_for_calls(run: Any, calls: list[dict[str, Any]]) -> list[dict[str,
             row = links.get(int(call.get("seq") or 0))
             if row is not None:
                 telemetry["local"] = local_from_llm_request(row)
+                _anthropic(telemetry, _response_usage(row))
             out.append(telemetry)
     except Exception:  # noqa: BLE001 - telemetry must never break run ingestion
         logging.getLogger(__name__).warning("Call telemetry for run %s failed", run.pk, exc_info=True)
@@ -650,8 +706,16 @@ def summarize_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
             # Retried calls are left out (their duration includes backoff sleeps),
             # and so are calls whose retry count was not recorded (older gateway).
             durations.append(duration)
-            if completion and duration > 0:
-                e2e.append(completion / duration)
+            rate = None
+            if not token_metrics.flagged_unclean(t):
+                rate = token_metrics.output_tokens_per_s(
+                    completion_tokens=completion,
+                    duration_s=duration,
+                    upstream_retries=retries,
+                    rate_wait_s=t.get("rate_wait_s"),
+                )
+            if rate is not None:
+                e2e.append(rate)
     n = len(calls)
     return {
         "n_calls": n,
@@ -688,8 +752,9 @@ PERFORMANCE_NOTES = (
     "Call duration is measured by the platform (gateway or orchestrator) around one call; calls with "
     "upstream retries, or whose retry count was not recorded (older gateway logs), are left out of duration "
     "and end-to-end tok/s because a retried call's time includes backoff.",
-    "End-to-end output tok/s = completion tokens (reasoning included) / call duration: it includes "
-    "prefill and queueing, so it is not a decode speed.",
+    "End-to-end output tok/s = completion tokens (reasoning included) / call duration (without the time "
+    "the call waited in the platform's own rate limiter): it includes prefill and queueing, so it is not a "
+    "decode speed.",
     "Cache-hit ratio = cached prompt tokens / prompt tokens; reasoning share = reasoning tokens / "
     "completion tokens; both over calls whose response reported the breakdown.",
     "OpenCode Go and local endpoints have no OpenRouter record: their TTFT/decode values are n/a, "

@@ -11,8 +11,8 @@ from backend.generation.tests.factories import GenerationRunFactory
 from backend.generation.tests.factories import RunFileFactory
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.rankings import services
-from backend.rankings.models import BenchmarkResult
 from backend.rankings.services.constants import EMPIRICAL_DENSITY_CAP
+from backend.rankings.tests.mss_helpers import create_eligible_model
 from backend.users.tests.factories import UserFactory
 
 CAP = EMPIRICAL_DENSITY_CAP
@@ -63,79 +63,6 @@ def _analysis(user, run, findings_by_tool):
     return analysis
 
 
-def test_normalize_benchmark_score_clamps():
-    assert services.normalize_benchmark_score("humaneval", 50.0) == 0.5
-    assert services.normalize_benchmark_score("humaneval", 150.0) == 1.0
-    assert services.normalize_benchmark_score("humaneval", -10.0) == 0.0
-    assert services.normalize_benchmark_score("webdev_elo", 1100) == 0.5
-
-
-def test_compute_benchmark_score_weighted_average():
-    entry = {
-        "bfcl_score": 80.0,
-        "webdev_elo": 1200,
-        "livebench_coding": 60.0,
-    }
-    score = services.compute_benchmark_score(entry)
-    assert 0.0 <= score <= 1.0
-    assert score > 0
-
-
-def test_compute_benchmark_score_zero_when_empty():
-    assert services.compute_benchmark_score({}) == 0.0
-
-
-def test_compute_cost_efficiency_free_model_high_with_long_context():
-    score = services.compute_cost_efficiency_score(
-        {"is_free": True, "benchmark_score": 1.0, "context_length": 1_000_000},
-    )
-    # Max possible = 0.7 (price_eff) + 0.3 (ctx_bonus at very large context)
-    assert 0.85 <= score <= 1.0
-
-
-def test_compute_cost_efficiency_zero_without_pricing():
-    assert services.compute_cost_efficiency_score({"benchmark_score": 0.5}) == 0.0
-
-
-def test_compute_accessibility_score_defaults():
-    score = services.compute_accessibility_score({})
-    assert score == pytest.approx(0.7, rel=0, abs=0.01)
-
-
-def test_compute_accessibility_score_with_inputs():
-    score = services.compute_accessibility_score(
-        {
-            "license_type": "apache",
-            "api_stability": "stable",
-            "documentation_quality": "comprehensive",
-        },
-    )
-    assert score == pytest.approx(1.0)
-
-
-def test_compute_adoption_score_from_rank():
-    assert services.compute_adoption_score({"openrouter_programming_rank": 1}) == 1.0
-    assert services.compute_adoption_score(
-        {"openrouter_programming_rank": 5},
-    ) == pytest.approx(0.84)
-
-
-def test_compute_adoption_score_falls_back_to_local_apps():
-    assert services.compute_adoption_score({"apps": 0}) == 0.0
-    high = services.compute_adoption_score({"apps": 100})
-    assert 0.0 < high <= 1.0
-
-
-def test_compute_mss_weighted_sum():
-    entry = {
-        "adoption_score": 1.0,
-        "benchmark_score": 1.0,
-        "cost_efficiency_score": 1.0,
-        "accessibility_score": 1.0,
-    }
-    assert services.compute_mss(entry) == pytest.approx(1.0)
-
-
 def test_aggregate_rankings_pulls_models_with_local_stats():
     user = UserFactory()
     model = LLMModelFactory(model_id="openai/gpt-4o", model_name="GPT-4o")
@@ -146,21 +73,68 @@ def test_aggregate_rankings_pulls_models_with_local_stats():
         tested=True,
         duration_seconds=30.0,
     )
-    BenchmarkResult.objects.create(
-        model_id=model.model_id,
-        benchmark="humaneval",
-        score=90.0,
-    )
 
     rankings = services.aggregate_rankings()
 
-    assert any(r["model_id"] == model.model_id for r in rankings)
     row = next(r for r in rankings if r["model_id"] == model.model_id)
     assert row["apps"] == 2
     assert row["apps_completed"] == 2
-    assert row["adoption_score"] > 0  # from local apps fallback
-    assert row["mss_score"] > 0
-    assert row["composite_score"] == row["mss_score"]
+    assert row["canonical_id"] == "openai/gpt-4o"
+    # No MSS evidence (no popularity, price, tool flag): never scored 0, simply absent.
+    assert row["mss_score"] is None
+    assert row["composite_score"] is None
+    assert row["eligible"] is False
+    assert row["exclusion"]["code"] == "no_tool_calling"
+
+
+def test_aggregate_rankings_carries_the_mss_v2_fields_of_an_eligible_model():
+    create_eligible_model("z-ai/glm-5.3", price=(1.4, 4.4), share=0.02, rating=1650.0)
+
+    row = next(r for r in services.aggregate_rankings() if r["model_id"] == "z-ai/glm-5.3")
+
+    assert row["eligible"] is True
+    assert row["exclusion"] is None
+    for key in ("popularity_score", "price_score", "capability_score", "recency_score", "mss_score"):
+        assert 0.0 <= row[key] <= 1.0
+    assert row["mss_coverage"] == 1.0
+    assert row["composite_score"] == pytest.approx(row["mss_score"], abs=1e-4)  # nothing measured locally
+    assert row["run_cost_usd"] == pytest.approx(0.9 * 1.4 + 0.036 * 4.4)
+    assert row["price_tier"] == "budget"  # the only eligible model
+    assert row["list_price"]["input"] == 1.4
+    assert row["webdev_rating"]["rating"] == 1650.0
+    assert row["popularity"]["days_listed"] == 7
+    assert row["preferred_route"] == "openrouter"
+
+
+def test_route_rows_inherit_the_mss_of_their_canonical_model():
+    from backend.inference.models import LLMEndpoint
+
+    user = UserFactory()
+    create_eligible_model("z-ai/glm-5.3")
+    endpoint = LLMEndpoint.objects.filter(slug="opencode-go").first() or LLMEndpoint.objects.create(
+        slug="opencode-go",
+        name="OpenCode Go",
+        kind=LLMEndpoint.Kind.OPENAI_COMPATIBLE,
+        owner=user,
+        # An OpenAI-compatible endpoint must speak the openai flavor (llmendpoint_flavor_by_kind).
+        **({"api_flavor": "openai"} if hasattr(LLMEndpoint, "ApiFlavor") else {}),
+    )
+    local = LLMModelFactory(
+        model_id="local-opencode-go/glm-5.3",
+        endpoint=endpoint,
+        served_model_name="glm-5.3",
+        metadata={"catalog_twin": {"model_id": "z-ai/glm-5.3"}},
+    )
+    GenerationRunFactory(created_by=user, model=local, tested=True)
+
+    rows = {r["model_id"]: r for r in services.aggregate_rankings()}
+
+    assert rows["local-opencode-go/glm-5.3"]["canonical_id"] == "z-ai/glm-5.3"
+    assert rows["local-opencode-go/glm-5.3"]["mss_inherited_from"] == "z-ai/glm-5.3"
+    assert rows["local-opencode-go/glm-5.3"]["mss_score"] == rows["z-ai/glm-5.3"]["mss_score"]
+    assert rows["local-opencode-go/glm-5.3"]["apps"] == 1
+    assert rows["z-ai/glm-5.3"]["apps"] == 0  # statistics are never pooled across rows
+    assert rows["z-ai/glm-5.3"]["preferred_route"] == "go"
 
 
 def test_aggregate_rankings_prompt_hash_filter_scopes_local_stats():
@@ -287,12 +261,14 @@ def test_compute_composite_blend_and_fallback():
 
     assert compute_composite(0.5, None) == 0.5
     assert compute_composite(0.5, 1.0) == pytest.approx(0.7)  # 0.6*0.5 + 0.4*1.0
+    assert compute_composite(None, 1.0) is None  # no MSS, no composite
 
 
 def test_aggregate_rankings_exposes_empirical_and_sorts_by_composite():
     user = UserFactory()
-    good = LLMModelFactory(model_id="good/model")
-    bad = LLMModelFactory(model_id="bad/model")
+    # Same MSS inputs for both, so the composite differs only through measured quality.
+    good = create_eligible_model("good/model")
+    bad = create_eligible_model("bad/model")
     for model, sev in ((good, "low"), (bad, "critical")):
         job = _completed_run(user, model, metrics=_eval(1.0))
         _analysis(user, job, {"bandit": [(sev, "security", "app.py")] * 10})
@@ -315,7 +291,9 @@ def test_filter_rankings_by_provider_and_search():
             "context_length": 128_000,
             "price_per_million_input": 5.0,
             "mss_score": 0.7,
-            "benchmark_score": 0.8,
+            "composite_score": 0.75,
+            "capability_score": 0.8,
+            "eligible": True,
         },
         {
             "model_id": "b/1",
@@ -324,8 +302,10 @@ def test_filter_rankings_by_provider_and_search():
             "is_free": True,
             "context_length": 32_000,
             "price_per_million_input": 0.0,
-            "mss_score": 0.5,
-            "benchmark_score": 0.0,
+            "mss_score": None,
+            "composite_score": None,
+            "capability_score": None,
+            "eligible": False,
         },
     ]
 
@@ -338,8 +318,15 @@ def test_filter_rankings_by_provider_and_search():
     out = services.filter_rankings(rankings, include_free=False)
     assert [r["model_id"] for r in out] == ["a/1"]
 
-    out = services.filter_rankings(rankings, has_benchmarks=True)
+    out = services.filter_rankings(rankings, has_capability=True)
     assert [r["model_id"] for r in out] == ["a/1"]
+
+    out = services.filter_rankings(rankings, eligible_only=True)
+    assert [r["model_id"] for r in out] == ["a/1"]
+
+    # min_composite compares the composite (it used to compare the MSS).
+    assert [r["model_id"] for r in services.filter_rankings(rankings, min_composite=0.72)] == ["a/1"]
+    assert services.filter_rankings(rankings, min_mss=0.72) == []
 
 
 def test_sort_rankings_desc_and_asc():
@@ -347,40 +334,36 @@ def test_sort_rankings_desc_and_asc():
         {"model_id": "a", "mss_score": 0.5},
         {"model_id": "b", "mss_score": 0.9},
         {"model_id": "c", "mss_score": 0.1},
+        {"model_id": "d", "mss_score": None},
     ]
     desc = services.sort_rankings(rankings, sort_by="mss", sort_dir="desc")
-    assert [r["model_id"] for r in desc] == ["b", "a", "c"]
+    assert [r["model_id"] for r in desc] == ["b", "a", "c", "d"]
     asc = services.sort_rankings(rankings, sort_by="mss", sort_dir="asc")
-    assert [r["model_id"] for r in asc] == ["c", "a", "b"]
+    assert [r["model_id"] for r in asc] == ["c", "a", "b", "d"]  # missing values sort last either way
+    # An unknown or dict-valued field falls back to the MSS instead of failing on dict comparison.
+    rows = [{**r, "routes": {"go": {}}} for r in rankings]
+    assert [r["model_id"] for r in services.sort_rankings(rows, sort_by="routes")] == ["b", "a", "c", "d"]
+    assert [r["model_id"] for r in services.sort_rankings(rankings, sort_by="mss_score")] == ["b", "a", "c", "d"]
 
 
-def test_get_top_models_with_custom_weights():
-    LLMModelFactory(model_id="m1", model_name="M1")
-    LLMModelFactory(model_id="m2", model_name="M2")
-    BenchmarkResult.objects.create(
-        model_id="m1",
-        benchmark="bfcl_score",
-        score=80.0,
-    )
+def test_sort_keys_cover_the_mss_v2_components():
+    from backend.rankings.services.constants import SORT_KEY_MAP
 
-    top = services.get_top_models(
-        count=5,
-        weights={"benchmark_score": 1.0},
-    )
-
-    assert len(top) >= 2
-    assert top[0]["model_id"] == "m1"
+    assert SORT_KEY_MAP["price"] == "run_cost_usd"
+    for key in ("popularity", "capability", "recency", "coverage"):
+        assert key in SORT_KEY_MAP
+    for old in ("adoption", "benchmark", "cost", "access"):
+        assert old not in SORT_KEY_MAP
 
 
-def test_get_status_counts_benchmark_rows():
-    LLMModelFactory(model_id="m1")
-    BenchmarkResult.objects.create(model_id="m1", benchmark="humaneval", score=80)
-    BenchmarkResult.objects.create(model_id="m1", benchmark="mbpp", score=70)
+def test_get_top_models_returns_eligible_models_by_mss():
+    create_eligible_model("a/low", share=0.001)
+    create_eligible_model("b/high", share=0.05)
+    LLMModelFactory(model_id="c/no-evidence")
 
-    s = services.get_status()
-    assert s["total_benchmark_rows"] == 2
-    assert s["models_with_benchmarks"] == 1
-    assert s["benchmarks"] == {"humaneval": 1, "mbpp": 1}
+    top = services.get_top_models(count=5)
+
+    assert [r["model_id"] for r in top] == ["b/high", "a/low"]
 
 
 def test_kendall_tau_identity_reverse_and_single_swap():

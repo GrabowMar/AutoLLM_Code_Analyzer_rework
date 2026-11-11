@@ -1,0 +1,36 @@
+schema: 1
+notes: |
+  Statedness only (core round 2): three `stated_in` additions; no sample, no request, no setup, no expectation
+  change, no skip.
+
+  The response schema of the image object limits `content_type` to `image/png` / `image/jpeg` (task.yaml). The
+  statedness rule (library/lint.py, STATEDNESS_VERSION 2) counts an option list of a response schema as stated
+  in a prose variant only when that variant spells every option; no variant spells the two media types, so the
+  three `.ok` checks that return an image object would be stated nowhere. The standard and the exhaustive prose
+  do state the rule in other words: "Signed-in users upload PNG and JPEG images" and "An image is returned as
+  an object with `id`, `filename`, `title`, `content_type`, ..."; `image/png` and `image/jpeg` are the
+  registered media types of exactly these two formats. The minimal prose does not name `content_type`.
+  `images.upload.ok` also asserts 201, which only the exhaustive prose gives ("On success it answers 201").
+
+  Removed in core round 2 (now done by the compiler for every upload task): the hand-built oversized PNG of
+  `images.upload.oversize`. The compiler sends `{png_oversize_b64}` there, a tester generator that produces
+  the same bytes (the tester's PNG plus one ancillary chunk, 9 437 333 bytes; GENERATORS.md).
+checks:
+  images.list.ok:
+    why: >-
+      Statedness only. The response option list `content_type: image/png | image/jpeg` is stated by the
+      standard and the exhaustive prose in other words ("upload PNG and JPEG images"; "An image is returned as
+      an object with ... `content_type` ..."): these are the registered media types of the two formats.
+    stated_in: [exhaustive]
+  images.get.ok:
+    why: >-
+      Statedness only. The response option list `content_type: image/png | image/jpeg` is stated by the
+      standard and the exhaustive prose in other words ("upload PNG and JPEG images"; "An image is returned as
+      an object with ... `content_type` ..."): these are the registered media types of the two formats.
+    stated_in: [exhaustive]
+  images.upload.ok:
+    why: >-
+      Statedness only. As images.list.ok for the `content_type` options; the check also asserts 201, which
+      only the exhaustive prose gives for `POST /api/images` ("On success it answers 201"), so the standard
+      variant is not added.
+    stated_in: [exhaustive]

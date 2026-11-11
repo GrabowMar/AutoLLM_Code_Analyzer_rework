@@ -1,0 +1,19 @@
+schema: 1
+notes: |
+  One entry. The generic compiler v2 plan needs no other fixture for this task.
+
+  samples.date = "{past_date}"
+    The generic sampler renders a field named `date` as `{future_date}` (30..299 days ahead), which suits
+    bookings. Here `date` is the day of a logged time entry: the task is a timesheet on which "users log time
+    entries (project, description, hours, date)" (first sentence of every prose variant), the entry form has the
+    "date defaulting to today" (web frontend section), and the task's own hand-written check export.header posts
+    an entry dated 2026-02-03. Neither task.yaml (entries.create request_schema `date: {type: string, format:
+    date}`) nor any prose variant says that an entry may be dated months in the future, so a sample 30..299 days
+    ahead makes entries.create.ok and every check that creates an entry depend on behaviour the spec does not
+    state. A date in the past is valid under the request schema and under every reading of the prose.
+    `{past_date}` rather than `{today}`: the UTC "today" of the tester can be tomorrow for an application that
+    compares with its local date. Expectations unchanged.
+    Preventive: both reference applications accept future dates, the base run without this entry is already
+    24/24 on both; flagged for the fairness review as a judgment call.
+samples:
+  date: "{past_date}"

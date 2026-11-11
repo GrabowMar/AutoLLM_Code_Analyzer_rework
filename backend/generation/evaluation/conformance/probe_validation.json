@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-03T17:08:10.898255+00:00",
+  "at": "2026-11-11T16:04:57.855079+00:00",
   "kinds": {
     "csrf_missing": {
       "auth_mode": "cookie_session",
@@ -104,6 +104,6 @@
       "validated": true
     }
   },
-  "probe_rules_version": 1,
-  "tester_version": 1
+  "probe_rules_version": 2,
+  "tester_version": 2
 }

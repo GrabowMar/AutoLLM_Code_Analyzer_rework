@@ -173,7 +173,7 @@ def _truncation_kind(validity: Any) -> str | None:
 
 
 def attrition(study: Study, stage: str = "main") -> list[dict[str, Any]]:
-    """Per condition: planned cells, runs per outcome, usable, truncated by kind, excluded by reason, infra retries.
+    """Per condition: planned cells, runs per outcome, usable, truncated, excluded / infra errors by reason, retries.
 
     Rows also give the share of sandbox time spent installing dependencies per stack (from the attempts'
     ``time_split``) and the attrition rate (excluded + infra over planned cells), which feed the
@@ -240,6 +240,7 @@ def attrition(study: Study, stage: str = "main") -> list[dict[str, Any]]:
         outcomes: Counter[str] = Counter()
         truncated: Counter[str] = Counter()
         excluded: Counter[str] = Counter()
+        infra_reasons: Counter[str] = Counter()
         usable = infra = retries = no_run = 0
         for cell in mine:
             run = runs.get(cell["current_id"])
@@ -261,6 +262,7 @@ def attrition(study: Study, stage: str = "main") -> list[dict[str, Any]]:
                 excluded[run["outcome_reason"] or "excluded"] += 1
             elif run["outcome"] == Outcome.INFRA_ERROR:
                 infra += 1
+                infra_reasons[run["outcome_reason"] or "infra_error"] += 1
         planned = planned_by_condition.get(condition_id) or len(mine)
         lost = sum(excluded.values()) + infra
         rows.append(
@@ -277,6 +279,8 @@ def attrition(study: Study, stage: str = "main") -> list[dict[str, Any]]:
                 "excluded": sum(excluded.values()),
                 "excluded_by_reason": dict(sorted(excluded.items())),
                 "infra_error": infra,
+                # e.g. platform_cpu (a binary the evaluation host's CPU cannot run): attrition, reported by reason
+                "infra_error_by_reason": dict(sorted(infra_reasons.items())),
                 "infra_retries": retries,
                 "cell_attempts": attempts.get(condition_id, 0),
                 "beyond_plan_runs": beyond.get(condition_id, 0),

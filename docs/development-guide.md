@@ -122,7 +122,7 @@ Seeds sync after every `migrate` through `post_migrate` handlers; a seeding erro
 | `conformance_kit`, `oracle_validate` | Evaluation conformance kit and oracle validation ([Evaluation](/docs/EVALUATION)) |
 | `enrich_models` | Attach models.dev / Hugging Face metadata to the catalog and link local endpoint models to their catalog twins ([Models reference](/docs/MODELS_REFERENCE#enrichment-beyond-openrouter)) |
 | `import_external_covariates` | Import Epoch AI and LMArena covariates through the curated name map ([Models reference](/docs/MODELS_REFERENCE#research-covariates)) |
-| `seed_benchmarks` | Load benchmark results from a JSON fixture |
+| `refresh_mss_inputs`, `import_list_prices`, `import_popularity`, `select_models` | MSS v2 inputs (catalog sync, enrichment, list prices, LMArena/Epoch, OpenRouter popularity) and the study model selection; `select_models --dry-run` writes nothing ([MSS v2](/docs/design/MSS_V2)) |
 | `run_executor`, `executor drain\|resume\|status`, `wait_for_migrations` | Executor process and control ([Execution engine](/docs/EXECUTION)) |
 | `sync_container_status`, `reconcile_app_routes`, `benchmark_sample_builds` | Reconcile container rows with Docker; rewrite Traefik route files; measure sample builds ([Sample builds](/docs/SAMPLE_BUILDS)) |
 | `export_study_tables`, `study_report` | Study outputs ([Study tables](/docs/STUDY_TABLES)) |
@@ -132,6 +132,8 @@ Seeds sync after every `migrate` through `post_migrate` handlers; a seeding erro
 ## Frontend layout
 
 SvelteKit 2 with Svelte 5 runes, Tailwind 4 and adapter-node, in `frontend/`. App routes live under `src/routes/(app)/` (one directory per feature: `studies`, `library`, `samples`, `slots`, `budget`, `applications`, `analysis`, `analyzers`, `endpoints`, `models`, `runtime`, `rankings`, `statistics`, `reports`, `docs`, `system`, `users`, ...), auth pages under `src/routes/(auth)/auth/`. Old URLs such as `/experiments`, `/sample-generator`, `/templates`, `/automation`, `/integrations` and `/settings` are redirects (the v2 ones for one release). API clients are in `src/lib/api/`, navigation in `src/lib/nav.ts`, settings sections in `src/lib/settings-sections.ts`. UI conventions are in `frontend/DESIGN_SYSTEM.md`.
+
+The report pages' **Notebook** tab embeds a self-hosted [JupyterLite](https://jupyterlite.readthedocs.io/) site (Python via Pyodide, in the browser) served from `frontend/static/jupyterlite/`. That directory is generated and gitignored: build it once with `frontend/jupyterlite/build.sh` (needs Python 3.11+ with uv or pip; on dev1 run it in the django container: `docker exec -u dev-user llmlab-django-1 /app/frontend/jupyterlite/build.sh /tmp/jl`). The production frontend image builds it in its own stage. Without it the tab shows "JupyterLite did not start".
 
 In the local stack the Vite dev server on :8000 proxies `/api`, `/_allauth`, `/admin`, `/media` and `/apps` to django via `API_TARGET=http://django:8000`. Always develop against http://localhost:8000, not :8001.
 

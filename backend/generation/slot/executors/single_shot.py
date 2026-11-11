@@ -53,6 +53,7 @@ from backend.generation.models.choices import Outcome
 from backend.generation.models.choices import ParseStatus
 from backend.generation.models.choices import PromptRole
 from backend.generation.models.choices import Termination
+from backend.generation.services import token_metrics
 from backend.generation.slot.part import part_of
 from backend.generation.slot.prompt import SINGLE_SHOT_EXECUTOR
 from backend.generation.slot.prompt import output_contract
@@ -319,7 +320,10 @@ def _usage(response: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]
     prompt = int(usage.get("prompt_tokens") or 0)
     completion = int(usage.get("completion_tokens") or 0)
     cached = int(((usage.get("prompt_tokens_details") or {}).get("cached_tokens")) or 0)
-    reasoning = int(((usage.get("completion_tokens_details") or {}).get("reasoning_tokens")) or 0)
+    # An unreported reasoning count is not measured (None), never 0 (services.token_metrics).
+    reasoning = token_metrics.reasoning_total(
+        [(completion, (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"))],
+    )
     pricing = (manifest.get("model") or {}).get("pricing") or {}
     list_cost = (
         prompt * float(pricing.get("input_per_mtok") or 0.0)

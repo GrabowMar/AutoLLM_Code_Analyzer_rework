@@ -4,11 +4,11 @@
 	 * Arena (both embedded in the OpenRouter catalog payload) with catalog
 	 * percentiles, external covariates (Epoch AI, LMArena), the evaluations
 	 * self-reported in the Hugging Face repo (labelled as such, never verified
-	 * here), plus benchmark rows seeded into the rankings. A local endpoint
-	 * model shows its catalog twin's external data, marked inherited.
+	 * here). A local endpoint model shows its catalog twin's external data,
+	 * marked inherited. (The MSS capability input, the LMArena WebDev rating,
+	 * is among the external covariates.)
 	 */
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Trophy from '@lucide/svelte/icons/trophy';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -40,10 +40,9 @@
 		return [...groups.entries()].map(([name, rows]) => ({ name, rows: [...rows].sort((a, b) => a.rank - b.rank) }));
 	});
 	const aaCatalog = $derived(insights?.catalog.artificial_analysis);
-	const local = $derived(insights?.benchmarks ?? []);
 	const view = $derived(metadataView(model));
 	const selfReported = $derived(view.hf?.eval_results ?? []);
-	const hasAny = $derived(!!aa || arena.length > 0 || local.length > 0 || selfReported.length > 0);
+	const hasAny = $derived(!!aa || arena.length > 0 || selfReported.length > 0);
 
 	// Design Arena category ids are run-together words; unknown ids show as-is.
 	const CATEGORY_LABELS: Record<string, string> = {
@@ -87,7 +86,7 @@
 </div>
 
 {#if !hasAny}
-	<EmptyState class="mt-4" compact icon={Trophy} title="No other benchmark data" description="OpenRouter publishes no Artificial Analysis or Design Arena scores for this model, its Hugging Face repo publishes no evaluations, and no benchmark rows were seeded for it." />
+	<EmptyState class="mt-4" compact icon={Trophy} title="No other benchmark data" description="OpenRouter publishes no Artificial Analysis or Design Arena scores for this model, and its Hugging Face repo publishes no evaluations." />
 {:else}
 	<div class="mt-4 space-y-4">
 		{#if aa}
@@ -165,33 +164,6 @@
 				inheritedFrom={view.inheritedFrom}
 				inheritedSlug={view.inheritedSlug}
 			/>
-		{/if}
-
-		{#if local.length}
-			<Card.Root class="gap-0 overflow-clip py-0">
-				<Card.Header class="border-b border-border py-3">
-					<Card.Title class="text-sm font-medium">Seeded benchmarks</Card.Title>
-					<Card.Description class="text-xs">Rows feeding the rankings' benchmark score (<code class="font-mono">manage.py seed_benchmarks</code>)</Card.Description>
-				</Card.Header>
-				<Card.Content class="p-0">
-					<div class="overflow-x-auto">
-						<table>
-							<thead><tr><th>Benchmark</th><th class="num">Score</th><th class="num">Percentile</th><th>Source</th><th class="num">Updated</th></tr></thead>
-							<tbody>
-								{#each local as b (b.benchmark)}
-									<tr>
-										<td class="font-mono text-xs">{b.benchmark}</td>
-										<td class="num">{b.score}</td>
-										<td class="num">{b.percentile != null ? `p${Math.round(b.percentile * 100)}` : '—'}<span class="cell-sub block text-[11px] text-muted-foreground">of {b.n}</span></td>
-										<td><Badge variant="outline" class="text-[11px]">{b.source}</Badge></td>
-										<td class="num text-xs text-muted-foreground">{b.fetched_at.slice(0, 10)}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				</Card.Content>
-			</Card.Root>
 		{/if}
 	</div>
 {/if}

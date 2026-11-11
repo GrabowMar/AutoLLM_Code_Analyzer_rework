@@ -206,7 +206,10 @@ class TestModelInsightsAPI:
         assert gen["resources"]["cache_hit_ratio"] == pytest.approx(0.5)
         assert gen["resources"]["cost_per_kloc"] == pytest.approx(0.25)
         assert gen["harnesses"] == {"opencode": 1}
-        assert data["ranking"]["positions"]["composite"]["rank"] >= 1
+        # No MSS v2 evidence for this model: no MSS, no composite (never 0); measured quality still ranks.
+        assert data["ranking"]["scores"]["mss"] is None
+        assert data["ranking"]["positions"]["composite"] is None
+        assert data["ranking"]["canonical_id"] == "acme/coder-1"
         assert data["catalog"]["catalog_size"] == 1
 
     def test_insights_requires_auth(self, client):

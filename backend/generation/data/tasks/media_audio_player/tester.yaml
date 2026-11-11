@@ -1,0 +1,16 @@
+schema: 1
+notes: |
+  One entry: the valid sample of the track `url`. No check patch, no expectation change, no skip.
+
+  Sources. Standard and exhaustive prose, Rules: "Only `http` and `https` audio addresses are accepted."
+  Exhaustive prose, Validation: "`url` required, an absolute `http` or `https` URL, at most 500 characters".
+  task.yaml tracks.create request_schema: url {type: string, format: uri, maxLength: 500}.
+
+  The generic sampler sends "https://example.com/llmlab/{rand}", an address with nothing that marks it as
+  audio. The prose every model saw calls the value an "audio address", so an app may reasonably look at the
+  path (a file extension) before it accepts a track; the exhaustive prose only requires an absolute http(s)
+  URL. The sample below is valid under both readings: an absolute https URL of 43 characters whose path ends
+  in ".mp3", the most common audio file extension. {rand} keeps repeated creates distinct. The app is never
+  asked to fetch the address by any stated rule, so no upstream is involved.
+samples:
+  url: "https://example.com/llmlab/{rand}.mp3"

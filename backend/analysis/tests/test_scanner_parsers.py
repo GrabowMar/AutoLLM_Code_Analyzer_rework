@@ -1104,3 +1104,188 @@ def test_djlint_output_that_linted_nothing_is_an_error():
     )
     assert len(crashed_pass.findings) == 1
     assert crashed_pass.warnings == ["djlint --extension=html exited with code 2"]
+
+
+# --- CodeQL (SARIF) -----------------------------------------------------------
+
+
+def _codeql_log(results=(), *, extracted=("backend/app.py",), notes=(), lines=120):
+    """A SARIF 2.1.0 log shaped like ``codeql database analyze --format=sarif-latest`` (2.27)."""
+    rules = [
+        {
+            "id": "py/path-injection",
+            "shortDescription": {"text": "Uncontrolled data used in path expression"},
+            "fullDescription": {"text": "Accessing paths influenced by users can allow an attacker to access files."},
+            "defaultConfiguration": {"enabled": True, "level": "error"},
+            "properties": {
+                "tags": ["correctness", "security", "external/cwe/cwe-022", "external/cwe/cwe-023"],
+                "kind": "path-problem",
+                "precision": "high",
+                "problem.severity": "error",
+                "security-severity": "7.5",
+            },
+        },
+        {
+            "id": "py/empty-except",
+            "shortDescription": {"text": "Empty except"},
+            "defaultConfiguration": {"enabled": True, "level": "note"},
+            "properties": {
+                "tags": ["quality", "reliability", "error-handling", "external/cwe/cwe-390"],
+                "precision": "high",
+                "problem.severity": "recommendation",
+            },
+        },
+    ]
+    notifications = [
+        {
+            "locations": [{"physicalLocation": {"artifactLocation": {"uri": path, "uriBaseId": "%SRCROOT%"}}}],
+            "message": {"text": ""},
+            "level": "none",
+            "descriptor": {"id": "py/diagnostics/successfully-extracted-files"},
+        }
+        for path in extracted
+    ]
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {"name": "CodeQL", "rules": rules},
+                        "extensions": [{"name": "codeql/python-all"}],
+                    },
+                    "invocations": [{"toolExecutionNotifications": [*notifications, *notes]}],
+                    "results": list(results),
+                    "properties": {
+                        "metricResults": [
+                            {"ruleId": "py/summary/lines-of-user-code", "value": lines},
+                            {"ruleId": "py/summary/lines-of-code", "value": lines + 9},
+                        ],
+                    },
+                },
+            ],
+        },
+    )
+
+
+_CODEQL_PATH_INJECTION = {
+    "ruleId": "py/path-injection",
+    "rule": {"id": "py/path-injection", "index": 0},
+    "message": {"text": "This path depends on a [user-provided value](1)."},
+    "locations": [
+        {
+            "physicalLocation": {
+                "artifactLocation": {"uri": "backend/routes/files%20api.py", "uriBaseId": "%SRCROOT%"},
+                "region": {
+                    "startLine": 41,
+                    "startColumn": 22,
+                    "endColumn": 26,
+                    "snippet": {"text": "    return send_file(path)"},
+                },
+            },
+        },
+    ],
+    "codeFlows": [
+        {
+            "threadFlows": [
+                {
+                    "locations": [
+                        {
+                            "location": {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "backend/routes/files%20api.py"},
+                                    "region": {"startLine": 38},
+                                },
+                            },
+                        },
+                        {
+                            "location": {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "backend/routes/files%20api.py"},
+                                    "region": {"startLine": 41},
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
+    ],
+}
+_CODEQL_EMPTY_EXCEPT = {
+    "ruleId": "py/empty-except",
+    "message": {"text": "'except' clause does nothing but pass and there is no explanatory comment."},
+    "locations": [
+        {"physicalLocation": {"artifactLocation": {"uri": "backend/app.py"}, "region": {"startLine": 12}}},
+    ],
+}
+
+
+def test_codeql_maps_security_and_quality_results():
+    raw = "### python\n" + _codeql_log([_CODEQL_PATH_INJECTION, _CODEQL_EMPTY_EXCEPT]) + "\n"
+    parsed = parsers.parse("codeql", raw)
+    assert parsed.error is None
+    assert parsed.warnings == []
+    injection, empty = parsed.findings
+
+    assert injection.rule_id == "py/path-injection"
+    assert injection.category == "security"
+    assert injection.severity == "high"  # security-severity 7.5
+    assert injection.tool_severity == "error"  # CodeQL's own problem.severity
+    assert injection.confidence == "high"
+    assert injection.title == "Uncontrolled data used in path expression"
+    assert injection.description == "This path depends on a user-provided value."
+    assert injection.file_path == "backend/routes/files api.py"
+    assert (injection.line_number, injection.column_number) == (41, 22)
+    assert injection.code_snippet == "    return send_file(path)"
+    data = injection.tool_specific_data
+    assert data["cwe"] == "CWE-22"
+    assert data["cvss_score"] == 7.5
+    assert data["tool_confidence"] == "high"
+    assert data["tags"] == ["correctness", "security"]
+    assert data["data_flow"] == ["backend/routes/files api.py:38", "backend/routes/files api.py:41"]
+    assert data["docs_url"] == "https://codeql.github.com/codeql-query-help/python/py-path-injection/"
+
+    assert empty.category == "quality"
+    assert empty.severity == "info"
+    assert empty.tool_severity == "recommendation"
+    assert "cvss_score" not in empty.tool_specific_data
+    assert parsed.metrics == {"languages": {"python": {"files_extracted": 1, "lines_of_user_code": 120}}}
+
+
+def test_codeql_clean_language_is_a_measurement():
+    raw = "### python\n" + _codeql_log() + "\n### javascript\n" + _codeql_log(extracted=("frontend/src/App.tsx",))
+    parsed = parsers.parse("codeql", raw)
+    assert parsed.error is None
+    assert parsed.findings == []
+    assert set(parsed.metrics["languages"]) == {"python", "javascript"}
+
+
+def test_codeql_failed_language_is_a_coverage_gap():
+    raw = "### python\n" + _codeql_log() + "\n### javascript\n!! codeql javascript failed: Out of memory\n"
+    parsed = parsers.parse("codeql", raw)
+    assert parsed.error is None
+    assert any("javascript: codeql javascript failed: Out of memory" in w for w in parsed.warnings)
+
+
+def test_codeql_nothing_analyzed_is_an_error_not_a_clean_result():
+    failed = parsers.parse("codeql", "### python\n!! codeql python failed: no source code seen\n")
+    assert failed.error
+    assert "python" in failed.error
+
+    # A database that extracted no file measured nothing either.
+    empty = parsers.parse("codeql", "### python\n" + _codeql_log(extracted=()))
+    assert empty.error
+    assert "extracted no source file" in empty.error
+
+
+def test_codeql_reports_extraction_errors():
+    note = {
+        "locations": [{"physicalLocation": {"artifactLocation": {"uri": "backend/broken.py"}}}],
+        "message": {"text": "Syntax error at line 3"},
+        "level": "warning",
+        "descriptor": {"id": "py/diagnostics/extraction-errors"},
+    }
+    parsed = parsers.parse("codeql", "### python\n" + _codeql_log(notes=[note]))
+    assert parsed.error is None
+    assert any("backend/broken.py: Syntax error at line 3" in w for w in parsed.warnings)

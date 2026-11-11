@@ -399,6 +399,58 @@ class TestAgentIngestion:
         assert first["local"]["endpoint"] == "opencode-go"
         assert second["provider"] == "CoreWeave"
         assert "local" not in second
+        assert "upstream" not in first
+
+    def test_telemetry_for_calls_keeps_what_the_native_anthropic_route_chose(self):
+        """The gateway line keeps only normalized tokens; the effort, thinking and stripped params the native
+        route sent come from the linked proxy row's answer and become durable call telemetry."""
+        from backend.inference.models import LLMRequest
+
+        owner = UserFactory()
+        run = GenerationRunFactory(created_by=owner)
+        anthropic = {
+            "id": "msg_1",
+            "request": {
+                "effort": "high",
+                "effort_source": "llmlab_default",
+                "thinking": "adaptive",
+                "thinking_replay": "dropped",
+                "tool_choice": "auto",
+                "stripped": ["temperature"],
+                "model_key": "claude-haiku-5-5",
+            },
+            "stop_reason": "tool_use",
+            "stop_details": None,
+        }
+        row = LLMRequest.objects.create(
+            endpoint=self._endpoint(owner),
+            job=run,
+            job_attempt=run.attempt,
+            source=LLMRequest.Source.AGENT_PROXY,
+            path="/v1/messages",
+            status=LLMRequest.Status.DONE,
+            response_status=200,
+            prompt_tokens=8221,
+            completion_tokens=96,
+            response={"usage": {"prompt_tokens": 8221, "completion_tokens": 96, "anthropic": anthropic}},
+            deadline_at=timezone.now() + timedelta(hours=1),
+        )
+        line = copy.deepcopy(OPENCODE_LINE)
+        line["ts"] = row.created_at.timestamp() - 0.01
+
+        (telemetry,) = call_telemetry.telemetry_for_calls(run, [line])
+
+        assert telemetry["local"]["request_id"] == str(row.pk)
+        assert telemetry["upstream"] == {
+            "api": "anthropic_messages",
+            "effort": "high",
+            "effort_source": "llmlab_default",
+            "thinking": "adaptive",
+            "thinking_replay": "dropped",
+            "tool_choice": "auto",
+            "stripped": ["temperature"],
+            "stop_reason": "tool_use",
+        }
 
     def test_telemetry_failure_never_breaks_ingestion(self):
         run = GenerationRunFactory()

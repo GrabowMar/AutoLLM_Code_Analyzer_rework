@@ -183,7 +183,7 @@ def get_model_comparison(
     from backend.rankings.services import aggregate_rankings
 
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
-    cache_key = f"stats_models_v3_{limit}_{u_key}_{prompt_hash or ''}_{config_fingerprint or ''}_{study_id or ''}"
+    cache_key = f"stats_models_v4_{limit}_{u_key}_{prompt_hash or ''}_{config_fingerprint or ''}_{study_id or ''}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached

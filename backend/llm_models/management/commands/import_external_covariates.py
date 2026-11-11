@@ -3,11 +3,13 @@
 Usage:
     python manage.py import_external_covariates [--epoch] [--lmarena] [--dry-run]
         [--model MODEL_ID ...] [--run RUN_ID ...] [--study STUDY_ID ...] [--suggest] [--map PATH]
+        [--frame]
 
 Without --epoch / --lmarena both sources are imported. Names are matched
 exactly through backend/llm_models/data/external_model_map.yaml; --suggest
 prints the closest external names for the models in scope (for curating the
-map) and writes nothing.
+map) and writes nothing. --frame checks map coverage against the MSS v2 frame
+(models passing the eligibility filters) instead of the models that already ran.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from backend.llm_models.services.external_sources import SOURCES
 from backend.llm_models.services.external_sources import arena_names_by_config
 from backend.llm_models.services.external_sources import fetch_epoch_csv
 from backend.llm_models.services.external_sources import fetch_lmarena
+from backend.llm_models.services.external_sources import frame_model_ids
 from backend.llm_models.services.external_sources import import_external_covariates
 from backend.llm_models.services.external_sources import load_model_map
 from backend.llm_models.services.external_sources import parse_epoch_csv
@@ -53,6 +56,11 @@ class Command(BaseCommand):
             "no writes.",
         )
         parser.add_argument("--map", default=None, help="Path to an alternative name map YAML.")
+        parser.add_argument(
+            "--frame",
+            action="store_true",
+            help="Warn about MSS v2 frame models (passing E1-E7) without a map entry, instead of models with runs.",
+        )
 
     def handle(self, *args, **options):
         sources = tuple(s for s in SOURCES if options[s]) or SOURCES
@@ -62,8 +70,9 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         model_ids = self._scope(options)
 
+        frame_ids = frame_model_ids() if options["frame"] else None
         if options["suggest"]:
-            self._suggest(model_ids, sources)
+            self._suggest(model_ids if model_ids is not None else frame_ids, sources)
             return
 
         report = import_external_covariates(
@@ -71,6 +80,7 @@ class Command(BaseCommand):
             model_ids=model_ids,
             dry_run=options["dry_run"],
             entries=entries,
+            coverage_ids=frame_ids,
         )
         for row in report.rows:
             parts = [f"{row['model_id']} [{row['match']}]"]
@@ -87,12 +97,13 @@ class Command(BaseCommand):
         for warning in report.warnings:
             self.stdout.write(self.style.WARNING(f"warning: {warning}"))
 
-        used = used_model_ids()
+        used = frame_ids if frame_ids is not None else used_model_ids()
+        label = "frame models" if frame_ids is not None else "used models"
         summary = [f"{'DRY RUN — ' if report.dry_run else ''}{len(report.rows)} mapped models"]
         for source in sources:
             matched = [r for r in report.rows if r.get(source) == "matched"]
             used_matched = sum(1 for r in matched if r["model_id"] in used)
-            summary.append(f"{source}: {len(matched)} matched ({used_matched} of {len(used)} used models)")
+            summary.append(f"{source}: {len(matched)} matched ({used_matched} of {len(used)} {label})")
         self.stdout.write(self.style.SUCCESS("; ".join(summary)))
 
     def _scope(self, options) -> set[str] | None:

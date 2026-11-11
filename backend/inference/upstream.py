@@ -26,6 +26,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from backend.inference.security import Target
 from backend.inference.security import validate_direct_base_url
@@ -48,8 +49,15 @@ ALLOWED_PATHS = frozenset(
 )
 
 
+# Anthropic's native Messages API (endpoint ``api_flavor="anthropic"``): direct endpoints only, never relayed,
+# so it is not part of the relay script's allowlist.
+MESSAGES_PATH = "/v1/messages"
+DIRECT_ONLY_PATHS = frozenset({("POST", MESSAGES_PATH)})
+
+
 def path_allowed(method: str, path: str, body: Any) -> bool:
-    if (method.upper(), path) not in ALLOWED_PATHS:
+    key = (method.upper(), path)
+    if key not in ALLOWED_PATHS and key not in DIRECT_ONLY_PATHS:
         return False
     if path == "/api/generate":
         return isinstance(body, dict) and not body.get("prompt")
@@ -110,11 +118,80 @@ def _opencode_session_id(body: Any) -> str:
     return f"llmlab-{digest[:32]}"
 
 
+def is_opencode(base_url: str | None) -> bool:
+    """Whether ``base_url`` is OpenCode Zen / Go (host ``opencode.ai``)."""
+    try:
+        return (urlsplit(str(base_url or "")).hostname or "").lower() == OPENCODE_HOST
+    except ValueError:
+        return False
+
+
+def opencode_reasoning(body: Any) -> Any:
+    """The body OpenCode Go honours for the run's reasoning control (C2).
+
+    Go is OpenAI-compatible: it honours a top-level ``reasoning_effort`` and ignores OpenRouter's
+    ``reasoning`` object. The canonical ``reasoning`` object (it reaches this point only when the run's
+    frozen policy forces ``reasoning.mode=effort``, see ``proxy_server.upstream_request``) becomes
+    ``reasoning_effort``; a ``reasoning`` object without an effort (``max_tokens`` mode) is dropped, which
+    is what Go did with it anyway. A body without ``reasoning`` is returned unchanged (same object).
+    """
+    if not isinstance(body, dict) or "reasoning" not in body:
+        return body
+    out = {k: v for k, v in body.items() if k != "reasoning"}
+    reasoning = body.get("reasoning")
+    effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+    if isinstance(effort, str) and effort and "reasoning_effort" not in out:
+        out["reasoning_effort"] = effort
+    return out
+
+
+# OpenCode Go's transient upstream failure (C1): ``400 Upstream request failed: [server_error] Upstream
+# response was not valid JSON`` (or the same error inside a 200 / as an in-stream error event). Retried
+# at most OPENCODE_TRANSIENT_RETRIES times by the pump; a moderation refusal is never retried.
+OPENCODE_TRANSIENT_MARKER = "[server_error]"
+OPENCODE_NEVER_RETRY_MARKERS = ("[data_inspection_failed]",)
+OPENCODE_TRANSIENT_RETRIES = 2
+OPENCODE_RETRY_BACKOFF_S = (1.0, 3.0)
+TRANSIENT_REASON = "opencode_server_error"
+
+
+def error_text(payload: Any) -> str:
+    """The ``error`` member of an answer as text (``""`` when it has none)."""
+    if isinstance(payload, dict) and payload.get("error") is not None:
+        error = payload["error"]
+        return error if isinstance(error, str) else json.dumps(error, default=str)
+    return ""
+
+
+def transient_reason(base_url: str | None, resp: UpstreamResponse) -> str | None:
+    """Why ``resp`` is a transient upstream failure worth re-submitting (:data:`TRANSIENT_REASON`), else None.
+
+    Only host ``opencode.ai``; only a 400, an error-only body inside a 200, or an in-stream error event
+    (status 502 with ``llmlab_stream_error``), whose **error** text carries ``[server_error]`` and no
+    ``[data_inspection_failed]``. Every other endpoint and status keeps its old handling.
+    """
+    if not is_opencode(base_url):
+        return None
+    payload = resp.payload
+    if resp.status == 400:
+        text = error_text(payload) or resp.text
+    elif resp.status == 200:
+        error_only = isinstance(payload, dict) and payload.get("error") and not payload.get("choices")
+        text = error_text(payload) if error_only else ""
+    elif resp.status == 502 and isinstance(payload, dict) and payload.get("llmlab_stream_error"):
+        text = error_text(payload)
+    else:
+        return None
+    if OPENCODE_TRANSIENT_MARKER not in text or any(m in text for m in OPENCODE_NEVER_RETRY_MARKERS):
+        return None
+    return TRANSIENT_REASON
+
+
 def _provider_quirks(host: str, body: Any, headers: dict[str, str]) -> Any:
     if host == OPENCODE_HOST:
         headers["User-Agent"] = OPENCODE_USER_AGENT
         headers["x-opencode-session"] = _opencode_session_id(body)
-        return body
+        return opencode_reasoning(body)
     if host != ANTHROPIC_HOST:
         return body
     headers["anthropic-version"] = ANTHROPIC_VERSION
@@ -171,6 +248,10 @@ def call(
     With ``stream_limits``, a non-stream OpenAI chat call is made as a **stream** upstream and
     re-assembled into the non-stream ``chat.completion`` its caller expects, cut at the per-call
     output cap or wall clock with ``finish_reason=length`` (see :class:`StreamLimits`).
+
+    ``POST /v1/messages`` (Anthropic's native API, :mod:`backend.inference.anthropic_native`) is always
+    streamed, with ``x-api-key`` / ``anthropic-version`` auth, and answered as an OpenAI ``chat.completion``
+    (errors in the OpenAI error shape, status unchanged); the body's private metadata is never sent.
     """
     if not path_allowed(method, path, body):
         raise UpstreamError(kind="forbidden_path", message=f"{method} {path} is not allowed")
@@ -178,7 +259,18 @@ def call(
         target = validate_direct_base_url(base_url)
     except ValueError as exc:
         raise UpstreamError(kind="connect", message=str(exc)) from exc
-    streamed = (
+    messages_call = method.upper() == "POST" and path == MESSAGES_PATH and isinstance(body, dict)
+    acc: Any = None
+    if messages_call:
+        from backend.inference import anthropic_native
+
+        body = dict(body)
+        meta = body.pop(anthropic_native.META_KEY, None) or {}
+        body["stream"] = True
+        max_tokens = body.get("max_tokens")
+        acc = anthropic_native.MessageStream(meta, max_tokens=max_tokens if isinstance(max_tokens, int) else None)
+        stream_limits = stream_limits or StreamLimits(max_output_tokens=None, wall_clock_s=None)
+    streamed = messages_call or (
         stream_limits is not None
         and method.upper() == "POST"
         and path == CHAT_COMPLETIONS_PATH
@@ -186,7 +278,8 @@ def call(
         and not body.get("stream")
     )
     if streamed:
-        body = {**body, "stream": True, "stream_options": {"include_usage": True}}
+        if not messages_call:
+            body = {**body, "stream": True, "stream_options": {"include_usage": True}}
         if stream_limits.wall_clock_s:
             timeout = min(timeout, stream_limits.wall_clock_s)
     started = time.monotonic()
@@ -197,17 +290,22 @@ def call(
         headers = {"Host": target.host_header, "Accept": "application/json", "User-Agent": "llmlab-executor"}
         if streamed:
             headers["Accept"] = "text/event-stream"
-        body = _provider_quirks(target.host, body, headers)
+        if messages_call:
+            headers["anthropic-version"] = ANTHROPIC_VERSION
+            if api_key:
+                headers["x-api-key"] = api_key
+        else:
+            body = _provider_quirks(target.host, body, headers)
         data = json.dumps(body).encode() if body is not None else None
         if data is not None:
             headers["Content-Type"] = "application/json"
-        if api_key:
+        if api_key and not messages_call:
             headers["Authorization"] = f"Bearer {api_key}"
         conn.request(method.upper(), _join(target.base_path, path), body=data, headers=headers)
         resp = conn.getresponse()
         if streamed and resp.status == 200 and "text/event-stream" in (resp.getheader("Content-Type") or ""):
             assert stream_limits is not None
-            payload = _read_chat_stream(resp, conn.sock, stream_limits, timeout=timeout, started=started)
+            payload = _read_chat_stream(resp, conn.sock, stream_limits, timeout=timeout, started=started, acc=acc)
             elapsed = int((time.monotonic() - started) * 1000)
             status = 502 if payload.get("llmlab_stream_error") else 200
             return UpstreamResponse(
@@ -235,6 +333,13 @@ def call(
         payload = json.loads(text) if text else None
     except ValueError:
         payload = None
+    if messages_call:
+        from backend.inference import anthropic_native
+
+        if resp.status == 200 and isinstance(payload, dict) and payload.get("type") == "message":
+            payload = anthropic_native.to_chat_completion(payload, meta=acc.request_meta)
+        elif resp.status >= 400:
+            payload = anthropic_native.error_payload(resp.status, payload, text)
     return UpstreamResponse(status=resp.status, payload=payload, text=text[:2000], elapsed_ms=elapsed)
 
 
@@ -437,8 +542,12 @@ def _read_chat_stream(
     *,
     timeout: float,
     started: float,
+    acc: Any = None,
 ) -> dict[str, Any]:
     """Read an SSE chat stream into one ``chat.completion``, cutting it at ``limits``.
+
+    ``acc`` is the stream accumulator: an OpenAI :class:`ChatStream` by default, or an
+    ``anthropic_native.MessageStream`` for a native Messages stream (same interface, same rules).
 
     Usage comes from the stream's own usage chunk (``stream_options.include_usage``), so a stream
     that finishes with one is accounted exactly; a cut one, or one that never sent a usage chunk,
@@ -449,7 +558,8 @@ def _read_chat_stream(
     clock before any output, is an upstream ``timeout`` as before; one that ends without a finish is
     a broken connection; an in-stream error object is an HTTP 502 error answer.
     """
-    acc = ChatStream()
+    if acc is None:
+        acc = ChatStream()
     deadline = started + limits.wall_clock_s if limits.wall_clock_s else None
     cut_chars = limits.max_output_tokens * CAP_CUT_CHARS_PER_TOKEN if limits.max_output_tokens else None
     data: list[bytes] = []
@@ -497,7 +607,7 @@ def _read_chat_stream(
     return acc.completion(limits, cut, time.monotonic() - started)
 
 
-def _dispatch(acc: ChatStream, data: list[bytes]) -> None:
+def _dispatch(acc: Any, data: list[bytes]) -> None:
     if not data:
         return
     text = b"\n".join(data).strip()

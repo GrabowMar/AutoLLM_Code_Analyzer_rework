@@ -102,6 +102,11 @@ DEVIATIONS: Final = {
 MIN_UNITS_FOR_INFERENCE: Final = 6
 
 
+def _has_route_error(validity: dict[str, Any]) -> bool:
+    notes = validity.get("notes") if isinstance(validity, dict) else None
+    return any(isinstance(n, dict) and n.get("code") == "route_error_terminated" for n in notes or [])
+
+
 @dataclass(frozen=True)
 class ResultFilters:
     metric: str = "pass_rate"
@@ -124,6 +129,7 @@ class _Cell:
     usable: bool | None = None
     truncated: bool = False
     termination: str | None = None
+    route_error: bool = False  # validity note ``route_error_terminated`` (flag only; the outcome stands)
     fingerprint: str = ""
     suite: str = ""
     cost: float = 0.0
@@ -277,6 +283,7 @@ def _load(study: Study, metric: str) -> tuple[list[_Cell], dict[int, bool]]:
         validity = run["validity"] if isinstance(run["validity"], dict) else {}
         cell.truncated = bool(validity.get("truncated"))
         cell.termination = validity.get("termination")
+        cell.route_error = _has_route_error(validity)
         cell.fingerprint = run["config_fingerprint"] or ""
         metrics = run["metrics"] if isinstance(run["metrics"], dict) else {}
         execution = run["execution"] if isinstance(run["execution"], dict) else {}
@@ -737,6 +744,9 @@ def compute(study: Study, baseline: Any = None, filters: ResultFilters | None = 
                 },
                 "model_failures_scored_zero": sum(1 for c in kept if c.outcome in _MODEL_FAILURES),
                 "truncated_in_sample": sum(1 for c in kept if c.truncated),
+                # Evaluated runs whose trajectory ended on a route error after >=1 good call (validity note
+                # ``route_error_terminated``): report the rates with and without them.
+                "route_error_terminated_in_sample": sum(1 for c in kept if c.route_error),
                 "pass_rate_mean": mean,
                 "pass_rate_ci95": stats.cluster_bootstrap_ci(
                     {u: list(v.values()) for u, v in unit_values.items()},

@@ -1,0 +1,92 @@
+slug: codeql
+name: CodeQL
+description: >-
+  GitHub's semantic code analysis: builds a database of the Python and
+  JavaScript/TypeScript code and runs the security-and-quality query suite on
+  it. Follows data across functions and files (taint tracking), so it reports
+  injection, path traversal, XSS and SSRF paths from a request to a sink that
+  pattern-based scanners miss, plus reliability and maintainability rules.
+category: security
+kind: container
+target_language: any
+analysis_mode: static
+technologies: [python, flask, django, javascript, react]
+icon: scan-search
+version: "2.27"
+docs_url: https://codeql.github.com/docs/
+# The CodeQL bundle (CLI + precompiled query packs, about 1.4 GB unpacked), pinned by release tag;
+# sha256 is the asset digest GitHub publishes for that release.
+# The CLI is free for research and for open-source code (GitHub CodeQL Terms and Conditions).
+install_cmd: >-
+  set -e;
+  mkdir -p /home/analyzer/.local/share /home/analyzer/.local/bin && cd /tmp;
+  curl -sSfL -o codeql-bundle.tgz https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.4/codeql-bundle-linux64.tar.gz;
+  echo "89ed56c8ec6bfccef6a0d2e7fe86da0469ca24b4db08b88016ec134b942c17a4  codeql-bundle.tgz" | sha256sum -c -;
+  rm -rf /home/analyzer/.local/share/codeql;
+  tar -xzf codeql-bundle.tgz -C /home/analyzer/.local/share && rm -f codeql-bundle.tgz;
+  printf '%s\n' '#!/bin/sh' 'exec /home/analyzer/.local/share/codeql/codeql "$@"' > /home/analyzer/.local/bin/codeql;
+  chmod +x /home/analyzer/.local/bin/codeql
+verify_cmd: "codeql version --format=terse"
+uninstall_cmd: "rm -rf /home/analyzer/.local/share/codeql /home/analyzer/.local/bin/codeql /home/analyzer/.codeql"
+# One database per language that has source files, each analyzed with the
+# language's query suite; the SARIF log of each goes to stdout under a
+# "### <language>" header, a failed language prints a "!! " line instead (the
+# parser counts it as not analyzed). --build-mode=none: both languages are
+# extracted from source, nothing is built or installed. Databases live in
+# /tmp, never in the analyzed tree. --ram stays under the workspace's memory
+# cap (ANALYZER_WORKSPACE_MEMORY, 2 GB by default).
+run_cmd: |
+  suite={config:suite}; w="$(mktemp -d /tmp/codeql.XXXXXX)"; trap 'rm -rf "$w"' EXIT
+  for lang in python javascript; do
+    case "$lang" in
+      python) n="$(find {target} -type f -name '*.py' -not -path '*/node_modules/*' | head -1)" ;;
+      *) n="$(find {target} -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \) -not -path '*/node_modules/*' | head -1)" ;;
+    esac
+    [ -n "$n" ] || continue
+    echo "### $lang"
+    if codeql database create "$w/db-$lang" --language="$lang" --source-root={target} --build-mode=none -j2 --ram=1200 >"$w/$lang.log" 2>&1 \
+      && codeql database analyze "$w/db-$lang" "codeql/$lang-queries:codeql-suites/$lang-$suite.qls" --format=sarif-latest --sarif-add-snippets --output="$w/$lang.sarif" -j2 --ram=1200 >>"$w/$lang.log" 2>&1; then
+      cat "$w/$lang.sarif"; echo
+    else
+      echo "!! codeql $lang failed: $(grep -v '^$' "$w/$lang.log" | tail -3 | tr '\n' ' ' | cut -c1-400)"
+    fi
+  done
+parser_key: codeql
+file_patterns: ["*.py", "*.js", "*.jsx", "*.mjs", "*.cjs", "*.ts", "*.tsx", "*.mts", "*.cts"]
+run_timeout: 900
+install_timeout: 1800
+display_order: 22
+config_schema:
+  - name: suite
+    type: select
+    label: Query suite
+    description: >-
+      security-and-quality adds reliability and maintainability queries to the
+      security ones; security-extended runs the security queries only.
+    default: security-and-quality
+    options:
+      - { value: security-and-quality, label: Security and quality }
+      - { value: security-extended, label: Security (extended) }
+default_config:
+  suite: security-and-quality
+sample_filename: sample.py
+sample_code: |
+  import os
+
+  from flask import Flask, request, send_file
+
+  app = Flask(__name__)
+
+
+  @app.route("/download")
+  def download():
+      # Path traversal: the file name comes straight from the request.
+      name = request.args.get("name", "")
+      return send_file(os.path.join("/srv/files", name))
+
+
+  @app.route("/run")
+  def run():
+      # Command injection.
+      os.system("ping -c 1 " + request.args.get("host", ""))
+      return "ok"

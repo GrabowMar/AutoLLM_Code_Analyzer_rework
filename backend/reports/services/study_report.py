@@ -262,6 +262,10 @@ def app_table(
                 "usable": run.usable,
                 "generated": bool(run.usable) and run.outcome != choices.Outcome.OUTPUT_INVALID,
                 "truncated": bool(validity.get("truncated")),
+                "route_error_terminated": any(
+                    isinstance(n, dict) and n.get("code") == "route_error_terminated"
+                    for n in validity.get("notes") or []
+                ),
                 "files": loc["source_files"],
                 "loc_backend": backend,
                 "loc_frontend": frontend,
@@ -1236,6 +1240,16 @@ def validity_section(
             "all",
             f"{truncated} generation(s) hit max_tokens"
             + (" and were excluded." if config.get("exclude_truncated", True) else "; their code is incomplete."),
+        )
+    route_errors = sum(1 for r in rows if r.get("route_error_terminated"))
+    if route_errors:
+        add(
+            "route_error_terminated",
+            "warning",
+            "all",
+            f"{route_errors} generation(s) ended on an LLM route error (upstream 4xx/5xx or transport failure) "
+            "after at least one successful call and were evaluated as the model's result; compare the rates "
+            "with and without them (validity note route_error_terminated).",
         )
     infra = sum(1 for r in rows if r["evaluation_status"] in _EVAL_INFRA)
     if infra:

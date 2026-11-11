@@ -9,6 +9,8 @@ from io import StringIO
 
 from django.db import transaction
 from django.db.models import Avg
+from django.db.models import Count
+from django.db.models import F
 from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -20,9 +22,11 @@ from ninja.responses import Status
 from backend.common.pagination import paginate_queryset
 from backend.credentials.services.resolver import MissingApiKeyError
 from backend.credentials.services.resolver import get_openrouter_key
+from backend.llm_models.api.schema import REASONING_PARAMETERS
 from backend.llm_models.api.schema import LLMModelListSchema
 from backend.llm_models.api.schema import LLMModelSchema
 from backend.llm_models.api.schema import ModelComparisonSchema
+from backend.llm_models.api.schema import ModelFacetsSchema
 from backend.llm_models.api.schema import ModelImportResultSchema
 from backend.llm_models.api.schema import PaginatedModelsSchema
 from backend.llm_models.api.schema import StatsSchema
@@ -48,6 +52,7 @@ SORT_FIELD_MAP = {
     "cost_efficiency": "cost_efficiency",
     "created_at": "created_at",
     "max_output": "max_output_tokens",
+    "released": "metadata__openrouter_created",
 }
 
 PRICE_PER_MILLION_THRESHOLDS = {
@@ -207,17 +212,101 @@ def _apply_search(qs, search: str):
     return qs
 
 
+CAPABILITY_FIELDS = {
+    "vision": "supports_vision",
+    "function_calling": "supports_function_calling",
+    "streaming": "supports_streaming",
+    "json_mode": "supports_json_mode",
+}
+# Request parameters OpenRouter lists for the model (``metadata.openrouter_supported_parameters``).
+CAPABILITY_PARAMETERS = {
+    "structured_outputs": "structured_outputs",
+    "seed": "seed",
+    "logprobs": "logprobs",
+}
+
+
+def _split(value: str) -> list[str]:
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def _reasoning_q() -> Q:
+    """Same rule as ``model_supports_reasoning``: OpenRouter reasoning params, or Ollama "thinking"."""
+    q = Q(metadata__ollama__capabilities__contains=["thinking"])
+    for param in sorted(REASONING_PARAMETERS):
+        q |= Q(metadata__openrouter_supported_parameters__contains=[param])
+    return q
+
+
 def _apply_capability_filter(qs, capability: str):
-    cap_map = {
-        "vision": "supports_vision",
-        "function_calling": "supports_function_calling",
-        "streaming": "supports_streaming",
-        "json_mode": "supports_json_mode",
-    }
-    field = cap_map.get(capability)
-    if field:
-        qs = qs.filter(**{field: True})
+    """``capability`` is one key or a comma list; every listed capability must hold (AND)."""
+    for cap in _split(capability):
+        if cap in CAPABILITY_FIELDS:
+            qs = qs.filter(**{CAPABILITY_FIELDS[cap]: True})
+        elif cap in CAPABILITY_PARAMETERS:
+            qs = qs.filter(metadata__openrouter_supported_parameters__contains=[CAPABILITY_PARAMETERS[cap]])
+        elif cap == "reasoning":
+            qs = qs.filter(_reasoning_q())
     return qs
+
+
+INPUT_MODALITIES = ("image", "file", "audio", "video")
+
+
+def _apply_modality_filter(qs, modality: str):
+    """Input modalities beyond text (comma list, AND), from OpenRouter's architecture data."""
+    for m in _split(modality):
+        if m in INPUT_MODALITIES:
+            qs = qs.filter(metadata__architecture_input_modalities__contains=[m])
+    return qs
+
+
+def _apply_weights_filter(qs, weights: str):
+    """``open`` / ``closed`` per models.dev; models it does not cover match neither."""
+    if weights == "open":
+        return qs.filter(metadata__models_dev__open_weights=True)
+    if weights == "closed":
+        return qs.filter(metadata__models_dev__open_weights=False)
+    return qs
+
+
+RELEASED_WINDOWS_DAYS = {"30d": 30, "90d": 90, "180d": 180, "365d": 365}
+
+
+def _apply_released_filter(qs, released: str):
+    """Catalog release time (OpenRouter ``created``): within N days, or ``older`` than a year.
+
+    Models without a release time (local endpoint models) match no window.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    days = RELEASED_WINDOWS_DAYS.get(released) or (365 if released == "older" else None)
+    if days is None:
+        return qs
+    cutoff = int((timezone.now() - timedelta(days=days)).timestamp())
+    if released == "older":
+        return qs.filter(metadata__openrouter_created__lt=cutoff)
+    return qs.filter(metadata__openrouter_created__gte=cutoff)
+
+
+COVERAGE_KEYS = {"epoch": "epoch", "lmarena": "lmarena", "huggingface": "huggingface"}
+
+
+def _apply_coverage_filter(qs, coverage: str):
+    """Models with external research data attached (comma list, AND)."""
+    for key in _split(coverage):
+        if key in COVERAGE_KEYS:
+            qs = qs.filter(metadata__has_key=COVERAGE_KEYS[key])
+    return qs
+
+
+def _exclude_variants(qs):
+    """Drop OpenRouter's "(batch)" price variants and router pseudo-models."""
+    # By pk: a bare exclude() on the JSON key would also drop models that have no tokenizer at all.
+    routers = LLMModel.objects.filter(metadata__architecture_tokenizer="Router").values("pk")
+    return qs.exclude(model_name__icontains="(batch)").exclude(pk__in=routers)
 
 
 def _apply_price_range(qs, price_range: str):
@@ -246,10 +335,10 @@ def _apply_context_range(qs, context_range: str):
 
 def _apply_sorting(qs, sort_by: str, sort_dir: str):
     if sort_by and sort_by in SORT_FIELD_MAP:
-        order_field = SORT_FIELD_MAP[sort_by]
-        if sort_dir == "desc":
-            order_field = f"-{order_field}"
-        return qs.order_by(order_field, "model_name")
+        field = F(SORT_FIELD_MAP[sort_by])
+        # Missing values (e.g. no release date) go last in both directions.
+        order = field.desc(nulls_last=True) if sort_dir == "desc" else field.asc(nulls_last=True)
+        return qs.order_by(order, "model_name")
     return qs.order_by("provider", "model_name")
 
 
@@ -269,11 +358,19 @@ def list_models(
     used_in_apps: bool = Query(False),  # noqa: FBT003
     endpoint: str = Query(""),
     include_unavailable: bool = Query(False),  # noqa: FBT003
+    modality: str = Query(""),
+    weights: str = Query(""),
+    released: str = Query(""),
+    tokenizer: str = Query(""),
+    max_output_range: str = Query(""),
+    coverage: str = Query(""),
+    hide_variants: bool = Query(False),  # noqa: FBT003
 ):
     """List models with filtering, search, sorting, and pagination.
 
     ``endpoint`` is a slug, ``local`` or ``openrouter``; hidden and
     unavailable local models are left out unless ``include_unavailable``.
+    ``capability``, ``modality`` and ``coverage`` take comma lists (all must hold).
     """
     qs = _base_queryset(request, include_unavailable=include_unavailable)
     qs = _apply_search(qs, search)
@@ -290,6 +387,24 @@ def list_models(
         qs = _apply_price_range(qs, price_range)
     if context_range:
         qs = _apply_context_range(qs, context_range)
+    if modality:
+        qs = _apply_modality_filter(qs, modality)
+    if weights:
+        qs = _apply_weights_filter(qs, weights)
+    if released:
+        qs = _apply_released_filter(qs, released)
+    if tokenizer:
+        qs = qs.filter(metadata__architecture_tokenizer=tokenizer)
+    if max_output_range in CONTEXT_RANGE_THRESHOLDS:
+        low, high = CONTEXT_RANGE_THRESHOLDS[max_output_range]
+        if low:
+            qs = qs.filter(max_output_tokens__gte=low)
+        if high is not None:
+            qs = qs.filter(max_output_tokens__gt=0, max_output_tokens__lt=high)
+    if coverage:
+        qs = _apply_coverage_filter(qs, coverage)
+    if hide_variants:
+        qs = _exclude_variants(qs)
     if used_in_apps:
         qs = qs.filter(generation_runs__isnull=False).distinct()
 
@@ -325,6 +440,27 @@ def get_stats(request):
         avg_input_price=round((agg["avg_in"] or 0) * 1_000_000, 4),
         avg_output_price=round((agg["avg_out"] or 0) * 1_000_000, 4),
     )
+
+
+@router.get("/facets/", response=ModelFacetsSchema)
+def get_facets(request):
+    """Values and model counts for the list filters (providers, tokenizer families)."""
+    qs = _base_queryset(request, include_unavailable=False)
+    providers = [
+        {"value": row["provider"], "count": row["n"]}
+        for row in qs.values("provider").annotate(n=Count("id")).order_by("provider")
+    ]
+    tokenizers: dict[str, int] = {}
+    for meta in qs.values_list("metadata", flat=True):
+        tok = (meta or {}).get("architecture_tokenizer")
+        if isinstance(tok, str) and tok and tok != "Router":
+            tokenizers[tok] = tokenizers.get(tok, 0) + 1
+    return {
+        "providers": providers,
+        "tokenizers": [
+            {"value": k, "count": v} for k, v in sorted(tokenizers.items(), key=lambda kv: (-kv[1], kv[0]))
+        ],
+    }
 
 
 @router.get("/providers/", response=list[str])
@@ -506,13 +642,16 @@ def _run_sampling(manifest: dict) -> tuple[dict, str, str, list[str]]:
     """``(params sent on every request, sampling policy, where it was read, stripped keys)`` of one run.
 
     Read from the run's frozen manifest (``sampling.forced_params``: what the gateway forced on every
-    call; ``stripped_params``: harness keys it removed). A run without a manifest recorded nothing.
+    call, less ``not_sent_upstream``, the keys the upstream API never received; ``stripped_params``: harness
+    keys it removed). A run without a manifest recorded nothing.
     """
     sampling = manifest.get("sampling") if isinstance(manifest, dict) else None
     if not isinstance(sampling, dict):
         return {}, "not_recorded", "not_recorded", []
     forced = sampling.get("forced_params") or {}
-    sent = {k: forced[k] for k in SAMPLING_USAGE_KEYS if forced.get(k) is not None}
+    # ``not_sent_upstream``: forced by the gateway but dropped before the model (native Anthropic route).
+    not_sent = {str(k) for k in sampling.get("not_sent_upstream") or []}
+    sent = {k: forced[k] for k in SAMPLING_USAGE_KEYS if forced.get(k) is not None and k not in not_sent}
     stripped = [str(k) for k in sampling.get("stripped_params") or []]
     return sent, str(sampling.get("policy") or "not_recorded"), "manifest.sampling.forced_params", stripped
 
@@ -536,7 +675,11 @@ def model_sampling_usage(model: LLMModel, user) -> dict:
     stripped: dict[str, int] = {}
     for run, view in zip(rows, run_views(rows), strict=True):
         by_kind[view.kind] = by_kind.get(view.kind, 0) + 1
-        sent, policy, source, stripped_keys = _run_sampling(view.manifest())
+        manifest = view.manifest()
+        sent, policy, source, stripped_keys = _run_sampling(manifest)
+        sampling = manifest.get("sampling") if isinstance(manifest, dict) else None
+        # Forced but never sent upstream (native Anthropic route): known not sent, not unknown.
+        not_sent = set((sampling or {}).get("not_sent_upstream") or []) if isinstance(sampling, dict) else set()
         policies[policy] = policies.get(policy, 0) + 1
         sources[source] = sources.get(source, 0) + 1
         preset = run.sampling_preset
@@ -552,7 +695,7 @@ def model_sampling_usage(model: LLMModel, user) -> dict:
             slot["n"] += 1
         if policy not in _NOT_SENT_KNOWN_POLICIES:
             for key in SAMPLING_USAGE_KEYS:
-                if key not in sent:
+                if key not in sent and key not in not_sent:
                     unknown_counts[key] += 1
         for key in stripped_keys:
             stripped[key] = stripped.get(key, 0) + 1

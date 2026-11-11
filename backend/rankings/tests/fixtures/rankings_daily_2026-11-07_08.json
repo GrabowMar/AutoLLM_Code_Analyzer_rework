@@ -1,0 +1,90 @@
+{
+ "data": [
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "anthropic/claude-opus-5.5-20260921",
+   "total_tokens": "766503175602"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "deepseek/deepseek-v4.1-flash-20260910",
+   "total_tokens": "2121386631266"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "deepseek/deepseek-v4.1-flash-20261017",
+   "total_tokens": "6985645772629"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "nvidia/nemotron-3-ultra-550b-a55b-20260604:free",
+   "total_tokens": "455642487772"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "nvidia/nemotron-3.5-super-vl-20261015:free",
+   "total_tokens": "368567476243"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "other",
+   "total_tokens": "1343626744209"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "perplexity/pplx-decider-v1.2-20261016",
+   "total_tokens": "46292553238"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "tencent/hy4-preview-20260827",
+   "total_tokens": "50668313133"
+  },
+  {
+   "date": "2026-11-07",
+   "model_permaslug": "z-ai/glm-5.3-flash-20260826",
+   "total_tokens": "1279666599538"
+  },
+  {
+   "date": "2026-11-08",
+   "model_permaslug": "anthropic/claude-opus-5.5-20260921",
+   "total_tokens": "688338316014"
+  },
+  {
+   "date": "2026-11-08",
+   "model_permaslug": "deepseek/deepseek-v4.1-flash-20260910",
+   "total_tokens": "2062576074625"
+  },
+  {
+   "date": "2026-11-08",
+   "model_permaslug": "deepseek/deepseek-v4.1-flash-20261017",
+   "total_tokens": "6008588478606"
+  },
+  {
+   "date": "2026-11-08",
+   "model_permaslug": "nvidia/nemotron-3.5-super-vl-20261015",
+   "total_tokens": "45224001632"
+  },
+  {
+   "date": "2026-11-08",
+   "model_permaslug": "other",
+   "total_tokens": "1260970238417"
+  },
+  {
+   "date": "2026-11-08",
+   "model_permaslug": "tencent/hy4-preview-20260827",
+   "total_tokens": "48130824373"
+  },
+  {
+   "date": "2026-11-08",
+   "model_permaslug": "z-ai/glm-5.3-flash-20260826",
+   "total_tokens": "1126842492745"
+  }
+ ],
+ "meta": {
+  "as_of": "2026-11-09T09:22:19.743Z",
+  "version": "v1",
+  "start_date": "2026-11-07",
+  "end_date": "2026-11-08"
+ }
+}

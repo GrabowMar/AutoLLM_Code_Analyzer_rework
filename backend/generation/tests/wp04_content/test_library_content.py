@@ -116,9 +116,11 @@ def test_eval_suite_v2():
     suites = content.entries("eval_suite")
     assert set(suites) == {"eval-v2"}
     body = suites["eval-v2"].content
-    assert body["tester"]["version"] == 1
+    assert body["tester"]["version"] == 2
     assert body["adherence_checker"]["version"] == 1
-    assert body["acceptance_compiler_version"] == 1
+    assert body["acceptance_compiler_version"] == 2
+    assert (body["tester_rules_version"], body["probe_rules_version"]) == (3, 2)
+    assert len(body["fixtures_digest"]) == 64
     assert body["probes"] == "task"
     assert body["baseline"] == "starter"
 

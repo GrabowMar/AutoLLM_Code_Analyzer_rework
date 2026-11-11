@@ -14,9 +14,11 @@ hand-curated name map ``backend/llm_models/data/external_model_map.yaml``
   arena (overall, coding) and the agent arena. Stored in
   ``metadata["lmarena"]["categories"]``.
 
-Neither import touches ``rankings.BenchmarkResult`` (that would change the
-ranking scores); they are descriptive covariates with their attribution,
-license, fetch time and the curator's match note kept next to every value.
+Both are stored with their attribution, license, fetch time and the curator's
+match note next to every value. MSS v2 (``backend/rankings``, docs/design/MSS_V2.md)
+reads the LMArena WebDev rating as its capability component and the arena
+interaction counts as a popularity fallback / validity check; Epoch stays a
+covariate.
 The catalog sync keeps both keys (``enrichment.ENRICHMENT_KEYS``), and the
 local endpoint inventory merges ``metadata``, so neither re-sync drops them.
 """
@@ -54,6 +56,7 @@ LMARENA_DATASET = "lmarena-ai/leaderboard-dataset"
 LMARENA_DATASET_URL = f"https://huggingface.co/datasets/{LMARENA_DATASET}"
 LMARENA_ROWS_URL = "https://datasets-server.huggingface.co/rows"
 LMARENA_STATS_URL = "https://datasets-server.huggingface.co/statistics"
+LMARENA_PARQUET_URL = "https://huggingface.co/datasets/{dataset}/resolve/main/{config}/{split}-00000-of-00001.parquet"
 LMARENA_SPLIT = "latest"
 LMARENA_LICENSE = "CC-BY 4.0 (LMArena)"
 LMARENA_PAGE_SIZE = 100
@@ -76,8 +79,8 @@ ARENA_CATEGORIES: dict[tuple[str, str], str] = {
 TEXT_CATEGORIES = ("overall", "coding")
 
 REQUEST_TIMEOUT = 60
-REQUEST_ATTEMPTS = 3
-RETRY_PAUSE_SECONDS = 2.0
+REQUEST_ATTEMPTS = 6  # the HF datasets-server answers bursts of 502/503
+RETRY_PAUSE_SECONDS = 5.0
 # The datasets-server rate-limits anonymous callers (429); wait it out instead of aborting the import.
 RATE_LIMIT_PAUSE_SECONDS = 15.0
 RATE_LIMIT_MAX_PAUSE_SECONDS = 60.0
@@ -371,12 +374,47 @@ def _arena_paged(base: dict, *, categories: tuple[str, ...] | None = None) -> li
             return rows
 
 
+def _jsonable(value: Any) -> Any:
+    """A parquet cell as the datasets-server would send it (dates and timestamps become ISO strings)."""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def _arena_parquet(config: str, *, categories: tuple[str, ...] | None = None) -> list[dict]:
+    """The same rows read from the repo's ``<config>/latest-*.parquet`` (fallback when the datasets-server fails).
+
+    Needs ``pyarrow``, which is not a project dependency: install it on demand outside the venv (e.g.
+    ``uv pip install --target <dir> pyarrow`` plus ``PYTHONPATH=<dir>``). Without it the caller's error stands.
+    """
+    import pyarrow.parquet as pq
+
+    url = LMARENA_PARQUET_URL.format(dataset=LMARENA_DATASET, config=config, split=LMARENA_SPLIT)
+    table = pq.read_table(io.BytesIO(_http_get(url).content))
+    rows = [{key: _jsonable(value) for key, value in row.items()} for row in table.to_pylist()]
+    if categories:
+        rows = [row for row in rows if str(row.get("category") or "") in categories]
+    return rows
+
+
 def fetch_lmarena(configs: tuple[str, ...] = ARENA_CONFIGS) -> dict[str, list[dict]]:
-    """``{config: [row, …]}`` of the ``latest`` split (text: only the overall and coding categories)."""
+    """``{config: [row, …]}`` of the ``latest`` split (text: only the overall and coding categories).
+
+    The datasets-server ``/rows`` API is tried first; when it keeps failing (it answers bursts of 502/503),
+    the split's parquet file in the dataset repo is read instead (same rows, see :func:`_arena_parquet`).
+    """
     out: dict[str, list[dict]] = {}
     for config in configs:
+        categories = TEXT_CATEGORIES if config == "text" else None
         base = {"dataset": LMARENA_DATASET, "config": config, "split": LMARENA_SPLIT}
-        out[config] = _arena_paged(base, categories=TEXT_CATEGORIES if config == "text" else None)
+        try:
+            out[config] = _arena_paged(base, categories=categories)
+        except requests.RequestException as exc:
+            try:
+                out[config] = _arena_parquet(config, categories=categories)
+            except ImportError:
+                raise exc from None
+            logger.warning("LMArena %s: datasets-server failed (%s); read the parquet split instead", config, exc)
     return out
 
 
@@ -520,6 +558,28 @@ def used_model_ids() -> set[str]:
     )
 
 
+def frame_model_ids() -> set[str]:
+    """Catalog rows of the MSS v2 frame models that pass the eligibility filters E1-E7.
+
+    For each such canonical model: its anchor row and its pinned version (the
+    rows the capability lookup reads first). Used by ``--frame`` so the
+    "no map entry" warning covers the models the selection can pick, not only
+    the ones that already ran.
+    """
+    from django.utils import timezone
+
+    from backend.rankings.services.frame import build_frame
+    from backend.rankings.services.frame import load_rows
+
+    frame = build_frame(load_rows(), timezone.now().date())
+    out: set[str] = set()
+    for entry in frame["candidates"]:
+        if entry["exclusion"] is None:
+            out.add(entry["anchor_model_id"])
+            out.add(entry["pinned_version"]["model_id"])
+    return out
+
+
 def _write(model_pk: int, changes: dict[str, Any]) -> None:
     """Set (or, for ``None``, remove) metadata keys under a row lock; other keys are untouched."""
     with transaction.atomic():
@@ -564,12 +624,15 @@ def import_external_covariates(
     epoch_rows: dict[str, dict[str, str]] | None = None,
     arena_rows: dict[str, list[dict]] | None = None,
     fetched_at: str | None = None,
+    coverage_ids: set[str] | None = None,
 ) -> ImportReport:
     """Copy the mapped Epoch / LMArena rows into ``metadata["epoch"]`` / ``metadata["lmarena"]``.
 
     ``epoch_rows`` / ``arena_rows`` are downloaded when not given (tests pass
     fixtures). A map entry set to null removes a stale value; a mapped name
-    the download lacks keeps the stored one and is reported.
+    the download lacks keeps the stored one and is reported. ``coverage_ids``
+    (default: models with generation runs) are the models whose missing map
+    entry is warned about.
     """
     entries = entries if entries is not None else load_model_map()
     fetched_at = fetched_at or _now_iso()
@@ -642,8 +705,12 @@ def import_external_covariates(
             _write(model.pk, changes)
 
     if model_ids is None:
-        uncovered = sorted(used_model_ids() - set(entries))
-        report.warnings.extend(f"{mid}: has generation jobs but no entry in the name map" for mid in uncovered)
+        if coverage_ids is None:
+            uncovered = sorted(used_model_ids() - set(entries))
+            report.warnings.extend(f"{mid}: has generation jobs but no entry in the name map" for mid in uncovered)
+        else:
+            uncovered = sorted(coverage_ids - set(entries))
+            report.warnings.extend(f"{mid}: in the MSS v2 frame but no entry in the name map" for mid in uncovered)
     return report
 
 

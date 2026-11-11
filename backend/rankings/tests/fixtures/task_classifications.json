@@ -1,0 +1,80 @@
+{
+ "data": {
+  "window_days": 7,
+  "as_of": "2026-11-08",
+  "classifications": [
+   {
+    "tag": "classification_tagging",
+    "display_name": "Classification",
+    "macro_category": "general",
+    "usage_share": 0.35,
+    "token_share": 0.1,
+    "category_usage_share": 0.586,
+    "category_token_share": 0.323,
+    "models": [
+     {
+      "id": "typesafe/jev-1.13-20260917",
+      "tag_usage_share": 0.23,
+      "tag_token_share": 0.106
+     },
+     {
+      "id": "typesafe/jev-1.14-20261014",
+      "tag_usage_share": 0.108,
+      "tag_token_share": 0.087
+     },
+     {
+      "id": "openai/gpt-6-luna-20260922",
+      "tag_usage_share": 0.067,
+      "tag_token_share": 0.057
+     },
+     {
+      "id": "perplexity/pplx-decider-v1.2-20261016",
+      "tag_usage_share": 0.048,
+      "tag_token_share": 0.057
+     },
+     {
+      "id": "deepseek/deepseek-v4.1-flash-20261017",
+      "tag_usage_share": 0.043,
+      "tag_token_share": 0.135
+     }
+    ]
+   },
+   {
+    "tag": "code:general_impl",
+    "display_name": "Code Generation",
+    "macro_category": "code",
+    "usage_share": 0.032,
+    "token_share": 0.099,
+    "category_usage_share": 0.304,
+    "category_token_share": 0.325,
+    "models": [
+     {
+      "id": "deepseek/deepseek-v4.1-flash-20261017",
+      "tag_usage_share": 0.281,
+      "tag_token_share": 0.306
+     },
+     {
+      "id": "deepseek/deepseek-v4.1-flash-20260910",
+      "tag_usage_share": 0.1,
+      "tag_token_share": 0.092
+     },
+     {
+      "id": "stealth/crouton-alpha",
+      "tag_usage_share": 0.08,
+      "tag_token_share": 0.064
+     },
+     {
+      "id": "z-ai/glm-5.3-flash-20260826",
+      "tag_usage_share": 0.058,
+      "tag_token_share": 0.078
+     },
+     {
+      "id": "tencent/hy4-20261104",
+      "tag_usage_share": 0.035,
+      "tag_token_share": 0.056
+     }
+    ]
+   }
+  ]
+ }
+}

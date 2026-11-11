@@ -7,7 +7,8 @@
 	 *   <ScoreCell value={row.mss_score} best={row.mss_score === colMax.mss} />
 	 *
 	 * Props: `value` (0–1 or null → "—"), `best`, `strong` (bolder headline column),
-	 * `title`, `sub` (small second line, e.g. "n=13"), `class`.
+	 * `title`, `sub` (small second line, e.g. "n=13"), `missing` (text for a null
+	 * value instead of "—", e.g. "no data": a missing input is never shown as 0), `class`.
 	 */
 	import { cn } from '$lib/utils';
 
@@ -17,17 +18,18 @@
 		strong?: boolean;
 		title?: string;
 		sub?: string;
+		missing?: string;
 		class?: string;
 	}
 
-	let { value, best = false, strong = false, title, sub, class: className }: Props = $props();
+	let { value, best = false, strong = false, title, sub, missing, class: className }: Props = $props();
 
 	const pct = $derived(value == null ? null : Math.max(0, Math.min(1, value)) * 100);
 </script>
 
 <td class={cn('num', className)} {title}>
 	{#if pct == null}
-		<span class="text-muted-foreground">—</span>
+		<span class={cn('text-muted-foreground', missing && 'whitespace-nowrap text-[11px]')}>{missing ?? '—'}</span>
 	{:else}
 		<div class="ml-auto flex w-16 flex-col items-end gap-1">
 			<span

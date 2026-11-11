@@ -49,10 +49,10 @@ export interface ModelComparisonRow {
   success_rate: number | null;
   /** mean over completed generations; null when none completed */
   avg_duration_seconds: number | null;
-  // Shared rankings scoring — all 0..1 scales.
-  mss: number;
+  // Shared rankings scoring — all 0..1 scales; null when unscored (no MSS: excluded or missing popularity/price).
+  mss: number | null;
   empirical_quality: number | null;
-  composite: number;
+  composite: number | null;
   /** Evaluation (EvalSuite) functional pass rate; null when no app of the model was evaluated. */
   pass_rate: number | null;
   n_trials: number;

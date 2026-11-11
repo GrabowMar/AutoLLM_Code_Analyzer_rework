@@ -10,7 +10,10 @@
   ``sec_pass`` = every counted check passed and no tested probe was exploited, ``None`` when probes were off or
   none was tested.
 * ``stated_pass_rate`` / ``unstated_pass_rate``: checks whose ``stated_in`` includes the run's prose variant,
-  and the others (8.2). ``common_pass_rate`` needs the study's auth modes and is filled by the results port.
+  and the others (8.2). ``stated_in`` is a plan fact that ``suite.evaluate`` merges into the stored rows by id
+  (``suite.merge_plan_metadata``); rows that do not record it are left out, and when no row records it both
+  rates are ``None`` (unknown). Both are ``None`` for a run without a prose variant.
+  ``common_pass_rate`` needs the study's auth modes and is filled by the results port.
 
 ``run_metrics(run)`` is the documented ``RunMetrics`` of a run with ``eval`` mirrored from its latest
 evaluation (retests excluded).
@@ -72,9 +75,12 @@ def compute(
     if probes_on and tested:
         sec_pass = bool(counted) and passed == len(counted) and exploited == 0
     stated = unstated = None
-    if prose_variant:
-        stated = rate(c for c in counted if prose_variant in (c.get("stated_in") or []))
-        unstated = rate(c for c in counted if prose_variant not in (c.get("stated_in") or []))
+    # Rows without a recorded ``stated_in`` (results of tester v1 that the suite did not back-fill from the
+    # plan) say nothing about statedness: the split is unknown (``None``), never "everything is unstated".
+    recorded = [c for c in counted if c.get("stated_in") is not None]
+    if prose_variant and recorded:
+        stated = rate(c for c in recorded if prose_variant in c["stated_in"])
+        unstated = rate(c for c in recorded if prose_variant not in c["stated_in"])
     over = (agent_rate - baseline_pass_rate) if agent_rate is not None and baseline_pass_rate is not None else None
     return EvalMetrics(
         infra_ok=bool(infra) and all(c.get("status") == "pass" for c in infra),

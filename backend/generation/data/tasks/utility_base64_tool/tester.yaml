@@ -1,0 +1,21 @@
+schema: 1
+notes: |
+  Statedness only (core round 2): one `stated_in` addition; no sample, no request, no setup, no expectation
+  change, no skip.
+
+  `base64.decode.invalid.too_long` sends valid base64 of 140004 characters for `encoded` (maxLength 140000).
+  The exhaustive prose states that limit, but names the field by its role instead of its name: "text to encode
+  is at most 100000 characters, base64 to decode at most 140000". The statedness rule (library/lint.py,
+  STATEDNESS_VERSION 2) looks for the limit in a clause that names the field `encoded`, does not find one and
+  would tag the check as stated nowhere.
+
+  Removed in core round 2 (now done by the compiler for every base64 field): the 140 KB literal that replaced
+  the compiled over-long sample ("y" x 140001, not base64 at all). The compiler now sends "eXl5" x 35001
+  itself: the over-long value of a base64 field stays valid base64.
+checks:
+  base64.decode.invalid.too_long:
+    why: >-
+      Statedness only. Exhaustive prose, Validation: "text to encode is at most 100000 characters, base64 to
+      decode at most 140000" states the 140000 limit of the `encoded` field of POST /api/base64/decode
+      (task.yaml request_schema `encoded: {maxLength: 140000}`) without using the field's name.
+    stated_in: [exhaustive]

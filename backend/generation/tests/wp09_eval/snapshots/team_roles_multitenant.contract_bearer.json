@@ -5,6 +5,149 @@
   "user_b",
   "admin"
  ],
+ "adjusted": [
+  {
+   "id": "projects.list.ok",
+   "reference_types": {
+    "org_id": {
+     "after": [
+      "integer",
+      "string",
+      "null"
+     ],
+     "before": [
+      "integer",
+      "null"
+     ]
+    }
+   },
+   "why": "The task spec declares `org_id` as a reference to Organization and types the id of a Organization as integer/string in its own response schemas, but types the reference as integer/null: a `org_id` is that Organization's id, so the response schema accepts the id types of the referenced entity (plus null where the property was nullable). An app with string ids could not answer any other value (P4: the written expectation contradicts the task spec itself)."
+  },
+  {
+   "id": "projects.create.ok",
+   "reference_types": {
+    "org_id": {
+     "after": [
+      "integer",
+      "string",
+      "null"
+     ],
+     "before": [
+      "integer",
+      "null"
+     ]
+    }
+   },
+   "why": "The task spec declares `org_id` as a reference to Organization and types the id of a Organization as integer/string in its own response schemas, but types the reference as integer/null: a `org_id` is that Organization's id, so the response schema accepts the id types of the referenced entity (plus null where the property was nullable). An app with string ids could not answer any other value (P4: the written expectation contradicts the task spec itself)."
+  },
+  {
+   "id": "projects.get.ok",
+   "reference_types": {
+    "org_id": {
+     "after": [
+      "integer",
+      "string",
+      "null"
+     ],
+     "before": [
+      "integer",
+      "null"
+     ]
+    }
+   },
+   "why": "The task spec declares `org_id` as a reference to Organization and types the id of a Organization as integer/string in its own response schemas, but types the reference as integer/null: a `org_id` is that Organization's id, so the response schema accepts the id types of the referenced entity (plus null where the property was nullable). An app with string ids could not answer any other value (P4: the written expectation contradicts the task spec itself)."
+  },
+  {
+   "id": "projects.update.ok",
+   "reference_types": {
+    "org_id": {
+     "after": [
+      "integer",
+      "string",
+      "null"
+     ],
+     "before": [
+      "integer",
+      "null"
+     ]
+    }
+   },
+   "why": "The task spec declares `org_id` as a reference to Organization and types the id of a Organization as integer/string in its own response schemas, but types the reference as integer/null: a `org_id` is that Organization's id, so the response schema accepts the id types of the referenced entity (plus null where the property was nullable). An app with string ids could not answer any other value (P4: the written expectation contradicts the task spec itself)."
+  },
+  {
+   "completed": [
+    {
+     "added": {
+      "description": "llmlab description",
+      "status": "active"
+     },
+     "step": 1
+    }
+   ],
+   "id": "projects.cross_tenant",
+   "why": "A valid request is valid for every prose variant: this hand-written check sent a request without properties (or query parameters) that only the request schema or the exhaustive prose mark as optional or defaulted, so it also required the app to treat them so. The omitted ones are completed with the compiler's valid values; no value the check sets is changed, and a property the check's own expectation is about is left out."
+  },
+  {
+   "id": "projects.cross_tenant",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 0
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/orgs, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by orgs.create.ok."
+  },
+  {
+   "id": "projects.cross_tenant",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 1
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/orgs/{oid}/projects, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by projects.create.ok."
+  },
+  {
+   "id": "members.admin_cannot_add_owner",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 0
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/orgs, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by orgs.create.ok."
+  },
+  {
+   "id": "members.admin_cannot_add_owner",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 3
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/orgs, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by orgs.create.ok."
+  },
+  {
+   "id": "members.admin_cannot_add_owner",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 4
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/orgs/{oid}/members, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by members.add.ok."
+  }
+ ],
  "auth": {
   "admin_username": "admin",
   "auth_flow": null,
@@ -22,6 +165,7 @@
  "checks": [
   {
    "actor": "anon",
+   "also": [],
    "category": "infra",
    "depends_on": [],
    "endpoint": null,
@@ -33,6 +177,8 @@
     "status": 200
    },
    "id": "health",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -52,6 +198,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "infra",
    "depends_on": [
     "health"
@@ -67,6 +214,8 @@
     "status": 200
    },
    "id": "index_served",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -86,6 +235,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "infra",
    "depends_on": [
     "health"
@@ -101,6 +251,8 @@
     "status": 200
    },
    "id": "spa_fallback",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -120,6 +272,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -133,11 +286,13 @@
     "status": 201
    },
    "id": "auth.register.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
     "json": {
-     "password": "Llmlab-pw-{rand}-9!",
+     "password": "Tk7-{alpha}-Wq9!",
      "username": "llmlab{rand}"
     },
     "method": "POST",
@@ -155,6 +310,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -179,11 +335,13 @@
     "status": 200
    },
    "id": "auth.login.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
     "json": {
-     "password": "Llmlab-pw-{rand}-9!",
+     "password": "Tk7-{alpha}-Wq9!",
      "username": "llmlab{rand}"
     },
     "method": "POST",
@@ -199,11 +357,12 @@
       200,
       201
      ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
       "json": {
-       "password": "Llmlab-pw-{rand}-9!",
+       "password": "Tk7-{alpha}-Wq9!",
        "username": "llmlab{rand}"
       },
       "method": "POST",
@@ -221,6 +380,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -264,6 +424,8 @@
     "status": 201
    },
    "id": "orgs.create.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -278,13 +440,12 @@
    "setup": [],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -298,6 +459,8 @@
     "status": 401
    },
    "id": "orgs.create.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -319,74 +482,7 @@
   },
   {
    "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "orgs.create",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "orgs.create.invalid.missing",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {},
-    "method": "POST",
-    "path": "/api/orgs",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "orgs.create",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "orgs.create.invalid.too_long",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "name": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-    },
-    "method": "POST",
-    "path": "/api/orgs",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -441,6 +537,8 @@
     "status": 200
    },
    "id": "orgs.list.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -460,6 +558,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -473,6 +572,8 @@
     "status": 401
    },
    "id": "orgs.list.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -492,6 +593,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -545,6 +647,8 @@
     "status": 200
    },
    "id": "members.list.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -560,7 +664,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -576,12 +684,12 @@
    "source": "compiler",
    "stated_in": [
     "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -595,6 +703,8 @@
     "status": 401
    },
    "id": "members.list.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -610,7 +720,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -632,6 +746,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -674,6 +789,8 @@
     "status": 201
    },
    "id": "members.add.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -692,7 +809,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -707,13 +828,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -727,6 +847,8 @@
     "status": 401
    },
    "id": "members.add.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -745,7 +867,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -761,173 +887,12 @@
    "source": "compiler",
    "stated_in": [
     "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "members.add",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "members.add.invalid.missing",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "role": "owner"
-    },
-    "method": "POST",
-    "path": "/api/orgs/{org_id}/members",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "members.add",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "members.add.invalid.too_long",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "role": "owner",
-     "username": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-    },
-    "method": "POST",
-    "path": "/api/orgs/{org_id}/members",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "members.add",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "members.add.invalid.enum",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "role": "llmlab-not-an-option",
-     "username": "{user_b_username}"
-    },
-    "method": "POST",
-    "path": "/api/orgs/{org_id}/members",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
+   "also": [],
    "category": "negative",
    "depends_on": [
     "health"
@@ -941,6 +906,8 @@
     "status": 409
    },
    "id": "members.add.duplicate",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -959,7 +926,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -974,7 +945,11 @@
     {
      "actor": "user_a",
      "capture": {},
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -995,6 +970,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1037,6 +1013,8 @@
     "status": 200
    },
    "id": "members.update.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1054,7 +1032,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1071,7 +1053,11 @@
      "capture": {
       "username": "$.username"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1088,12 +1074,12 @@
    "source": "compiler",
    "stated_in": [
     "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -1107,6 +1093,8 @@
     "status": 401
    },
    "id": "members.update.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1124,7 +1112,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1141,7 +1133,11 @@
      "capture": {
       "username": "$.username"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1158,83 +1154,12 @@
    "source": "compiler",
    "stated_in": [
     "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "members.update",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "members.update.invalid.enum",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "role": "llmlab-not-an-option"
-    },
-    "method": "PATCH",
-    "path": "/api/orgs/{org_id}/members/{username}",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_a",
-     "capture": {
-      "username": "$.username"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "role": "owner",
-       "username": "{user_b_username}"
-      },
-      "method": "POST",
-      "path": "/api/orgs/{org_id}/members",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1248,6 +1173,8 @@
     "status": 204
    },
    "id": "members.remove.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1263,7 +1190,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1280,7 +1211,11 @@
      "capture": {
       "username": "$.username"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1296,13 +1231,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -1316,6 +1250,8 @@
     "status": 401
    },
    "id": "members.remove.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1331,7 +1267,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1348,7 +1288,11 @@
      "capture": {
       "username": "$.username"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1365,12 +1309,12 @@
    "source": "compiler",
    "stated_in": [
     "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1412,6 +1356,7 @@
          "org_id": {
           "type": [
            "integer",
+           "string",
            "null"
           ]
          },
@@ -1445,6 +1390,8 @@
     "status": 200
    },
    "id": "projects.list.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1460,7 +1407,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1475,13 +1426,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -1495,6 +1445,8 @@
     "status": 401
    },
    "id": "projects.list.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1510,7 +1462,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1532,6 +1488,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1570,6 +1527,7 @@
       "org_id": {
        "type": [
         "integer",
+        "string",
         "null"
        ]
       },
@@ -1595,6 +1553,8 @@
     "status": 201
    },
    "id": "projects.create.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1614,7 +1574,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1629,13 +1593,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -1649,6 +1612,8 @@
     "status": 401
    },
    "id": "projects.create.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1668,63 +1633,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "minimal",
-    "standard",
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "projects.create",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "projects.create.invalid.missing",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "description": "llmlab description",
-     "status": "active"
-    },
-    "method": "POST",
-    "path": "/api/orgs/{org_id}/projects",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1744,116 +1657,7 @@
   },
   {
    "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "projects.create",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "projects.create.invalid.too_long",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "description": "llmlab description",
-     "name": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-     "status": "active"
-    },
-    "method": "POST",
-    "path": "/api/orgs/{org_id}/projects",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
-   "category": "validation",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "projects.create",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": [
-     400,
-     422
-    ]
-   },
-   "id": "projects.create.invalid.enum",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "description": "llmlab description",
-     "name": "llmlab name",
-     "status": "llmlab-not-an-option"
-    },
-    "method": "POST",
-    "path": "/api/orgs/{org_id}/projects",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1892,6 +1696,7 @@
       "org_id": {
        "type": [
         "integer",
+        "string",
         "null"
        ]
       },
@@ -1917,6 +1722,8 @@
     "status": 200
    },
    "id": "projects.get.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1932,7 +1739,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1949,7 +1760,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1966,13 +1781,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -1986,6 +1800,8 @@
     "status": 401
    },
    "id": "projects.get.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -2001,7 +1817,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2018,7 +1838,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2035,13 +1859,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -2080,6 +1903,7 @@
       "org_id": {
        "type": [
         "integer",
+        "string",
         "null"
        ]
       },
@@ -2105,6 +1929,8 @@
     "status": 200
    },
    "id": "projects.update.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -2124,7 +1950,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2141,7 +1971,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2158,13 +1992,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -2178,6 +2011,8 @@
     "status": 401
    },
    "id": "projects.update.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -2197,7 +2032,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2214,7 +2053,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2231,13 +2074,1020 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "projects.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 204
+   },
+   "id": "projects.delete.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/projects/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "description": "llmlab description",
+       "name": "llmlab name",
+       "status": "active"
+      },
+      "method": "POST",
+      "path": "/api/orgs/{org_id}/projects",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "projects.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "projects.delete.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/projects/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "description": "llmlab description",
+       "name": "llmlab name",
+       "status": "active"
+      },
+      "method": "POST",
+      "path": "/api/orgs/{org_id}/projects",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "persistence",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "projects.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": {
+     "name": "llmlab name"
+    },
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "projects.get.persists",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/projects/{id}",
+    "query": {}
+   },
+   "restart_before": true,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "description": "llmlab description",
+       "name": "llmlab name",
+       "status": "active"
+      },
+      "method": "POST",
+      "path": "/api/orgs/{org_id}/projects",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "also": [],
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "projects.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "projects.cross_tenant",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/projects/{pid}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "oid": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "zz org"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "pid": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "description": "llmlab description",
+       "name": "secret",
+       "status": "active"
+      },
+      "method": "POST",
+      "path": "/api/orgs/{oid}/projects",
+      "query": {}
+     }
+    }
+   ],
+   "source": "acceptance",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "members.add",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 403
+   },
+   "id": "members.admin_cannot_add_owner",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "role": "owner",
+     "username": "zz_owner_candidate"
+    },
+    "method": "POST",
+    "path": "/api/orgs/{oid}/members",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_b",
+     "capture": {
+      "b_oid": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "zz own org"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_b",
+     "capture": {
+      "b_name": "$.items[0].username"
+     },
+     "expect_status": 200,
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": null,
+      "method": "GET",
+      "path": "/api/orgs/{b_oid}/members",
+      "query": {}
+     }
+    },
+    {
+     "actor": "anon",
+     "capture": {},
+     "expect_status": [
+      201,
+      409
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "password": "s3cret-pass",
+       "username": "zz_owner_candidate"
+      },
+      "method": "POST",
+      "path": "/api/auth/register",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "oid": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "zz roles org"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "role": "admin",
+       "username": "{b_name}"
+      },
+      "method": "POST",
+      "path": "/api/orgs/{oid}/members",
+      "query": {}
+     }
+    }
+   ],
+   "source": "acceptance",
+   "stated_in": [
     "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "orgs.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "orgs.create.invalid.missing",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {},
+    "method": "POST",
+    "path": "/api/orgs",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "orgs.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "orgs.create.invalid.too_long",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "name": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    "method": "POST",
+    "path": "/api/orgs",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "members.add",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "members.add.invalid.missing",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "role": "owner"
+    },
+    "method": "POST",
+    "path": "/api/orgs/{org_id}/members",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "members.add",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "members.add.invalid.too_long",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "role": "owner",
+     "username": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy{rand}"
+    },
+    "method": "POST",
+    "path": "/api/orgs/{org_id}/members",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "members.add",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "members.add.invalid.enum",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "role": "notlisted",
+     "username": "{user_b_username}"
+    },
+    "method": "POST",
+    "path": "/api/orgs/{org_id}/members",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "members.update",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "members.update.invalid.enum",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "role": "notlisted"
+    },
+    "method": "PATCH",
+    "path": "/api/orgs/{org_id}/members/{username}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "username": "$.username"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "role": "owner",
+       "username": "{user_b_username}"
+      },
+      "method": "POST",
+      "path": "/api/orgs/{org_id}/members",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "projects.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "projects.create.invalid.missing",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "description": "llmlab description",
+     "status": "active"
+    },
+    "method": "POST",
+    "path": "/api/orgs/{org_id}/projects",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [
+    {
+     "label": "description",
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "description": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+       "name": "llmlab name",
+       "status": "active"
+      },
+      "method": "POST",
+      "path": "/api/orgs/{org_id}/projects",
+      "query": {}
+     }
+    }
+   ],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "projects.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "projects.create.invalid.too_long",
+   "label": "name",
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "description": "llmlab description",
+     "name": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "status": "active"
+    },
+    "method": "POST",
+    "path": "/api/orgs/{org_id}/projects",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "validation",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "projects.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": [
+     400,
+     422
+    ]
+   },
+   "id": "projects.create.invalid.enum",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "description": "llmlab description",
+     "name": "llmlab name",
+     "status": "notlisted"
+    },
+    "method": "POST",
+    "path": "/api/orgs/{org_id}/projects",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "org_id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "name": "llmlab name"
+      },
+      "method": "POST",
+      "path": "/api/orgs",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [
+    {
+     "label": "description",
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "description": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+       "name": "llmlab name",
+       "status": "active"
+      },
+      "method": "PATCH",
+      "path": "/api/projects/{id}",
+      "query": {}
+     }
+    }
+   ],
    "category": "validation",
    "depends_on": [
     "health"
@@ -2254,6 +3104,8 @@
     ]
    },
    "id": "projects.update.invalid.too_long",
+   "label": "name",
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -2273,7 +3125,11 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2290,7 +3146,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -2312,6 +3172,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "validation",
    "depends_on": [
     "health"
@@ -2328,13 +3189,15 @@
     ]
    },
    "id": "projects.update.invalid.enum",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
     "json": {
      "description": "llmlab description",
      "name": "llmlab name",
-     "status": "llmlab-not-an-option"
+     "status": "notlisted"
     },
     "method": "PATCH",
     "path": "/api/projects/{id}",
@@ -2347,408 +3210,16 @@
      "capture": {
       "org_id": "$.id"
      },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_a",
-     "capture": {
-      "id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "description": "llmlab description",
-       "name": "llmlab name",
-       "status": "active"
-      },
-      "method": "POST",
-      "path": "/api/orgs/{org_id}/projects",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
-   "category": "functional",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "projects.delete",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": 204
-   },
-   "id": "projects.delete.ok",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": null,
-    "method": "DELETE",
-    "path": "/api/projects/{id}",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_a",
-     "capture": {
-      "id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "description": "llmlab description",
-       "name": "llmlab name",
-       "status": "active"
-      },
-      "method": "POST",
-      "path": "/api/orgs/{org_id}/projects",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "minimal",
-    "standard",
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "anon",
-   "category": "auth",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "projects.delete",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": 401
-   },
-   "id": "projects.delete.anon_401",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": null,
-    "method": "DELETE",
-    "path": "/api/projects/{id}",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_a",
-     "capture": {
-      "id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "description": "llmlab description",
-       "name": "llmlab name",
-       "status": "active"
-      },
-      "method": "POST",
-      "path": "/api/orgs/{org_id}/projects",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "minimal",
-    "standard",
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_a",
-   "category": "persistence",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "projects.get",
-   "expect": {
-    "header_contains": null,
-    "json_contains": {
-     "name": "llmlab name"
-    },
-    "json_schema": null,
-    "max_ms": null,
-    "status": 200
-   },
-   "id": "projects.get.persists",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": null,
-    "method": "GET",
-    "path": "/api/projects/{id}",
-    "query": {}
-   },
-   "restart_before": true,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "org_id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "llmlab name"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_a",
-     "capture": {
-      "id": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "description": "llmlab description",
-       "name": "llmlab name",
-       "status": "active"
-      },
-      "method": "POST",
-      "path": "/api/orgs/{org_id}/projects",
-      "query": {}
-     }
-    }
-   ],
-   "source": "compiler",
-   "stated_in": [
-    "minimal",
-    "standard",
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_b",
-   "category": "ownership",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "projects.get",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": 404
-   },
-   "id": "projects.cross_tenant",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": null,
-    "method": "GET",
-    "path": "/api/projects/{pid}",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_a",
-     "capture": {
-      "oid": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "zz org"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_a",
-     "capture": {
-      "pid": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "secret"
-      },
-      "method": "POST",
-      "path": "/api/orgs/{oid}/projects",
-      "query": {}
-     }
-    }
-   ],
-   "source": "acceptance",
-   "stated_in": [
-    "standard",
-    "exhaustive"
-   ]
-  },
-  {
-   "actor": "user_b",
-   "category": "auth",
-   "depends_on": [
-    "health"
-   ],
-   "endpoint": "members.add",
-   "expect": {
-    "header_contains": null,
-    "json_contains": null,
-    "json_schema": null,
-    "max_ms": null,
-    "status": 403
-   },
-   "id": "members.admin_cannot_add_owner",
-   "request": {
-    "files": null,
-    "form": null,
-    "json": {
-     "role": "owner",
-     "username": "zz_owner_candidate"
-    },
-    "method": "POST",
-    "path": "/api/orgs/{oid}/members",
-    "query": {}
-   },
-   "restart_before": false,
-   "setup": [
-    {
-     "actor": "user_b",
-     "capture": {
-      "b_oid": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "zz own org"
-      },
-      "method": "POST",
-      "path": "/api/orgs",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_b",
-     "capture": {
-      "b_name": "$.items[0].username"
-     },
-     "expect_status": 200,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": null,
-      "method": "GET",
-      "path": "/api/orgs/{b_oid}/members",
-      "query": {}
-     }
-    },
-    {
-     "actor": "anon",
-     "capture": {},
      "expect_status": [
-      201,
-      409
+      200,
+      201
      ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
       "json": {
-       "password": "s3cret-pass",
-       "username": "zz_owner_candidate"
-      },
-      "method": "POST",
-      "path": "/api/auth/register",
-      "query": {}
-     }
-    },
-    {
-     "actor": "user_a",
-     "capture": {
-      "oid": "$.id"
-     },
-     "expect_status": 201,
-     "request": {
-      "files": null,
-      "form": null,
-      "json": {
-       "name": "zz roles org"
+       "name": "llmlab name"
       },
       "method": "POST",
       "path": "/api/orgs",
@@ -2757,29 +3228,35 @@
     },
     {
      "actor": "user_a",
-     "capture": {},
-     "expect_status": 201,
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
       "json": {
-       "role": "admin",
-       "username": "{b_name}"
+       "description": "llmlab description",
+       "name": "llmlab name",
+       "status": "active"
       },
       "method": "POST",
-      "path": "/api/orgs/{oid}/members",
+      "path": "/api/orgs/{org_id}/projects",
       "query": {}
      }
     }
    ],
-   "source": "acceptance",
+   "source": "compiler",
    "stated_in": [
-    "standard",
     "exhaustive"
    ]
   }
  ],
- "compiler_version": 1,
+ "compiler_version": 2,
  "has_frontend": true,
  "health_path": "/api/health",
  "mock_host": "mock.internal",
@@ -2803,7 +3280,10 @@
       "capture": {
        "org_id": "$.id"
       },
-      "expect_status": 201,
+      "expect_status": [
+       200,
+       201
+      ],
       "request": {
        "json": {
         "name": "llmlab name"
@@ -2817,7 +3297,10 @@
       "capture": {
        "id": "$.id"
       },
-      "expect_status": 201,
+      "expect_status": [
+       200,
+       201
+      ],
       "request": {
        "json": {
         "description": "llmlab description",
@@ -2837,7 +3320,7 @@
    },
    "positive_control": {
     "actor": "user_a",
-    "expect_status": 200,
+    "expect_status": null,
     "files": null,
     "form": null,
     "headers": {},
@@ -2868,7 +3351,10 @@
       "capture": {
        "org_id": "$.id"
       },
-      "expect_status": 201,
+      "expect_status": [
+       200,
+       201
+      ],
       "request": {
        "json": {
         "name": "llmlab name"
@@ -2891,7 +3377,7 @@
    },
    "positive_control": {
     "actor": "user_a",
-    "expect_status": 201,
+    "expect_status": null,
     "files": null,
     "form": null,
     "headers": {},
@@ -2909,5 +3395,7 @@
    ]
   }
  ],
- "signed_routes": []
+ "signed_routes": [],
+ "skipped": [],
+ "upstream": null
 }

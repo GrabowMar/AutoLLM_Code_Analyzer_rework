@@ -374,12 +374,28 @@ class GenerationRun(ValidatedModel):
 
     @classmethod
     def iter_blob_refs(cls) -> Iterator[str]:
-        """The lock files inside every ``resolved_lock_blob`` payload (``ResolvedLock.files`` values)."""
+        """The lock files of every ``resolved_lock_blob`` payload, and the locks dropped by a supersession.
+
+        ``ResolvedLock.files`` values; ``execution.eval_supersessions[*].relock.previous_lock_blob`` and its files.
+        """
         from backend.generation import blobs
 
         locks = cls._base_manager.exclude(resolved_lock_blob="").values_list("resolved_lock_blob", flat=True)
         for sha in locks.distinct().iterator():
             yield from blobs.nested_blob_refs(sha, _resolved_lock_files)
+        # A lock an operator dropped to re-resolve it (``evaluation.supersede``, ``--relock``) stays referenced by
+        # the run's supersession history: the superseded evaluations were built under it (audit, reproduction).
+        histories = cls._base_manager.filter(execution__has_key="eval_supersessions").values_list(
+            "execution",
+            flat=True,
+        )
+        for execution in histories.iterator():
+            for entry in (execution or {}).get("eval_supersessions") or []:
+                relock = entry.get("relock") if isinstance(entry, dict) else None
+                sha = relock.get("previous_lock_blob") if isinstance(relock, dict) else None
+                if isinstance(sha, str) and sha:
+                    yield sha
+                    yield from blobs.nested_blob_refs(sha, _resolved_lock_files)
 
     @property
     def fingerprints(self) -> dict[str, str]:

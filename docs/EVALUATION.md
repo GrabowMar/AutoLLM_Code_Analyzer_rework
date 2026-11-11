@@ -37,6 +37,40 @@ collected tree); a failed evaluation is retried with the runs API.
 `mode=overlay` (slot variants, spec 4.8) skips lock and build and starts the parent image with the slot files
 copied in; `mode=static_only` runs no app.
 
+**Platform CPU faults (`platform_cpu`).** A step killed by `SIGILL` -- "Illegal instruction", BuildKit's `exit
+code: 132`, the legacy builder's `returned a non-zero code: 132`, a Go/Rust `SIGILL: illegal instruction`,
+gunicorn's `was sent SIGILL`, or an app process/container exit code 132 (`-4` from `Popen.poll`) -- ran a
+prebuilt binary compiled for a newer x86-64 level than the evaluation host (Ivy Bridge: AVX, no AVX2/BMI2/FMA).
+It is never the sample's fault: the lock step (`LockInfraError`), the build (before `lock_incomplete`,
+`build_infra` and `build_fail`; never retried, it is deterministic), the start (instead of `start_fail`) and the
+app during the tester (the checks are discarded) all end `stages.<stage>.status=error`, `detail.reason=
+platform_cpu`, `detail.signal=SIGILL`: `RunEvaluation.status=error`, `result.measured=false`
+(`not_measured_reason=infra:platform_cpu`), outcome `infra_error:platform_cpu` -- not usable, attrition, no pass
+rate (never 0). `suite.platform_cpu_fault(log, exit_code=)` is the detector; `suite.stored_platform_cpu_fault(
+evaluation)` reads a stored row's failed stages (operator scans). First seen 2026-11-09:
+`@rolldown/binding-linux-x64-gnu@1.2.18` (vite 8's bundler) ships an x86-64-v3 mimalloc.
+
+*What qualifies* (so a sample's own failure is never relabelled): only what the OS, a shell, a runtime or a
+builder prints for a process that died of SIGILL -- sh/dash `Illegal instruction (core dumped)` or `Illegal
+instruction` ending its line, bash `<pid> Illegal instruction  (core dumped) <cmd>`, `Fatal Python error: Illegal
+instruction`, `SIGILL: illegal instruction`, `signal SIGILL` / `signal: 'SIGILL'`, `<Signals.SIGILL: 4>`, `was sent
+SIGILL`, exit status 132 (`exit code: 132`, `returned a non-zero code: 132`, `exit status 132`, `exited with code
+132`). The words in the sample's own text do not count: a quoted string (`throw new Error("Illegal instruction")`
+in a compiler excerpt), an exception message (`Error: Illegal instruction`), `signal.SIGILL` in a traceback.
+**Build:** the failed step decides (`suite.build_platform_cpu_fault`): its exit status 132 is SIGILL; with any
+other status a SIGILL report counts only inside that step's own output (BuildKit `#N` lines of the `#N ERROR`
+step, the legacy builder's last `Step`), so a SIGILL that an earlier step survived (a native probe with a
+fallback, `|| true`) never relabels a later `build_fail`; a build that timed out (no step status) counts a SIGILL
+report only in the step that was still printing. **Lock:** a resolver killed by SIGILL is never
+`lock_unresolvable`, even when its output also says "No solution found". **Tester:** the checks are discarded only
+when the tester did not measure or a check failed/errored; a clean measured result stands
+(`stages.tester.detail.sigill_in_app_logs=true`). Every `platform_cpu` stage records `detail.host_cpu` (CPU model,
+`x86_64_level`, the x86-64-v3 flags it lacks) as evidence. *Residual ambiguity:* a sample's own native code can
+also die of SIGILL (`ud2` from `__builtin_trap`/undefined behaviour in C, C++, Rust or Zig it compiled) or call
+`exit(132)`; logs cannot tell that apart from a missing CPU feature (only the kernel's `trap invalid opcode ...
+in <file>` line names the faulting binary). Such runs are attrition, not 0, and the operator scan
+(`reevaluate_platform_failures`, §9) lists every one; `infra_error_by_reason` in the attrition table reports them.
+
 Postgres stacks (`database: postgres`, phase B) get a database sidecar on the eval network: the docker runtime's
 `start_database("postgres")` starts `base_images.yaml` `sidecars.postgres` (pinned by digest) as alias `db` with a
 fresh password, waits for `pg_isready` and passes `DATABASE_URL=postgresql://app:<pw>@db:5432/app` to the app; the
@@ -59,7 +93,11 @@ changed (`stale_starter_lock`) or a lock that misses a direct requirement (`not_
 Otherwise the platform resolves the manifest in a container of the sandbox base image (`uv pip compile
 --generate-hashes`, `npm install --package-lock-only`) and stores the lock at the starter-convention path
 (`<dir>/requirements.lock`, `<dir>/package-lock.json`), so the starter Dockerfiles install under it;
-`lock_source=platform`, `registry_snapshot_at` = now.
+`lock_source=platform`, `registry_snapshot_at` = now. For npm the tree's own `package-lock.json` (the model's or
+the starter's, lockfile v2+) goes in next to `package.json` as the seed: npm keeps every locked version the
+manifest still accepts and re-resolves only what changed; a seed npm cannot use (resolver error, or a result that
+does not cover the manifest) falls back to the manifest-only resolve, so a broken model lock is never
+`lock_unresolvable` by itself.
 
 Go (phase B): a `go.mod` whose `go.sum` is missing or does not cover it gets the platform Go lock: `go mod
 download all` in the pinned `base_images.yaml` `go` image with `GOTOOLCHAIN=local` (the toolchain the stack
@@ -277,3 +315,15 @@ runs evaluations.
 - `manage.py oracle_validate --kit [--kinds a,b] [--dry-run]`: validate the probe kinds (local; no docker).
 - `manage.py oracle_validate [--task SLUG] [--stack SLUG] [--suite REF] [--runs 3]`: validate task oracles.
 - `manage.py conformance_kit [--stack SLUG] [--suite REF] [--status]`: run or show the conformance kit.
+- `manage.py reevaluate_platform_failures [RUN_ID ...] [--study ID] [--relock] [--include-reclassified]
+  [--no-force-rebuild] [--note TEXT] [--by NAME] [--apply]`: list (default) or re-evaluate runs whose latest evaluation died
+  of a platform CPU fault. `--apply` queues one re-evaluation per run under the superseded evaluation's suite
+  (`evaluation.supersede.supersede`) and records `execution.eval_supersessions` (who, when, the superseded
+  evaluation/outcome/`metrics.eval`, the new evaluation id, a dropped lock) plus the validity note
+  `eval_superseded:platform_cpu` (warn). The run's outcome and `metrics.eval` follow the new evaluation when the
+  eval worker finishes it (as for every re-evaluation); old `RunEvaluation` rows never change. `--relock` drops a
+  platform lock (never a model lock) so the lock step re-resolves it, seeded with the tree's lock; the dropped
+  lock stays in the blob store (`GenerationRun.iter_blob_refs` keeps `eval_supersessions[*].relock.
+  previous_lock_blob` and its files from GC). `--relock` re-resolves every ecosystem the platform completed, not
+  only npm. `--by` names the operator (default: the OS user). The executor does not autoreload: restart it on the
+  new code before `--apply`.

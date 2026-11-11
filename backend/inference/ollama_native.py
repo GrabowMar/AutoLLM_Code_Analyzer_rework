@@ -169,8 +169,13 @@ def from_openai_response(
     served_model: str,
     provider: str,
     created: int | None = None,
+    zero_cost: bool = True,
 ) -> dict[str, Any]:
-    """An upstream OpenAI-compatible response, normalised (``provider``, ``model``, ``usage.cost = 0``)."""
+    """An upstream OpenAI-compatible response, normalised (``provider``, ``model``, ``usage.cost = 0``).
+
+    ``zero_cost=False`` leaves ``usage.cost`` as the upstream reported it (absent: unknown, so the budget
+    code prices the tokens at the list-price table instead of booking $0).
+    """
     out = dict(payload)
     usage = dict(out.get("usage") or {})
     prompt = int(usage.get("prompt_tokens") or 0)
@@ -180,9 +185,10 @@ def from_openai_response(
             "prompt_tokens": prompt,
             "completion_tokens": completion,
             "total_tokens": int(usage.get("total_tokens") or prompt + completion),
-            "cost": 0.0,
         },
     )
+    if zero_cost:
+        usage["cost"] = 0.0
     out["usage"] = usage
     out["provider"] = provider
     out["model"] = served_model

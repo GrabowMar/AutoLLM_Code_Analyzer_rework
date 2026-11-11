@@ -31,6 +31,9 @@ STATIC_PARAMS: dict[tuple[str, str], frozenset[str]] = {
     ("ollama", "openai"): _OLLAMA_OPENAI,
     # vLLM and friends accept these as extras.
     ("openai_compatible", "openai"): _OLLAMA_OPENAI | {"top_k", "min_p", "repetition_penalty"},
+    # Anthropic's native Messages API: documentation only, ``anthropic_native.to_messages_request`` maps its
+    # own keys (sampling knobs are stripped: current Claude models reject them, and there is no seed).
+    ("openai_compatible", "anthropic"): frozenset({"max_tokens", "tools"}),
 }
 
 SOURCE_OFFSET: dict[str, int] = {

@@ -61,7 +61,17 @@ HF_RESOLVE_URL = "https://huggingface.co/{hf_id}/resolve/{rev}/{filename}"
 HF_PAPER_URL = "https://huggingface.co/api/papers/{arxiv_id}"
 OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{path}/endpoints"
 
-ENRICHMENT_KEYS = ("models_dev", "huggingface", "catalog_twin", "params", "epoch", "lmarena")
+# popularity / list_price: the MSS v2 inputs written by rankings import_popularity / import_list_prices.
+ENRICHMENT_KEYS = (
+    "models_dev",
+    "huggingface",
+    "catalog_twin",
+    "params",
+    "epoch",
+    "lmarena",
+    "popularity",
+    "list_price",
+)
 
 MODELS_DEV_CACHE_KEY = "llm_models:models_dev:v1"
 MODELS_DEV_PROVIDERS_CACHE_KEY = "llm_models:models_dev_providers:v1"
@@ -732,6 +742,9 @@ def _normalize_endpoint(raw: dict) -> dict:
         "output_price_per_million": (_float_or_none(pricing.get("completion")) or 0.0) * 1_000_000,
         "cache_read_per_million": (
             p * 1_000_000 if (p := _float_or_none(pricing.get("input_cache_read"))) is not None else None
+        ),
+        "cache_write_per_million": (
+            p * 1_000_000 if (p := _float_or_none(pricing.get("input_cache_write"))) is not None else None
         ),
         "discount": _float_or_none(pricing.get("discount")) or 0.0,
         "status": raw.get("status"),

@@ -163,7 +163,8 @@ def test_get_model_comparison_uses_shared_rankings_scoring():
     assert row["apps"] == 4
     assert row["apps_completed"] == 3
     assert row["success_rate"] == 75.0
-    assert 0 <= row["mss"] <= 1
+    # A model without MSS v2 evidence has no MSS (None, never 0) and therefore no composite.
+    assert row["mss"] is None or 0 <= row["mss"] <= 1
     assert row["findings"]["critical"] == 2
     assert row["ai_findings"] == {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     # LOC comes from the stored code: the analyzed run has some, so its findings yield an empirical measurement.

@@ -48,9 +48,11 @@ class LLMEndpoint(models.Model):
         RELAY = "relay", _("Relay")
 
     class ApiFlavor(models.TextChoices):
-        # native is valid only for kind=ollama (constraint below)
+        # native is valid only for kind=ollama; anthropic (the native Messages API, prompt caching) only for a
+        # direct openai_compatible endpoint (constraint below: the relay cannot carry /v1/messages).
         NATIVE = "native", _("Native")
         OPENAI = "openai", _("OpenAI")
+        ANTHROPIC = "anthropic", _("Anthropic Messages")
 
     class Visibility(models.TextChoices):
         PRIVATE = "private", _("Private")
@@ -124,8 +126,10 @@ class LLMEndpoint(models.Model):
                 name="llmendpoint_openrouter_direct",
             ),
             models.CheckConstraint(
-                condition=Q(api_flavor="openai") | Q(kind="ollama"),
-                name="llmendpoint_native_only_ollama",
+                condition=Q(api_flavor="openai")
+                | Q(kind="ollama", api_flavor="native")
+                | Q(kind="openai_compatible", api_flavor="anthropic", connection="direct"),
+                name="llmendpoint_flavor_by_kind",
             ),
             models.CheckConstraint(
                 condition=Q(max_concurrency__gte=1) & Q(max_concurrency__lte=256),

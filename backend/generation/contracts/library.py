@@ -38,7 +38,9 @@ from typing import Literal
 from typing import get_args
 
 from pydantic import Field
+from pydantic import SerializerFunctionWrapHandler
 from pydantic import StringConstraints
+from pydantic import model_serializer
 
 from backend.generation.contracts._base import ContractModel
 from backend.generation.contracts._base import CweId
@@ -590,6 +592,9 @@ class SamplingContent(ContractModel):
     forward_seed: bool = True
 
 
+FixturesDigest = Annotated[str, StringConstraints(pattern=r"^(?:sha256:)?[0-9a-f]{64}$")]
+
+
 class ImagePin(ContractModel):
     version: PosInt
     image_digest: DigestStr
@@ -611,6 +616,19 @@ class EvalSuiteContent(ContractModel):
     flaky_checks: list[str] = Field(default_factory=list)  # written by oracle_validate as a new suite version
     tester_rules_version: PosInt = 1
     probe_rules_version: PosInt = 1
+    # The instrument fixtures this suite was validated with: ``acceptance.fixtures_digest()`` over every task
+    # overlay (``data/tasks/<slug>/tester.yaml``). When set, an evaluation refuses a tree whose overlays differ
+    # (``fixtures_digest_mismatch``, like the pinned image digests). ``None`` (eval-v2@1): not pinned.
+    fixtures_digest: FixturesDigest | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_fixtures_digest(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # The content hash is taken over this dump, defaults included: an unset ``fixtures_digest`` must not
+        # appear, or every suite stored before the field existed (eval-v2@1) would hash differently on re-seed.
+        data = handler(self)
+        if data.get("fixtures_digest") is None:
+            data.pop("fixtures_digest", None)
+        return data
 
 
 class DetectorTool(ContractModel):

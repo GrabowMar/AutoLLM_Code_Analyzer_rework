@@ -8,7 +8,8 @@ the ``lint_*`` codes of ``contracts/issues.py`` (WP-03 owns that tuple). Rules:
   ``lint_library_ref_kind``, ``lint_fragment_role``, ``lint_prompt_role_mismatch``,
   ``lint_prompt_mode_mismatch``);
 * tasks (sections 3.4, 8.2, 11.2, 11.3): vocabulary, ids, entity and endpoint references, prose variants,
-  prose/structure consistency, forbidden phrases, the minimal-prose word budget and check statedness;
+  prose/structure consistency, forbidden phrases, the minimal-prose word budget and check statedness; the
+  task's instrument overlay ``tester.yaml`` (:func:`overlay_issues`, the acceptance compiler's strict loader);
 * prompt templates: syntax and the filter whitelist, declared versus used versus documented variables;
 * prompt sets: the WP-01 content rules (:func:`prompt_set_issues`) plus the ref-resolving rules;
 * stacks, styles, guidance: fragment refs and roles, the guidance fragment, style frontends;
@@ -74,17 +75,23 @@ __all__ = [
     "editor_brief_issues",
     "endpoint_mentioned",
     "has_errors",
+    "limit_stated",
     "lint",
     "load_vocabulary",
     "make_issue",
+    "options_stated",
     "prompt_set_issues",
     "read_store_blob",
+    "required_stated",
+    "statedness_reasons",
     "status_of",
+    "status_stated",
     "tag_checks",
+    "unstated_reasons",
 ]
 
 LINTER_VERSION: Final = 1
-STATEDNESS_VERSION: Final = 1
+STATEDNESS_VERSION: Final = 3
 MINIMAL_PROSE_MAX_WORDS: Final = 120
 # Section 11.2 / WP-04 tests: prose never talks about evaluation or planted credentials.
 FORBIDDEN_PROSE_PHRASES: Final = ("evaluat", "test suite", "graded", "admin/admin", "default password")
@@ -241,13 +248,16 @@ def lint(
     resolve: RefResolver | None | bool = True,
     read_blob: BlobReader | None = None,
     vocabulary: Vocabulary | None = None,
+    slug: str | None = None,
 ) -> list[Issue]:
     """Registered issues for ``content`` of ``kind`` (codes from ``contracts.issues``).
 
     ``resolve=True`` resolves library refs from the database; pass a callable ``(kind, ref) -> content`` to
     resolve from elsewhere (seed files, packages), or ``False`` for content-only rules. ``read_blob`` reads
     starter file blobs (default: the blob store). ``system`` applies the stricter system-entity rules
-    (all three prose variants).
+    (all three prose variants). ``slug`` names the task (kind ``task``) whose instrument overlay
+    ``data/tasks/<slug>/tester.yaml`` is checked too (:func:`overlay_issues`); without it the task is looked
+    up among the bundled tasks that have an overlay, by title and summary.
     """
     if kind not in CONTENT_MODELS:
         msg = f"unknown library kind {kind!r}"
@@ -283,7 +293,43 @@ def lint(
     rule = _RULES.get(kind)
     if rule is not None:
         issues += rule(normalized, options)
+    if kind == "task":
+        task_slug = slug or _overlay_slug(normalized)
+        if task_slug:
+            issues += overlay_issues(task_slug, parsed.model_dump(mode="json", by_alias=True))
     return issues
+
+
+def _overlay_slug(content: Mapping[str, Any], data_dir: Path | None = None) -> str | None:
+    """The bundled task with an instrument overlay whose ``task.yaml`` has this title and summary."""
+    root = (data_dir or _data_dir()) / "tasks"
+    for overlay in sorted(root.glob("*/tester.yaml")):
+        try:
+            task = yaml.safe_load((overlay.parent / "task.yaml").read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if (
+            isinstance(task, dict)
+            and task.get("title") == content.get("title")
+            and task.get("summary") == content.get("summary")
+        ):
+            return overlay.parent.name
+    return None
+
+
+def overlay_issues(slug: str, content: Mapping[str, Any], data_dir: Path | None = None) -> list[Issue]:
+    """The instrument overlay of task ``slug`` (``data/tasks/<slug>/tester.yaml``) is usable, strictly.
+
+    The acceptance compiler refuses a plan whose overlay has an unknown key, an unknown endpoint or check id, a
+    check patch without ``why``, an unknown placeholder or a sample that violates the request schema; the lint
+    reports the same problems (``lint_content_invalid``, path ``tester.yaml``) before anything is evaluated.
+    """
+    from backend.generation.evaluation import acceptance  # the compiler imports this module
+
+    return [
+        _issue("lint_content_invalid", f"tester.yaml: {problem}", "tester.yaml")
+        for problem in acceptance.overlay_problems(slug, content, data_dir)
+    ]
 
 
 def _ref_issues(kind: str, content: Mapping[str, Any], resolve: RefResolver) -> list[Issue]:
@@ -334,7 +380,40 @@ def endpoint_mentioned(prose: str, endpoint: Mapping[str, Any]) -> bool:
     return bool(_endpoint_pattern(str(endpoint.get("method", "")), str(endpoint.get("path", "/"))).search(prose))
 
 
-# Statedness rule table (STATEDNESS_VERSION 1): category -> keyword patterns that state the behaviour.
+# Statedness rule table (STATEDNESS_VERSION 3; version 2 plus the two round-3 rules marked below).
+#
+# Version 1 tagged a check as stated in a prose variant when the endpoint was mentioned and, for validation
+# checks, when a keyword of the expected status ("invalid", "validation", "required" ...) occurred anywhere in
+# the prose. The standard prose of nearly every task has the frontend sentence "forms that show the API's
+# validation messages", so length limits, option lists and success statuses that only the exhaustive prose (or
+# only the request schema) gives were counted as stated in the standard variant.
+#
+# Version 2: a check is stated in variant V only when V states every *value* the check holds the app to:
+#
+# * the endpoint is mentioned (unchanged), and the category keywords for auth / ownership / pagination /
+#   filter checks occur (unchanged);
+# * ``too long``: V gives the limit of every over-long field of the check (the number, in the clause that
+#   names the field);
+# * ``not an option``, and an option list the response schema of the check demands: V lists all options of
+#   that field.
+# * a *valid* option any request of the check sends (the request under test, an ``also`` request or a setup
+#   step; body fields at any depth and query parameters): V lists the options of that field. (Round 3: an app
+#   built from a variant that never lists the options has to invent its own vocabulary, so whether it accepts
+#   the instrument's ``priority: low`` is not something that variant states.)
+# * ``missing``: V says the dropped field is required (in the clause that names it), or names it on the line
+#   that describes the endpoint and says there that invalid input is answered 400/422;
+# * an exact status other than 200 (201, 202, 204, 3xx; 404, 409, 413, 429 ...) that the check accepts nothing
+#   else beside: V gives that number on a line that mentions the endpoint or, for an error status, on a line
+#   that names the condition. For a ``POST`` an exact 200 is such a status too (round 3): 200 is the default
+#   answer of a read, but a POST may as well answer 201 or 204, so "exactly 200" is stated only where the
+#   variant gives it. ``POST /api/auth/register`` and ``/login`` are exempt: their statuses are
+#   stated to every variant by the auth contract of the prompt. 400 and 422 are one tolerance ("invalid
+#   input"): there the fault decides, and a 400/422 check without a recognisable fault keeps the version 1
+#   rule (the number or a keyword). Auth / ownership / pagination / filter checks are decided by their
+#   category keywords alone, as in version 1.
+#
+# The rule only decides ``stated_in`` (which pass rate a check counts in); it never changes a request or an
+# expectation. A hand-written check with an explicit ``stated_in`` keeps its author's list.
 _CATEGORY_WORDS: Final[Mapping[str, tuple[str, ...]]] = {
     "auth": (r"log ?in", r"sign ?in", r"authenticat", r"token", r"session", r"password", r"register"),
     "ownership": (r"\bown", r"only (?:the|their|his|her)", r"belong", r"other users?", r"another user"),
@@ -346,12 +425,22 @@ _STATUS_WORDS: Final[Mapping[int, tuple[str, ...]]] = {
     401: (r"unauthenticated", r"not (?:logged|signed) in", r"log ?in", r"authenticat"),
     403: (r"forbidden", r"not allowed", r"permission", r"only (?:the|their)", r"\bown"),
     404: (r"not found", r"does not exist", r"doesn't exist", r"unknown"),
-    409: (r"conflict", r"already exists", r"duplicate", r"unique"),
-    413: (r"too large", r"size limit", r"maximum size", r"exceeds"),
+    409: (r"conflict", r"already", r"duplicate", r"unique", r"taken", r"exists"),
+    413: (r"too large", r"size limit", r"maximum size", r"exceeds", r"\bover\b", r"larger than", r"\b[KMG]i?B\b"),
     422: (r"unprocessable", r"invalid", r"validat"),
-    429: (r"rate limit", r"too many", r"throttl", r"lock(?:ed)? out", r"lockout"),
+    429: (r"rate limit", r"too many", r"throttl", r"lock(?:ed)? out", r"lockout", r"attempts"),
 }
 _VALIDATION_CATEGORIES: Final = frozenset({"validation", "negative"})
+_REQUIRED_WORDS: Final = (
+    r"\brequired\b",
+    r"\bmandatory\b",
+    r"\bmust (?:be|have|include|contain|not be)\b",
+    r"\b(?:may|can|must)(?: not|not) be (?:empty|blank|omitted|missing)\b",
+    r"\bnon-empty\b",
+    r"\bis needed\b",
+)
+_CLAUSE_END: Final = re.compile(r";|(?<=[.!?])\s+")
+_AUTH_CONTRACT_PATHS: Final = ("/api/auth/register", "/api/auth/login")
 
 
 def _words(prose: str, patterns: Iterable[str]) -> bool:
@@ -365,29 +454,300 @@ def _expected_statuses(check: Mapping[str, Any]) -> list[int]:
     return [int(status)] if status is not None else []
 
 
-def _stated(check: Mapping[str, Any], prose: str, endpoints: Mapping[str, Mapping[str, Any]]) -> bool:
+def _clauses(prose: str) -> list[str]:
+    """The clauses of ``prose``: its lines, split at ``;`` and at sentence ends."""
+    return [clause for line in prose.splitlines() for clause in _CLAUSE_END.split(line) if clause.strip()]
+
+
+def _token(text: str) -> str:
+    """A regex matching ``text`` as a whole token (not inside a longer word, number or identifier)."""
+    return rf"(?<![\w.-]){re.escape(text)}(?![\w-]|\.\w)"
+
+
+def _number(value: int) -> str:
+    """A regex matching the number ``value`` (also written ``200,000`` / ``200 000``), not as part of another."""
+    forms = {str(value), f"{value:,}", f"{value:,}".replace(",", " ")}
+    return r"(?<![\w.,])(?:" + "|".join(sorted(map(re.escape, forms))) + r")(?![\w]|[.,]\d)"
+
+
+def limit_stated(prose: str, field: str, limit: int) -> bool:
+    """``prose`` gives the length limit of ``field``: one clause names the field and holds the number."""
+    name, number = re.compile(_token(field)), re.compile(_number(int(limit)))
+    return any(name.search(clause) and number.search(clause) for clause in _clauses(prose))
+
+
+def options_stated(prose: str, options: Iterable[Any]) -> bool:
+    """``prose`` lists every option of an ``enum`` (each value occurs as a whole token; ``null`` and booleans
+    are not vocabulary and are not looked for)."""
+    values = [str(option) for option in options if option is not None and not isinstance(option, bool)]
+    return all(re.search(_token(value), prose) for value in values)
+
+
+def required_stated(prose: str, field: str, endpoint: Mapping[str, Any] | None = None) -> bool:
+    """``prose`` says a request without ``field`` is refused.
+
+    Either one clause names the field and holds a requiredness word (``_REQUIRED_WORDS``), or the line that
+    describes ``endpoint`` names the field as its input and says invalid input is answered 400/422 (an action
+    endpoint: "changes the password; the body holds `current_password` and `new_password`. ... It answers 400
+    for invalid input").
+    """
+    name = re.compile(_token(field))
+    if any(name.search(clause) and _words(clause, _REQUIRED_WORDS) for clause in _clauses(prose)):
+        return True
+    if endpoint is None:
+        return False
+    refused = re.compile(r"(?<![\w.,])4(?:00|22)(?![\w]|[.,]\d)")
+    return any(
+        endpoint_mentioned(line, endpoint) and name.search(line) and refused.search(line)
+        for line in prose.splitlines()
+    )
+
+
+def status_stated(prose: str, endpoint: Mapping[str, Any] | None, code: int) -> bool:
+    """``prose`` gives status ``code`` for ``endpoint``: the number stands on a line that mentions the endpoint
+    or, for an error status, on a line that names the condition (``_STATUS_WORDS``)."""
+    number = re.compile(rf"(?<![\w.,]){int(code)}(?![\w]|[.,]\d)")
+    for line in prose.splitlines():
+        if not number.search(line):
+            continue
+        if endpoint is not None and endpoint_mentioned(line, endpoint):
+            return True
+        if code >= 400 and _words(line, _STATUS_WORDS.get(code, ())):
+            return True
+    return False
+
+
+def default_stated(prose: str, endpoint: Mapping[str, Any], param: str) -> bool:
+    """``prose`` states a default for query parameter ``param`` of ``endpoint``: on a line that mentions the
+    endpoint, one clause names the parameter and holds the word "default" ("`page` is the 1-based page number
+    (default 1)", "`date` is the day to show (default today)")."""
+    name = re.compile(_token(param))
+    return any(
+        endpoint_mentioned(line, endpoint)
+        and any(
+            name.search(clause) and re.search(r"\bdefaults?\b", clause, re.I) for clause in _CLAUSE_END.split(line)
+        )
+        for line in prose.splitlines()
+    )
+
+
+def qualifies_other_parameter(prose: str, endpoint: Mapping[str, Any], param: str) -> bool:
+    """``prose`` defines query parameter ``param`` only in combination with another optional parameter of
+    ``endpoint``: on a line that mentions the endpoint, the clause that names ``param`` reads "with `<other>`
+    ..." ("with `lat` and `lng` it keeps the stores within `radius` kilometres": a radius without a location
+    has no stated meaning)."""
+    name = re.compile(_token(param))
+    others = [
+        str(q.get("name"))
+        for q in endpoint.get("query") or []
+        if str(q.get("name")) != param and not q.get("required")
+    ]
+    if not others:
+        return False
+    leading = re.compile(r"\bwith `(?:" + "|".join(map(re.escape, others)) + r")`")
+    # the closing "(query parameters: ...)" list of a standard-prose line names every parameter: not a clause
+    return any(
+        endpoint_mentioned(line, endpoint)
+        and any(
+            name.search(clause) and leading.search(clause)
+            for clause in _CLAUSE_END.split(line.split("(query parameters:")[0])
+        )
+        for line in prose.splitlines()
+    )
+
+
+def _request_endpoint(request: Mapping[str, Any], content: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The endpoint a (setup or check) request addresses: same method, same path up to parameter names."""
+    method = str(request.get("method", "GET")).upper()
+    shape = re.sub(r"\{[^}/]+\}", "{}", str(request.get("path", "")).rstrip("/"))
+    for endpoint in content.get("endpoints") or []:
+        if str(endpoint.get("method", "")).upper() != method:
+            continue
+        if re.sub(r"\{[^}/]+\}", "{}", str(endpoint.get("path", "")).rstrip("/")) == shape:
+            return endpoint
+    return None
+
+
+def _request_properties(endpoint: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    schema = endpoint.get("request_schema")
+    props = (schema.get("properties") or {}) if isinstance(schema, Mapping) else {}
+    return {str(name): sub for name, sub in props.items() if isinstance(sub, Mapping)}
+
+
+def _check_requests(check: Mapping[str, Any]) -> list[tuple[bool, Mapping[str, Any]]]:
+    """``(is the request under test, request)`` for the setup steps, the request and the ``also`` requests."""
+    out: list[tuple[bool, Mapping[str, Any]]] = [
+        (False, step.get("request") or {}) for step in check.get("setup") or [] if isinstance(step, Mapping)
+    ]
+    out.append((True, check.get("request") or {}))
+    out += [(True, extra.get("request") or {}) for extra in check.get("also") or [] if isinstance(extra, Mapping)]
+    return out
+
+
+def _schema_options(schema: Any) -> list[list[Any]]:
+    """Every ``enum`` list inside a JSON schema (deep)."""
+    found: list[list[Any]] = []
+    if isinstance(schema, Mapping):
+        if isinstance(schema.get("enum"), list) and schema["enum"]:
+            found.append(list(schema["enum"]))
+        for value in schema.values():
+            found += _schema_options(value)
+    elif isinstance(schema, list):
+        for value in schema:
+            found += _schema_options(value)
+    return found
+
+
+def _sent_options(value: Any, schema: Any, name: str = "") -> list[tuple[str, list[Any]]]:
+    """``(field, options)`` of every option-valued field for which ``value`` holds one of its options (deep:
+    nested objects and the items of arrays). Booleans and ``null`` are not vocabulary."""
+    if not isinstance(schema, Mapping):
+        return []
+    found: list[tuple[str, list[Any]]] = []
+    options = schema.get("enum") if isinstance(schema.get("enum"), list) else None
+    if options and value is not None and not isinstance(value, (bool, dict, list)) and value in options:
+        found.append((name, list(options)))
+    if isinstance(value, Mapping):
+        props = schema.get("properties") if isinstance(schema.get("properties"), Mapping) else {}
+        for key, sub in props.items():
+            if key in value:
+                found += _sent_options(value[key], sub, str(key))
+    elif isinstance(value, list):
+        for item in value:
+            found += _sent_options(item, schema.get("items"), name)
+    return found
+
+
+def _value_rules(check: Mapping[str, Any], content: Mapping[str, Any]) -> list[tuple[str, str, Any]]:
+    """The values a check holds the app to, as ``(kind, field, value)``.
+
+    ``too_long`` (value: the limit), ``enum`` (the options a request breaks), ``missing`` (a required field
+    the request under test drops), ``options`` (the options the response schema demands of a field) and
+    ``sent`` (the options of a field for which a request or a setup step of the check sends a valid one).
+
+    ``sent`` (round 3): a check whose requests rely on the option vocabulary of a field holds the app to that
+    vocabulary. A variant that does not list the options leaves the vocabulary to the implementer, and an app
+    with another one refuses the instrument's value: the check then measures something that variant does not
+    state. (Round 2 left these checks in the stated set.)
+    """
+    from backend.generation.evaluation.acceptance import rendered_len  # the compiler imports this module
+
+    rules: list[tuple[str, str, Any]] = []
+    validation = str(check.get("category")) in _VALIDATION_CATEGORIES
+    for under_test, request in _check_requests(check):
+        endpoint = _request_endpoint(request, content)
+        if endpoint is None:
+            continue
+        body = request.get("json") if isinstance(request.get("json"), Mapping) else request.get("form")
+        props = _request_properties(endpoint)
+        if isinstance(body, Mapping):
+            for name, sub in props.items():
+                if name not in body:
+                    continue
+                value = body[name]
+                limit = sub.get("maxLength")
+                options = sub.get("enum") if isinstance(sub.get("enum"), list) else None
+                if options and not isinstance(value, bool):
+                    if value not in options:
+                        rules.append(("enum", name, list(options)))
+                elif isinstance(limit, int) and not isinstance(limit, bool) and isinstance(value, str):
+                    # the length the tester sends; ``None`` for the oversize placeholders (another rule: 413)
+                    size = rendered_len(value)
+                    if size is None and "oversize" not in value:
+                        size = len(re.sub(r"\{\w+\}", "", value))  # at least its literal text
+                    if size is not None and size > limit:
+                        rules.append(("too_long", name, limit))
+                rules += [("sent", field, found) for field, found in _sent_options(value, sub, name)]
+            if under_test and validation and str(endpoint.get("method")) != "PATCH":
+                schema = endpoint.get("request_schema") or {}
+                rules += [("missing", str(name), None) for name in schema.get("required") or [] if name not in body]
+        query = request.get("query") if isinstance(request.get("query"), Mapping) else {}
+        for param in endpoint.get("query") or []:
+            name = str(param.get("name"))
+            options = param.get("enum") if isinstance(param.get("enum"), list) else None
+            if options and name in query and not isinstance(query[name], bool) and query[name] in options:
+                rules.append(("sent", name, list(options)))
+    for options in _schema_options((check.get("expect") or {}).get("json_schema")):
+        rules.append(("options", "", options))
+    seen: list[tuple[str, str, Any]] = []
+    for rule in rules:
+        if rule not in seen:
+            seen.append(rule)
+    return seen
+
+
+def unstated_reasons(
+    check: Mapping[str, Any],
+    prose: str,
+    endpoints: Mapping[str, Mapping[str, Any]],
+    content: Mapping[str, Any] | None = None,
+) -> list[str]:
+    """Why ``check`` is not stated in ``prose`` (empty: it is stated). Rule table ``STATEDNESS_VERSION``."""
+    content = content if content is not None else {"endpoints": list(endpoints.values())}
     endpoint = endpoints.get(str(check.get("endpoint"))) if check.get("endpoint") else None
     if endpoint is not None and not endpoint_mentioned(prose, endpoint):
-        return False
+        return ["endpoint_not_mentioned"]
+    reasons: list[str] = []
     category = str(check.get("category", "functional"))
-    if category in _CATEGORY_WORDS:
-        return _words(prose, _CATEGORY_WORDS[category])
-    if category in _VALIDATION_CATEGORIES:
-        failing = [code for code in _expected_statuses(check) if code >= 400]
-        if not failing:
-            return True
-        return any(re.search(rf"\b{code}\b", prose) or _words(prose, _STATUS_WORDS.get(code, ())) for code in failing)
-    return True  # functional, persistence, infra: stated when the endpoint is
+    if category == "infra":
+        return []
+    if category in _CATEGORY_WORDS and not _words(prose, _CATEGORY_WORDS[category]):
+        reasons.append(f"category:{category}")
+    rules = _value_rules(check, content)
+    faults = [rule for rule in rules if rule[0] in ("too_long", "enum", "missing")]
+    for kind, name, value in rules:
+        if kind == "too_long" and not limit_stated(prose, name, value):
+            reasons.append(f"limit:{name}={value}")
+        elif kind in ("enum", "options") and not options_stated(prose, value):
+            reasons.append(f"options:{name}" if kind == "enum" else "response_options")
+        elif kind == "sent" and not options_stated(prose, value):
+            reasons.append(f"sent_options:{name}")
+        elif kind == "missing" and not required_stated(prose, name, endpoint):
+            reasons.append(f"required:{name}")
+    statuses = _expected_statuses(check)
+    # the endpoint the status belongs to: the check's, else the one its request addresses, else the request
+    target = endpoint or _request_endpoint(check.get("request") or {}, content) or (check.get("request") or None)
+    # 200 is the default answer of a read; of a POST it is one success status among 200 / 201 / 202 / 204
+    posted = str((check.get("request") or {}).get("method") or (target or {}).get("method") or "").upper() == "POST"
+    exact_200 = posted and statuses == [200]  # a tolerance such as [200, 201] is not an exact status
+    specific = [code for code in statuses if (code != 200 or exact_200) and code not in (400, 422)]
+    if category in _CATEGORY_WORDS or not statuses:
+        pass  # auth / ownership / pagination / filter: decided by the category keywords above
+    elif set(statuses) <= {400, 422}:
+        # either status is accepted for invalid input: the fault decides; without a recognisable fault the
+        # version 1 rule holds (the number or a keyword of the status, anywhere in the prose)
+        if not faults and not any(
+            re.search(rf"\b{code}\b", prose) or _words(prose, _STATUS_WORDS.get(code, ())) for code in statuses
+        ):
+            reasons.append("status:400")
+    elif len(specific) == len(statuses):
+        # every accepted status is an exact one other than 200: the variant must give it
+        exempt = target is not None and str(target.get("path", "")).rstrip("/") in _AUTH_CONTRACT_PATHS
+        if not exempt and not any(status_stated(prose, target, code) for code in specific):
+            reasons.append("status:" + "/".join(str(code) for code in specific))
+    return reasons
+
+
+def _stated(
+    check: Mapping[str, Any],
+    prose: str,
+    endpoints: Mapping[str, Mapping[str, Any]],
+    content: Mapping[str, Any] | None = None,
+) -> bool:
+    return not unstated_reasons(check, prose, endpoints, content)
 
 
 def check_statedness(
     content: Mapping[str, Any],
     checks: Iterable[Mapping[str, Any]] | None = None,
+    *,
+    explicit: bool = True,
 ) -> dict[str, list[str]]:
     """``{check_id: [prose variants that state it]}`` (section 8.2, rule table ``STATEDNESS_VERSION``).
 
     ``checks`` defaults to the task's hand-written ``acceptance``. A hand-written check whose author set
-    ``stated_in`` keeps that list.
+    ``stated_in`` keeps that list; ``explicit=False`` ignores the authors' lists and applies the rule table to
+    every check (to list where the two disagree).
     """
     endpoints = {str(endpoint.get("id")): endpoint for endpoint in content.get("endpoints") or []}
     prose = content.get("prose") or {}
@@ -395,16 +755,34 @@ def check_statedness(
     items = (content.get("acceptance") or []) if checks is None else checks
     for check in items:
         check_id = str(check.get("id"))
-        explicit = list(check.get("stated_in") or [])
-        if explicit and checks is None:
-            tagged[check_id] = [variant for variant in PROSE_VARIANTS if variant in explicit]
+        declared = list(check.get("stated_in") or [])
+        if declared and checks is None and explicit:
+            tagged[check_id] = [variant for variant in PROSE_VARIANTS if variant in declared]
             continue
         tagged[check_id] = [
             variant
             for variant in PROSE_VARIANTS
-            if variant in prose and _stated(check, str(prose[variant]), endpoints)
+            if variant in prose and _stated(check, str(prose[variant]), endpoints, content)
         ]
     return tagged
+
+
+def statedness_reasons(
+    content: Mapping[str, Any],
+    checks: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, list[str]]]:
+    """``{check_id: {variant: [why the check is not stated there]}}`` for the variants that do not state it."""
+    endpoints = {str(endpoint.get("id")): endpoint for endpoint in content.get("endpoints") or []}
+    prose = content.get("prose") or {}
+    out: dict[str, dict[str, list[str]]] = {}
+    for check in checks:
+        rows = {
+            variant: unstated_reasons(check, str(prose[variant]), endpoints, content)
+            for variant in PROSE_VARIANTS
+            if variant in prose
+        }
+        out[str(check.get("id"))] = {variant: reasons for variant, reasons in rows.items() if reasons}
+    return out
 
 
 def tag_checks(content: Mapping[str, Any], checks: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

@@ -15,6 +15,24 @@
   model's code outside a sandbox.
 
 ``get_runtime()`` picks by ``settings.EVAL_RUNTIME`` (``docker`` by default), read at call time.
+
+Public-looking mock upstream (eval-v2@2, tasks whose core feature is an outbound fetch). The eval network is
+internal and ``mock.internal`` has a private address, which a correct SSRF filter rejects. When -- and only
+when -- the compiled plan carries ``upstream`` (``{"hosts": [...], "port": 80}``), ``suite.evaluate`` calls
+``prepare_upstream(spec)`` before the app starts:
+
+* ``DockerEvalRuntime`` creates a *second* internal bridge network whose subnet is a random /28 of
+  ``UPSTREAM_POOL`` (addresses that every "is this address public?" test accepts; the network is internal, so
+  nothing ever leaves the daemon), attaches the app to it before it starts, and attaches every tester container
+  under the plan's hostnames as network aliases **on that network only**. The app therefore resolves the
+  hostname to exactly one global-looking IPv4 address; ``mock.internal`` stays an alias on the private eval
+  network only, so the ``ssrf_mock`` probe is unchanged. The tester (uid 10001, all capabilities dropped) may
+  bind port 80 through the container sysctl ``net.ipv4.ip_unprivileged_port_start=0``.
+* ``LocalProcessRuntime`` has no network to attach: it rewrites the plan's ``upstream`` to loopback with an
+  ephemeral port (``hosts: ["127.0.0.1"], port: 0, bind: "127.0.0.1"``) for the in-process tester.
+
+Without ``plan.upstream`` neither runtime does anything different: no extra network, no sysctl, the same
+container arguments as before.
 """
 
 from __future__ import annotations
@@ -24,6 +42,7 @@ import io
 import json
 import logging
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -51,6 +70,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "UPSTREAM_POOL",
     "AppHandle",
     "BuildOutcome",
     "DockerEvalRuntime",
@@ -72,6 +92,16 @@ def _name_prefix() -> str:
 
 
 LOCAL_MARKER = "llmlab-local.json"
+# The mock upstream's address pool: /28 subnets of a block that is globally routable to every address
+# classifier (``ipaddress.ip_address(x).is_global``, hand-written private/reserved block lists). The networks
+# are ``internal``: no packet to or from them leaves the apps daemon.
+UPSTREAM_POOL = "55.77.0.0/16"
+_UPSTREAM_PREFIX = 28
+_UPSTREAM_NETWORK_ATTEMPTS = 8
+_UPSTREAM_SYSCTLS = {"net.ipv4.ip_unprivileged_port_start": "0"}
+_HOSTNAME = re.compile(
+    r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+)
 
 
 class RuntimeInfraError(RuntimeError):
@@ -172,6 +202,30 @@ def get_runtime(suite_content: Mapping[str, Any] | None = None) -> EvalRuntime:
 # =====================================================================================
 # Local: bundled stdlib apps only
 # =====================================================================================
+
+
+def upstream_hosts(spec: Mapping[str, Any]) -> list[str]:
+    """The validated public hostnames of ``plan.upstream``: dotted lower-case names, never an address or eval alias."""
+    hosts = [str(h).strip().lower() for h in spec.get("hosts") or []]
+    reserved = {"mock.internal", "app", "db"}
+    bad = [
+        h
+        for h in hosts
+        if not _HOSTNAME.match(h) or h in reserved or h.endswith(".internal") or h.rsplit(".", 1)[-1].isdigit()
+    ]
+    if not hosts or bad:
+        msg = f"plan.upstream needs public hostnames, got {spec.get('hosts')!r}"
+        raise RuntimeInfraError(msg)
+    return list(dict.fromkeys(hosts))
+
+
+def _upstream_subnet() -> str:
+    import ipaddress
+
+    pool = ipaddress.ip_network(UPSTREAM_POOL)
+    count = 1 << (_UPSTREAM_PREFIX - pool.prefixlen)
+    base = int(pool.network_address) + secrets.randbelow(count) * (1 << (32 - _UPSTREAM_PREFIX))
+    return f"{ipaddress.ip_address(base)}/{_UPSTREAM_PREFIX}"
 
 
 def _free_port() -> int:
@@ -304,12 +358,19 @@ class LocalProcessRuntime:
         from backend.generation.evaluation.tester import tester_module
 
         local_plan = {**plan, "base_url": f"http://127.0.0.1:{handle.port}", "mock_host": "127.0.0.1", "mock_port": 0}
+        if plan.get("upstream"):
+            # In-process: the tester serves the upstream on loopback at an ephemeral port.
+            local_plan["upstream"] = {**plan["upstream"], "hosts": ["127.0.0.1"], "port": 0, "bind": "127.0.0.1"}
         return tester_module().run_plan(
             local_plan,
             admin_password=env.get("ADMIN_PASSWORD", ""),
             webhook_secret=env.get("WEBHOOK_SECRET", ""),
             restart=lambda: self.restart(handle),
         )
+
+    def prepare_upstream(self, spec: Mapping[str, Any]) -> None:
+        """Nothing to attach in-process (``run_tester`` points the plan's upstream at loopback)."""
+        upstream_hosts(spec)
 
     def run_adherence(self, tree: Mapping[str, bytes], expect: dict[str, Any]) -> tuple[dict[str, Any], bytes | None]:
         from backend.generation.evaluation.tester import checker_module
@@ -329,6 +390,11 @@ class LocalProcessRuntime:
     def logs(self, handle: AppHandle) -> str:
         path = Path(handle.workdir) / "app.log"
         return path.read_text(encoding="utf-8", errors="replace")[-8000:] if path.is_file() else ""
+
+    def exit_code(self, handle: AppHandle) -> int | None:
+        """The app process's return code once it exited (``-4`` = killed by SIGILL), else ``None``."""
+        proc = handle.ref
+        return proc.poll() if proc is not None else None
 
     def _kill(self, handle: AppHandle) -> None:
         proc = handle.ref
@@ -430,6 +496,8 @@ class DockerEvalRuntime:
         self.suite_content = dict(suite_content)
         self._client = client
         self.network: Any = None
+        self.upstream_network: Any = None  # only for a plan with ``upstream`` (``prepare_upstream``)
+        self.upstream_aliases: list[str] = []
         self.containers: list[Any] = []
         self.database: Any = None
         self.database_password = ""
@@ -477,6 +545,37 @@ class DockerEvalRuntime:
                 msg = f"creating the eval network failed: {exc}"
                 raise RuntimeInfraError(msg) from exc
         return self.network
+
+    def prepare_upstream(self, spec: Mapping[str, Any]) -> None:
+        """The public-looking mock upstream network of this evaluation (module docstring). Idempotent.
+
+        Must be called before ``start``: the app is attached before its process starts, so its resolver and
+        routes are complete from the first request.
+        """
+        aliases = upstream_hosts(spec)
+        if self.upstream_network is None:
+            last: Exception | None = None
+            for _ in range(_UPSTREAM_NETWORK_ATTEMPTS):
+                subnet = _upstream_subnet()
+                try:
+                    self.upstream_network = self.client.networks.create(
+                        f"{_name_prefix()}-up-{self.short}",
+                        driver="bridge",
+                        internal=True,
+                        labels=self.labels,
+                        ipam={"Driver": "default", "Config": [{"Subnet": subnet}]},
+                    )
+                    break
+                except RuntimeInfraError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - docker APIError
+                    last = exc
+                    if "overlap" not in str(exc).lower():
+                        break  # only a subnet another evaluation holds is worth another draw
+            if self.upstream_network is None:
+                msg = f"creating the mock upstream network failed: {last}"
+                raise RuntimeInfraError(msg) from last
+        self.upstream_aliases = aliases
 
     # build -------------------------------------------------------------------------------
 
@@ -538,6 +637,8 @@ class DockerEvalRuntime:
             )
             self.containers.append(container)
             _attach_alias(network, container, "app")
+            if self.upstream_network is not None:
+                self.upstream_network.connect(container)  # no alias: the app is a client of the upstream
             if overlay_files:
                 workdir = container.attrs.get("Config", {}).get("WorkingDir") or "/app"
                 container.put_archive(workdir, _tar(dict(overlay_files)))
@@ -673,6 +774,12 @@ class DockerEvalRuntime:
         timeout_s: float,
     ) -> dict[str, bytes]:
         image = self._image("EVAL_TESTER_IMAGE", "llmlab-v3-wt/eval-tester:dev", "tester")
+        upstream = self.upstream_network if plan.get("upstream") else None
+        if plan.get("upstream") and upstream is None:
+            msg = "the plan has an upstream but prepare_upstream was not called before the app started"
+            raise RuntimeInfraError(msg)
+        # Only a plan with an upstream changes the tester container (port 80 for an unprivileged process).
+        extra: dict[str, Any] = {"sysctls": dict(_UPSTREAM_SYSCTLS)} if upstream is not None else {}
         try:
             tester = self.client.containers.create(
                 image,
@@ -695,9 +802,12 @@ class DockerEvalRuntime:
                 nano_cpus=500_000_000,
                 cap_drop=["ALL"],
                 security_opt=["no-new-privileges"],
+                **extra,
             )
             self.containers.append(tester)
             _attach_alias(self.network, tester, "mock.internal")
+            if upstream is not None:
+                upstream.connect(tester, aliases=list(self.upstream_aliases))
             files = {"plan.json": json.dumps(plan).encode()}
             tester.put_archive("/in", _tar(files))
             if state is not None:
@@ -786,6 +896,18 @@ class DockerEvalRuntime:
         except Exception:  # noqa: BLE001
             return ""
 
+    def exit_code(self, handle: AppHandle) -> int | None:
+        """The app container's exit code once it stopped (``132`` = SIGILL), else ``None``."""
+        try:
+            handle.ref.reload()
+            state = handle.ref.attrs.get("State") or {}
+        except Exception:  # noqa: BLE001 - only a diagnostic
+            return None
+        if state.get("Running") or state.get("Status") in ("created", "running", "restarting"):
+            return None
+        code = state.get("ExitCode")
+        return int(code) if isinstance(code, int) else None
+
     def stop(self, handle: AppHandle) -> None:
         with contextlib.suppress(Exception):
             handle.ref.remove(force=True)
@@ -799,4 +921,9 @@ class DockerEvalRuntime:
             with contextlib.suppress(Exception):
                 self.network.remove()
             self.network = None
+        if self.upstream_network is not None:
+            with contextlib.suppress(Exception):
+                self.upstream_network.remove()
+            self.upstream_network = None
+        self.upstream_aliases = []
         self.database, self.database_password = None, ""

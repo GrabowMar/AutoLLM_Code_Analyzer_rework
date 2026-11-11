@@ -242,6 +242,7 @@ NOTE_CODES: Final = frozenset(
         "max_turns",
         # call / harness behaviour
         "ended_on_llm_error",
+        "route_error_terminated",  # evaluated, but the trajectory ended on a failed LLM call after >=1 good one
         "harness_error",
         "harness_crash",
         "truncated",  # slot single-shot finish_reason=length (7.6)
@@ -269,6 +270,10 @@ PARAMETRIC_NOTE_CODES: Final[Mapping[str, re.Pattern[str]]] = {
     "unsupported_knob": re.compile(r"^[a-z][a-z0-9_.]*$"),
     "lock_source": re.compile(r"^(model|platform)$"),
     "adherence": re.compile(r"^(compliant|partial|violated|not_measured)$"),
+    # An operator re-evaluation that replaced the run's previous evaluation for a platform fault, e.g.
+    # "eval_superseded:platform_cpu" (``manage.py reevaluate_platform_failures``; history in
+    # ``execution.eval_supersessions``).
+    "eval_superseded": re.compile(r"^[a-z][a-z0-9_]*$"),
 }
 
 
@@ -323,7 +328,14 @@ class AttemptServed(ContractModel):
 
 
 class AttemptUsage(ContractModel):
-    """``RunAttempt.usage``: totals over every call of one attempt."""
+    """``RunAttempt.usage``: totals over every call of one attempt.
+
+    Two keys are derived (``services.token_metrics``) and ``None`` means *not measured*, never 0:
+    ``reasoning_tokens`` is a total only when every call that produced output reported a reasoning-token
+    count (the native Anthropic API reports none); ``tokens_per_s_p50`` is the median end-to-end output rate
+    (completion tokens / call duration without the rate-limiter wait) of the ``tokens_per_s_calls`` clean,
+    unretried calls.
+    """
 
     requests_by_class: dict[Literal["main", "subagent", "compaction", "auxiliary"], NonNegInt] = Field(
         default_factory=dict,
@@ -331,7 +343,7 @@ class AttemptUsage(ContractModel):
     prompt_tokens: NonNegInt = 0
     uncached_prompt_tokens: NonNegInt = 0
     completion_tokens: NonNegInt = 0
-    reasoning_tokens: NonNegInt = 0
+    reasoning_tokens: NonNegInt | None = None
     cached_tokens: NonNegInt = 0
     cache_write_tokens: NonNegInt = 0
     cost_usd: NonNegFloat = 0.0
@@ -339,6 +351,7 @@ class AttemptUsage(ContractModel):
     call_truncations: NonNegInt = 0
     translation_dropped: dict[str, NonNegInt] = Field(default_factory=dict)
     tokens_per_s_p50: NonNegFloat | None = None
+    tokens_per_s_calls: NonNegInt | None = None
 
 
 class TimeSplit(ContractModel):

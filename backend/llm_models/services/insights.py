@@ -31,7 +31,6 @@ from backend.generation.models import GenerationRun
 from backend.generation.models.choices import RunStatus
 from backend.generation.runs.view import run_views
 from backend.llm_models.models import LLMModel
-from backend.rankings.models import BenchmarkResult
 from backend.statistics.services.inference import wilson_interval
 
 if TYPE_CHECKING:
@@ -430,34 +429,50 @@ def _position(rows: list[dict[str, Any]], model_id: str, field: str) -> dict[str
 
 
 def _ranking_stats(model: LLMModel, user: AbstractBaseUser | None) -> dict[str, Any] | None:
+    """The model's MSS v2 scores and its positions in the rankings.
+
+    A model without its own rankings row (a route copy or dated member that
+    was never exercised) falls back to its canonical model's row
+    (``rankings.services.frame.canonical_of``); the scores are then that
+    model's and ``inherited_from`` names it.
+    """
     rows = _rankings_for(user)
     row = next((r for r in rows if r["model_id"] == model.model_id), None)
+    inherited_from = None
     if row is None:
-        return None
+        from backend.rankings.services.frame import canonical_of
+
+        canon = canonical_of(model.model_id, [{"model_id": model.model_id, "metadata": model.metadata or {}}])
+        row = next((r for r in rows if r.get("canonical_id") == canon and not r.get("mss_inherited_from")), None)
+        if row is None:
+            return None
+        inherited_from = row["model_id"]
     exercised = [r for r in rows if r.get("apps")]
+    model_id = row["model_id"]
+    canonical_rows = [r for r in rows if r.get("eligible") and not r.get("mss_inherited_from")]
+    canonical_model_id = row.get("mss_inherited_from") or model_id
     return {
         "scores": {
-            key: row.get(key)
-            for key in (
-                "composite_score",
-                "mss_score",
-                "empirical_quality_score",
-                "benchmark_score",
-                "cost_efficiency_score",
-                "accessibility_score",
-                "adoption_score",
-            )
+            "composite": row.get("composite_score"),
+            "mss": row.get("mss_score"),
+            "empirical": row.get("empirical_quality_score"),
+            "popularity": row.get("popularity_score"),
+            "price": row.get("price_score"),
+            "capability": row.get("capability_score"),
+            "recency": row.get("recency_score"),
+            "coverage": row.get("mss_coverage"),
         },
         "positions": {
-            "composite": _position(rows, model.model_id, "composite_score"),
-            "mss": _position(rows, model.model_id, "mss_score"),
-            "empirical": _position(exercised, model.model_id, "empirical_quality_score"),
-            "benchmark": _position(
-                [r for r in rows if (r.get("benchmark_score") or 0) > 0],
-                model.model_id,
-                "benchmark_score",
-            ),
+            "composite": _position(rows, model_id, "composite_score"),
+            # Ranked among canonical models only; a route copy takes its canonical model's place.
+            "mss": _position(canonical_rows, canonical_model_id, "mss_score"),
+            "empirical": _position(exercised, model_id, "empirical_quality_score"),
+            "capability": _position(canonical_rows, canonical_model_id, "capability_score"),
         },
+        "canonical_id": row.get("canonical_id"),
+        "eligible": row.get("eligible"),
+        "exclusion": row.get("exclusion"),
+        "inherited_from": inherited_from or row.get("mss_inherited_from"),
         "variance": row.get("variance"),
         "local_loc": row.get("local_loc", 0),
         "n_trials": row.get("n_trials", 0),
@@ -535,24 +550,6 @@ def _catalog_context(model: LLMModel) -> dict[str, Any]:
     }
 
 
-def _local_benchmarks(model: LLMModel) -> list[dict[str, Any]]:
-    rows = BenchmarkResult.objects.filter(model_id=model.model_id).order_by("benchmark")
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        others = sorted(BenchmarkResult.objects.filter(benchmark=row.benchmark).values_list("score", flat=True))
-        out.append(
-            {
-                "benchmark": row.benchmark,
-                "score": row.score,
-                "source": row.source,
-                "fetched_at": row.fetched_at,
-                "percentile": _percentile_rank(others, row.score),
-                "n": len(others),
-            },
-        )
-    return out
-
-
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 
@@ -567,5 +564,4 @@ def model_insights(model: LLMModel, user: AbstractBaseUser | None) -> dict[str, 
         "analysis": _analysis_stats(runs),
         "ranking": _ranking_stats(model, user),
         "catalog": _catalog_context(model),
-        "benchmarks": _local_benchmarks(model),
     }

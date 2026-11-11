@@ -14,6 +14,14 @@
   --package-lock-only``), and stores the files in the blob store at the starter-convention paths
   (``<dir>/requirements.lock``, ``<dir>/package-lock.json``; WP-05) so the starter Dockerfiles install under
   them. ``lock_source=platform``, ``registry_snapshot_at`` = now.
+* npm: the tree's own ``package-lock.json`` (the model's, or the starter's), when it is a v2+ lock, goes in
+  next to ``package.json`` as the **seed** of ``npm install --package-lock-only``: npm keeps every locked
+  version the manifest still accepts and only re-resolves what changed (usually just the root specs). Without
+  the seed a fresh resolve takes whatever the registry serves today -- that is how a ``~1.2.14`` range picked
+  up ``@rolldown/binding-linux-x64-gnu@1.2.18`` (built for x86-64-v3, ``SIGILL`` on the evaluation host) while
+  the model had built with 1.2.16. A seed npm cannot use (the resolver fails, or the result does not cover the
+  manifest) falls back to the manifest-only resolve, so a broken model lock is never ``lock_unresolvable`` by
+  itself.
 * Go (phase B): an incomplete or missing ``go.sum`` is completed by ``go mod download all`` in the pinned
   ``base_images.yaml`` ``go`` image (``GOTOOLCHAIN=local``; the tree's ``go.sum`` goes in too) and stored at
   ``<dir>/go.sum``; ``go.mod`` must come out unchanged. A ``go.mod`` without ``require``/``replace`` needs no
@@ -26,6 +34,7 @@ Failures: a resolver that runs and reports an unresolvable requirement raises ``
 
 from __future__ import annotations
 
+import contextlib
 import json
 import posixpath
 import re
@@ -231,6 +240,24 @@ def _now() -> datetime:
     return datetime.now(tz=UTC)
 
 
+def _npm_seed(check: Any, run_files: dict[str, bytes]) -> bytes | None:
+    """The tree's ``package-lock.json`` beside ``check.manifest`` when npm can seed a re-lock from it (v2+)."""
+    data = run_files.get(check.lock)
+    if not data:
+        return None
+    try:
+        doc = json.loads(data)
+    except ValueError:
+        return None
+    if not isinstance(doc, dict) or not isinstance(doc.get("packages"), dict):
+        return None
+    version = doc.get("lockfileVersion")
+    # v1 (npm 6) has no "packages" map to seed from.
+    if isinstance(version, bool) or not isinstance(version, int) or version < 2:
+        return None
+    return data
+
+
 def _platform_lock(
     run_files: dict[str, bytes],
     needs: list[Any],
@@ -261,6 +288,7 @@ def _platform_lock(
         if not eco.enforced:
             continue  # Maven never reads its lock record: nothing to complete
         inputs = {eco.manifest: run_files[check.manifest]}
+        seed = _npm_seed(check, run_files) if check.ecosystem == "npm" else None
         script = eco.script(tools)
         output = eco.lock
         manifest_text = run_files[check.manifest].decode("utf-8", errors="replace")
@@ -272,16 +300,32 @@ def _platform_lock(
             if subdir:
                 script = f"cd {shlex.quote(subdir)} && {script}"
                 output = f"{subdir}/{eco.lock}"
+        if seed is not None:
+            # Seeded first; any failure or an uncovered result falls back to the manifest-only resolve below.
+            seeded: bytes | None = None
+            with contextlib.suppress(Exception):
+                seeded = runner.run(images[eco.image_key].pinned, {**inputs, eco.lock: seed}, script, [output])[output]
+            if seeded is not None and build_locks.lock_covers(run_files[check.manifest], seeded, ecosystem="npm"):
+                path = (PurePosixPath(check.manifest).parent / eco.lock).as_posix()
+                lock_files[path] = blobs.put_bytes(seeded)
+                ecosystems.setdefault(_KEY[check.ecosystem], []).extend(parse_lock_packages("npm", seeded))
+                continue
         try:
             produced = runner.run(images[eco.image_key].pinned, inputs, script, [output])
         except build_locks.LockError as exc:
+            from backend.generation.evaluation.suite import platform_cpu_fault
+
             text = str(exc)
             pattern = _GO_UNRESOLVABLE if check.ecosystem == "go" else _UNRESOLVABLE
-            if pattern.search(text):
+            # A resolver (or a build backend it ran) killed by SIGILL is the host CPU's, never the sample's
+            # "unresolvable" -- even when its output also says "No solution found" (the suite labels it
+            # infra_error:platform_cpu from this message).
+            if pattern.search(text) and not platform_cpu_fault(text):
                 detail = {"manifest": check.manifest, "error": text[-2000:]}
                 msg = f"{check.manifest}: dependencies cannot be resolved"
                 raise LockUnresolvableError(msg, detail) from exc
-            msg = f"{check.manifest}: lock step failed: {text[-500:]}"
+            died = " (killed by SIGILL: platform CPU)" if platform_cpu_fault(text) else ""
+            msg = f"{check.manifest}: lock step failed{died}: {text[-500:]}"
             raise LockInfraError(msg) from exc
         except (LockInfraError, LockUnresolvableError):
             raise

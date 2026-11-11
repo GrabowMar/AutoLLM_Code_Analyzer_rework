@@ -135,6 +135,7 @@ def test_infra_errors_are_attrition_and_not_measured_is_never_zero(make_study, f
     base, other = _runs(study, BASE), _runs(study, OTHER)
     finish(base[0], Outcome.TESTED, pass_rate=1.0)
     finish(base[1], Outcome.INFRA_ERROR)
+    GenerationRun.objects.filter(pk=base[1].pk).update(outcome_reason="platform_cpu")  # e.g. a SIGILL build
     finish(other[0], Outcome.TESTED)  # tested, evaluation not measured
     finish(other[1], Outcome.EXCLUDED, reason="budget_stop")
     _complete(study)
@@ -147,8 +148,10 @@ def test_infra_errors_are_attrition_and_not_measured_is_never_zero(make_study, f
     base_row = rows[board[BASE]["condition_id"]]
     other_row = rows[board[OTHER]["condition_id"]]
     assert base_row["infra_error"] == 1
+    assert base_row["infra_error_by_reason"] == {"platform_cpu": 1}  # reported by reason, never scored 0
     assert base_row["attrition_rate"] == 0.5
     assert other_row["excluded_by_reason"] == {"budget_stop": 1}
+    assert other_row["infra_error_by_reason"] == {}
     assert res["stopped_early"] is True
 
 

@@ -14,6 +14,7 @@ import type {
   RunEvaluationOut,
   RunFileOut,
   RunKind,
+  TrajectoryStepOut,
 } from "$lib/api/v3/types";
 
 // ── Outcomes (6.12) ────────────────────────────────────────────────────────
@@ -381,6 +382,8 @@ export const SKIP_REASON_TEXT: Record<string, string> = {
   positive_control_failed: "positive control failed",
   disabled: "disabled",
   level: "not at this evaluation level",
+  not_applicable: "not applicable under this evaluation setup",
+  not_measurable: "not measurable (the attack could not have been observed)",
 };
 
 /** One line for the evaluation status; "not measured" carries its reason. */
@@ -395,4 +398,68 @@ export function evaluationSummary(evaluation: RunEvaluationOut | null): string {
   if (evaluation.status === "error")
     return "Evaluation error (not a 0 pass rate)";
   return `Evaluation ${evaluation.status}`;
+}
+
+// ── Trajectory turns ───────────────────────────────────────────────────────
+
+/** One model turn: an LLM step and the tool / shell / edit steps it triggered, until the next LLM step. */
+export interface TrajectoryTurn {
+  /** 1-based turn number; 0 = steps recorded before the first LLM call. */
+  n: number;
+  llm: TrajectoryStepOut | null;
+  actions: TrajectoryStepOut[];
+  /** Prompt tokens of the turn's LLM call: the context the model saw. */
+  tokensIn: number;
+  tokensOut: number;
+  failed: number;
+  files: string[];
+  /** Summed step durations when the parser records them, else null. */
+  seconds: number | null;
+}
+
+export function groupTurns(steps: TrajectoryStepOut[]): TrajectoryTurn[] {
+  const turns: TrajectoryTurn[] = [];
+  let current: TrajectoryTurn | null = null;
+  const open = (llm: TrajectoryStepOut | null, n: number): TrajectoryTurn => ({
+    n,
+    llm,
+    actions: [],
+    tokensIn: llm?.tokens_in ?? 0,
+    tokensOut: llm?.tokens_out ?? 0,
+    failed: llm?.ok === false ? 1 : 0,
+    files: [...(llm?.files ?? [])],
+    seconds: llm?.duration_s ?? null,
+  });
+  let n = 0;
+  for (const step of steps) {
+    if (step.kind === "llm") {
+      n += 1;
+      current = open(step, n);
+      turns.push(current);
+      continue;
+    }
+    if (!current) {
+      current = open(null, 0);
+      turns.push(current);
+    }
+    current.actions.push(step);
+    if (step.ok === false) current.failed += 1;
+    for (const f of step.files)
+      if (!current.files.includes(f)) current.files.push(f);
+    if (step.duration_s != null)
+      current.seconds = (current.seconds ?? 0) + step.duration_s;
+  }
+  return turns;
+}
+
+/** "Bash ×3 · Edit" — the tools a turn used, in first-use order. */
+export function turnTools(turn: TrajectoryTurn): string {
+  const counts = new Map<string, number>();
+  for (const a of turn.actions) {
+    const name = a.tool ?? a.kind;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([name, k]) => (k > 1 ? `${name} ×${k}` : name))
+    .join(" · ");
 }

@@ -52,14 +52,19 @@ done
 iptables -A DOCKER-USER -j RETURN
 echo "apps-dind: nested containers blocked from private ranges via $uplink"
 
-# Hourly: drop images no container uses that are over a week old (removed
-# apps; base images are rebuilt on demand). Build cache is capped by
-# daemon.json's builder GC.
-(
-	while sleep 3600; do
-		# Sample artifacts have reference-aware TTL/size GC in the executor.
-		docker image prune --all --force --filter until=168h --filter 'label!=llmlab.sample_image=true' >/dev/null
-	done
-) &
+# Opt-in (APPS_DIND_IMAGE_PRUNE=1): hourly, drop images no container uses that
+# are over a week old. Off by default: evaluation suites and stack bases pin
+# images by digest (eval-tester, adherence-checker, node/python bases), no
+# container holds them between runs, and a pruned one fails every later
+# evaluation with image_digest_mismatch (12 runs on 2026-11-10). Build cache is
+# capped by daemon.json's builder GC; sample artifacts have reference-aware
+# TTL/size GC in the executor.
+if [ "${APPS_DIND_IMAGE_PRUNE:-0}" = "1" ]; then
+	(
+		while sleep 3600; do
+			docker image prune --all --force --filter until=168h --filter 'label!=llmlab.sample_image=true' >/dev/null
+		done
+	) &
+fi
 
 wait "$dockerd_pid"

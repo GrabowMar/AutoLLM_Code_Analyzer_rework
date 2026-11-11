@@ -29,10 +29,12 @@ from backend.generation.contracts._base import Sha256
 from backend.generation.contracts.library import Actor
 from backend.generation.contracts.library import AuthFlow
 from backend.generation.contracts.library import CheckCategory
+from backend.generation.contracts.library import CheckRequest
 from backend.generation.contracts.library import CheckSpec
 from backend.generation.contracts.library import CompiledRequest
 from backend.generation.contracts.library import ProbeKind
 from backend.generation.contracts.library import ProbeSpec
+from backend.generation.contracts.library import SetupStep
 
 __all__ = [
     "AcceptancePlan",
@@ -47,6 +49,7 @@ __all__ = [
     "CompiledCheck",
     "CompiledProbe",
     "CompiledRequest",
+    "CompiledSetupStep",
     "Detected",
     "Deviation",
     "EvalMetrics",
@@ -58,6 +61,7 @@ __all__ = [
     "ProbeResult",
     "ProbeSpec",
     "ResolvedLock",
+    "SkippedCheck",
     "StageRecord",
     "StyleMetrics",
 ]
@@ -86,8 +90,40 @@ class AuthDriverConfig(ContractModel):
     auth_flow: AuthFlow | None = None  # spec_defined only
 
 
+class CompiledSetupStep(SetupStep):
+    """A setup step of a compiled plan. Plan-side only: ``SetupStep`` itself is part of the hashed
+    ``TaskSpecContent``, so instrument fields must never be added there (a default would change every task hash).
+    """
+
+    # Tester v2: the rand-derived generators of this step use a step-local ``rand`` (the repeated creates of
+    # ``page_size`` checks); captures still land in the check context.
+    fresh: bool = False
+
+
+class SkippedCheck(ContractModel):
+    """A check the instrument overlay drops (``tester.yaml`` ``skip: true``): reported, never silently lost."""
+
+    id: NonEmptyStr
+    why: str = ""
+
+
+class CompiledAlso(ContractModel):
+    """One further request of a compiled check, held to the check's own ``expect`` (plan-side only)."""
+
+    label: str | None = None  # what this request varies (the over-long field), for the result note
+    request: CheckRequest
+
+
 class CompiledCheck(CheckSpec):
     source: Literal["compiler", "acceptance"] = "compiler"
+    setup: list[CompiledSetupStep] = Field(default_factory=list)  # type: ignore[assignment]
+    overlay: bool = False  # touched by the task's instrument overlay (``data/tasks/<slug>/tester.yaml``)
+    # Compiler v2 (plan-side only, like ``CompiledSetupStep``: ``CheckSpec`` is part of the hashed task
+    # content). ``also``: further requests the check sends after ``request``; it passes when every one meets
+    # ``expect`` (``.invalid.too_long`` breaks each length-limited field in turn). ``label`` names what the
+    # first request varies.
+    label: str | None = None
+    also: list[CompiledAlso] = Field(default_factory=list)
 
 
 class CompiledProbe(ProbeSpec):
@@ -105,6 +141,12 @@ class AcceptancePlan(ContractModel):
     checks: list[CompiledCheck]
     probes: list[CompiledProbe] = Field(default_factory=list)
     only: list[str] | None = None
+    # Compiler v2 (instrument overlay). ``skipped``: checks dropped with a written reason; ``adjusted``: every
+    # expectation the overlay changed (``{id, why, ...}``); ``upstream``: the public-looking mock upstream the
+    # runtime attaches for this plan (``None``: the environment is the plain internal eval network).
+    skipped: list[SkippedCheck] = Field(default_factory=list)
+    adjusted: list[dict[str, Any]] = Field(default_factory=list)
+    upstream: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +164,11 @@ class CheckResult(ContractModel):
     ms: NonNegInt | None = None
     note: str | None = None
     skipped_due_to: list[str] = Field(default_factory=list)  # failed depends_on checks (status skipped)
+    # Copied by id from the compiled plan (tester v2, and back-filled by ``suite.evaluate``). ``None`` = not
+    # recorded: results stored under eval-v2@1 have neither key, and their stated/unstated split is unknown.
+    stated_in: list[str] | None = None
+    source: Literal["compiler", "acceptance"] | None = None
+    overlay: bool = False
 
 
 class ProbeResult(ContractModel):
@@ -131,7 +178,20 @@ class ProbeResult(ContractModel):
     endpoint: str | None = None
     status: Literal["exploited", "not_exploited", "error", "skipped"]
     evidence: str | None = None
-    skip_reason: Literal["precondition_failed", "positive_control_failed", "disabled", "level"] | None = None
+    # ``not_applicable``: the probe has no meaning under this plan (CSRF with a bearer credential);
+    # ``not_measurable``: the attack ran but could not have been observed (the view of a stored payload is not
+    # an HTML page, the endpoint never redirects, sign-in was limited before every candidate was tried).
+    skip_reason: (
+        Literal[
+            "precondition_failed",
+            "positive_control_failed",
+            "disabled",
+            "level",
+            "not_applicable",
+            "not_measurable",
+        ]
+        | None
+    ) = None
 
 
 class CategoryCount(ContractModel):
@@ -171,6 +231,13 @@ class EvalResult(ContractModel):
     measured: bool
     not_measured_reason: str | None = None
     flaky_checks: list[str] = Field(default_factory=list)  # excluded from every pass rate, listed here
+    # The instrument identity of this evaluation (``None`` on results stored before eval-v2@2):
+    # ``plan_sha256`` = hash of the canonical compiled plan without run-specific values (identical for every
+    # run of one task / auth mode / stack / compiler / overlay); ``fixtures_sha256`` = digest over every task
+    # overlay of the tree that compiled it. ``skipped``: overlay-skipped checks (in no denominator).
+    plan_sha256: str | None = None
+    fixtures_sha256: str | None = None
+    skipped: list[SkippedCheck] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

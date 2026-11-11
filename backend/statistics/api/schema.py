@@ -71,9 +71,10 @@ class ModelComparisonRowSchema(Schema):
     success_rate: float | None = None
     # Mean over completed generations; None when none completed.
     avg_duration_seconds: float | None = None
-    mss: float
+    # None when the model has no MSS v2 (insufficient evidence or not in the frame).
+    mss: float | None = None
     empirical_quality: float | None = None
-    composite: float
+    composite: float | None = None
     # The latest evaluation's functional pass rate; None when no run was measured.
     pass_rate: float | None = None
     n_trials: int = 0

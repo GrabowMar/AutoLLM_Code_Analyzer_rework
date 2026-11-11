@@ -383,7 +383,8 @@ def _original_tokens(target: Any) -> int | None:
 
 def _supports_seed(model: LLMModel) -> bool:
     if model.endpoint_id is not None:
-        return True  # local endpoints (ollama) honour the seed
+        # Local endpoints (ollama, vLLM) honour the seed; Anthropic's native Messages API has none.
+        return model.endpoint.api_flavor != "anthropic"
     supported = (model.metadata or {}).get("openrouter_supported_parameters")
     return isinstance(supported, list) and "seed" in supported
 
@@ -758,7 +759,9 @@ class _Resolver:
 
     # -- (condition, unit) pairs -----------------------------------------------------------------
 
-    def _manifest_model(self, model: LLMModel) -> ManifestModel:
+    def _manifest_model(self, model: LLMModel, reasoning: dict[str, Any] | None = None) -> ManifestModel:
+        """The frozen model section; ``reasoning`` is the condition's policy ``reasoning`` (it sets the effort
+        the native Anthropic route plans to send, recorded in ``endpoint.native``)."""
         endpoint = model.endpoint
         # The local serving settings (context size, residency, dialect, ``think`` capability) are frozen
         # here, so the proxy uses them instead of the live endpoint row; all None for OpenRouter. Recorded,
@@ -775,11 +778,29 @@ class _Resolver:
             api_flavor=section.get("api_flavor") or None,
             capabilities=list(section.get("capabilities") or []) if section else None,
         )
+        cache_prices: dict[str, Any] = {}
+        source = "catalog"
+        if endpoint is not None and endpoint.api_flavor == "anthropic":
+            # Anthropic's native route caches prompts: the cache-read and cache-write prices are frozen too, so the
+            # gateway and proxy budgets reserve and settle at what Anthropic bills (``inference.anthropic_prices``).
+            from backend.generation.budget.model_facts import model_facts
+
+            facts = model_facts(model)
+            for key in ("cached_input_per_mtok", "cache_write_per_mtok"):
+                value = getattr(facts, key)
+                if value is not None:
+                    cache_prices[key] = round(float(value), 6)
+            source = "anthropic_list_price"
+            from backend.inference.anthropic_native import planned_settings
+
+            native = planned_settings(model.served_model_name or "", reasoning=reasoning)
+            manifest_endpoint = manifest_endpoint.model_copy(update={"native": native})
         pricing = ManifestPricing(
             input_per_mtok=round(float(model.input_price_per_token or 0.0) * 1_000_000, 6),
             output_per_mtok=round(float(model.output_price_per_token or 0.0) * 1_000_000, 6),
-            source="catalog",
+            source=source,
             as_of=model.updated_at.isoformat() if model.updated_at else "unknown",
+            **cache_prices,
         )
         return ManifestModel(slug=model.model_id, endpoint=manifest_endpoint, pricing=pricing)
 
@@ -794,12 +815,21 @@ class _Resolver:
         forced = {k: v for k, v in content.params.model_dump(mode="json").items() if v is not None}
         if condition.kind == "slot_single_shot" and condition.model.supports_json_mode:
             forced["response_format"] = "json_schema"  # recorded; the single-shot executor reads it (WP-12)
+        if content.policy != "explicit":
+            forced = {k: v for k, v in forced.items() if k == "response_format"}
+        not_sent: list[str] = []
+        endpoint = condition.model.endpoint if condition.model.endpoint_id is not None else None
+        if endpoint is not None and endpoint.api_flavor == "anthropic":
+            # The native Messages route sends no sampling knobs (temperature/top_p/top_k answer 400 on current
+            # Claude models; there is no seed): recorded, so the manifest never claims Claude ran at them.
+            from backend.inference.anthropic_native import not_sent as anthropic_not_sent
+
+            not_sent = anthropic_not_sent(forced)
         return ManifestSampling(
             ref=row.pinned_ref,
             policy=content.policy,
-            forced_params=forced
-            if content.policy == "explicit"
-            else {k: v for k, v in forced.items() if k == "response_format"},
+            not_sent_upstream=not_sent,
+            forced_params=forced,
             seed=None,
             seed_forwarded=bool(
                 content.forward_seed
@@ -1101,7 +1131,11 @@ class _Resolver:
         condition = pair.condition
         policy = condition.policy
         assert policy is not None
-        model = self._manifest_model(condition.model)
+        reasoning = getattr(getattr(policy, "content", None), "reasoning", None)
+        model = self._manifest_model(
+            condition.model,
+            reasoning=reasoning.model_dump(mode="json") if hasattr(reasoning, "model_dump") else None,
+        )
         pair.identity_inputs.update(
             {
                 "stimuli": [(record.role, record.sha) for record in pair.stimuli],

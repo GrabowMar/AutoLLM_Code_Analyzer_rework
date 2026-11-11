@@ -282,6 +282,7 @@ def cell_detail(bundle: PlanBundle, cell: ResolvedCell) -> dict[str, Any]:
         "model_effects": {
             "dropped_params": list(sampling.stripped_params) if sampling else [],
             "forced_params": dict(sampling.forced_params) if sampling else {},
+            "not_sent_upstream": list(sampling.not_sent_upstream) if sampling else [],
             "seed_forwarded": sampling.seed_forwarded if sampling else None,
             "structured_output": None,
         },

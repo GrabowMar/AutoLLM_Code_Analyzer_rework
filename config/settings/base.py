@@ -528,3 +528,7 @@ LLM_LOCAL_AGENT_RUNS = env.bool("LLM_LOCAL_AGENT_RUNS", default=bool(APPS_DOCKER
 
 # Maximum number of analyzer threads to run in parallel per analysis task.
 ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)
+# Memory and CPU caps of an analyzer workspace container (applied when it is provisioned; an existing
+# workspace keeps its caps until it is torn down and provisioned again).
+ANALYZER_WORKSPACE_MEMORY = env.str("ANALYZER_WORKSPACE_MEMORY", default="2g")
+ANALYZER_WORKSPACE_CPUS = env.float("ANALYZER_WORKSPACE_CPUS", default=2.0)

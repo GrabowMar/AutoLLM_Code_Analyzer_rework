@@ -15,7 +15,8 @@ The catalog has 33 tools, one YAML file per tool in `backend/analysis/data/tools
 | bandit | security | Python, Flask, Django | `*.py` | Insecure calls, hardcoded secrets, weak crypto |
 | trivy | security | pip/PyPI, npm, Docker, Kubernetes, Terraform | always | Vulnerable packages, Dockerfile/IaC misconfigurations, secrets |
 | semgrep | security | Python, JavaScript, Flask, FastAPI, Django, Express | `*.py`, `*.js`, `*.jsx`, `*.ts`, `*.tsx` | Rule-based security and correctness patterns (`p/python`, `p/javascript`) |
-| eslint-security | security | JavaScript, Express | `*.js`, `*.jsx`, `*.cjs`, `*.mjs` | eval, ReDoS, unsafe child processes, timing-unsafe comparisons |
+| eslint-security | security | JavaScript, TypeScript, Express | `*.js`, `*.jsx`, `*.cjs`, `*.mjs`, `*.ts`, `*.tsx`, `*.mts`, `*.cts` | eval, ReDoS, unsafe child processes, timing-unsafe comparisons; DOM XSS sinks (`innerHTML`, `document.write`) via eslint-plugin-no-unsanitized |
+| codeql | security | Python, JavaScript, TypeScript | `*.py`, `*.js`, `*.jsx`, `*.cjs`, `*.mjs`, `*.ts`, `*.tsx`, `*.mts`, `*.cts` | Data-flow (taint) analysis across functions and files: injection, path traversal, XSS, SSRF; plus reliability and maintainability queries (`security-and-quality` suite). One database per language; `metrics.languages` records files extracted and lines of user code |
 | pip-audit | dependencies | Python, pip/PyPI | `requirements*.txt` | Vulnerable Python packages; nonexistent packages and versions |
 | npm-audit | dependencies | JavaScript, npm | `package.json` | Vulnerable JavaScript packages; nonexistent packages and versions |
 | osv-scanner | dependencies | pip/PyPI, npm | `requirements*.txt`, `package.json`, lockfiles | Vulnerable packages from OSV.dev. Checks versions declared in `requirements*.txt` and lockfiles (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `Pipfile.lock`) without transitive resolution (`--no-resolve`: its own resolution invented old versions and bogus critical CVEs); `package.json` only through its lockfile; dev-only packages left out. Exit 1 (vulnerabilities found) is normalized to 0 in the run_cmd; a run that prints no JSON report fails |
@@ -24,8 +25,10 @@ The catalog has 33 tools, one YAML file per tool in `backend/analysis/data/tools
 | depcheck | dependencies | JavaScript, npm | `package.json` | Missing and unused JavaScript dependencies |
 | ruff | lint | Python | `*.py` | Bugs, unused imports, style |
 | flake8 | lint | Python | `*.py` | pyflakes + pycodestyle + mccabe |
-| eslint | lint | JavaScript | `*.js`, `*.jsx`, `*.cjs`, `*.mjs` | Undefined names, unused variables |
-| eslint-react | lint | JavaScript, React | `*.js`, `*.jsx`, `*.cjs`, `*.mjs` | Rules of Hooks, missing keys, unsafe links, `dangerouslySetInnerHTML` |
+| eslint | lint | JavaScript, TypeScript | `*.js`, `*.jsx`, `*.cjs`, `*.mjs`, `*.ts`, `*.tsx`, `*.mts`, `*.cts` | Undefined names, unused variables (`eslint:recommended`; `@typescript-eslint/recommended` for TypeScript files) |
+| eslint-react | lint | JavaScript, TypeScript, React | `*.js`, `*.jsx`, `*.cjs`, `*.mjs`, `*.ts`, `*.tsx`, `*.mts`, `*.cts` | Rules of Hooks, missing keys, unsafe links, `dangerouslySetInnerHTML` |
+| eslint-a11y | lint | JavaScript, TypeScript, React | `*.js`, `*.jsx`, `*.cjs`, `*.mjs`, `*.ts`, `*.tsx`, `*.mts`, `*.cts` | JSX accessibility (eslint-plugin-jsx-a11y): missing alt text, click handlers without keyboard support, unlabeled controls, invalid ARIA |
+| eslint-sonarjs | lint | JavaScript, TypeScript, React | `*.js`, `*.jsx`, `*.cjs`, `*.mjs`, `*.ts`, `*.tsx`, `*.mts`, `*.cts` | SonarJS bug and code-smell rules: cognitive complexity, identical functions, duplicated branches, constant conditions |
 | pylint | lint | Python | `*.py` | Errors, code smells, refactoring candidates |
 | mypy | lint | Python | `*.py` | Type errors |
 | vulture | lint | Python | `*.py` | Dead code |

@@ -611,3 +611,130 @@ models:
       agent: Step 5 Preview
     match: variant
     note: Webdev lists only High (OpenRouter default effort medium); text and agent entries are unlabelled.
+
+  # ── MSS v2 frame candidates (added 2026-11-09 against the LMArena "latest" split
+  #    published 2026-11-08). Epoch names are not curated for these yet (epoch: null);
+  #    run `import_external_covariates --suggest --model <id>` to add them. Capability
+  #    (MSS v2) reads only the webdev entry, so the effort rule matters most there.
+  anthropic/claude-opus-5.5:
+    epoch: null
+    lmarena:
+      webdev: Claude Opus 5.5 (Max)
+      text: Claude Opus 5.5 (High)
+      agent: Claude Opus 5.5 (Max)
+    match: variant
+    note: >-
+      Provider default effort high (OpenRouter default_effort); webdev and agent list only Max,
+      text lists High. The Anthropic-key route calls the same default.
+
+  anthropic/claude-sonnet-5.5:
+    epoch: null
+    lmarena:
+      webdev: Claude Sonnet 5.5 (High)
+      text: Claude Sonnet 5.5 (xHigh)
+      agent: Claude Sonnet 5.5 (Max)
+    match: exact
+    note: >-
+      Webdev High matches the default effort (high); the xHigh webdev entry (1773) is not used.
+      Text lists only xHigh, agent only Max.
+
+  anthropic/claude-fable-5.1:
+    epoch: null
+    lmarena:
+      webdev: Claude Fable 5.1 (Max)
+      text: Claude Fable 5.1 (Max)
+      agent: Claude Fable 5.1 (Max)
+    match: variant
+    note: Arena lists only Max; default effort is high.
+
+  openai/gpt-6.1-sol:
+    epoch: null
+    lmarena:
+      webdev: GPT-6.1 Sol (Max)
+      text: GPT-6.1 Sol (Max)
+      agent: GPT-6.1 Sol (Max)
+    match: variant
+    note: Arena lists only Max; OpenRouter default effort is medium.
+
+  openai/gpt-6-astra:
+    epoch: null
+    lmarena:
+      webdev: GPT-6 Astra (Max)
+      text: GPT-6 Astra (Max)
+      agent: GPT-6 Astra (Max)
+    match: variant
+    note: Arena lists only Max; OpenRouter default effort is medium.
+
+  google/gemini-3.8-flash:
+    epoch: null
+    lmarena:
+      webdev: Gemini 3.8 Flash (High)
+      text: Gemini 3.8 Flash (High)
+      agent: Gemini 3.8 Flash (High)
+    match: variant
+    note: Arena lists only High; OpenRouter default effort is medium.
+
+  nvidia/nemotron-3-ultra-550b-a55b:
+    epoch: null
+    lmarena:
+      webdev: null
+      text: NVIDIA-Nemotron-3-Ultra-550B-A55B (NVFP4)
+      agent: Nemotron 3 Ultra
+    match: variant
+    note: >-
+      Not on the webdev arena (capability is missing in MSS v2). The text entry is the NVFP4
+      quantisation; the agent entry is unlabelled.
+
+  moonshotai/kimi-k3.1-pro:
+    epoch: null
+    lmarena:
+      webdev: Kimi K3.1 Pro (Max)
+      text: null
+      agent: Kimi K3.1 Pro (Max)
+    match: variant
+    note: >-
+      Catalog row created by the next OpenRouter sync. Arena lists only Max (Kimi K3's
+      OpenRouter default is max; K3.1 Pro's default is unknown until the sync). Not in the
+      text top list checked.
+
+  tencent/hy4:
+    epoch: null
+    lmarena:
+      webdev: null
+      text: null
+      agent: Hy4
+    match: exact
+    note: >-
+      Catalog row created by the next OpenRouter sync. The webdev arena lists only 'Hy4 preview'
+      (a prerelease build, not used for the GA model), so capability is missing.
+
+  minimax/minimax-m3.1-flash:
+    epoch: null
+    lmarena:
+      webdev: MiniMax-M3.1-Flash
+      text: null
+      agent: MiniMax-M3.1-Flash
+    match: exact
+    note: Paid route of the model mapped above as :free (catalog row after the next sync).
+
+  deepseek/deepseek-v4.1-flash-1017:
+    epoch: null
+    lmarena:
+      webdev: DeepSeek-V4.1-Flash-20261017 (Max)
+      text: null
+      agent: DeepSeek-V4.1-Flash-20261017 (Max)
+    match: variant
+    note: >-
+      The 2026-10-17 update (the pinned version of deepseek-v4.1-flash in MSS v2). Arena
+      measured Max; OpenRouter default effort is high.
+
+  qwen/qwen3.8-max-0902:
+    epoch: null
+    lmarena:
+      webdev: Qwen3.8-Max (0902)
+      text: Qwen3.8-Max
+      agent: Qwen3.8-Max
+    match: assumed
+    note: >-
+      Webdev has a dated (0902) entry; text and agent list one undated 'Qwen3.8-Max', assumed
+      to be the same release. OpenRouter default effort xhigh; arena entries are unlabelled.

@@ -5,6 +5,32 @@
   "user_b",
   "admin"
  ],
+ "adjusted": [
+  {
+   "id": "shares.revoked",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 0
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/files, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by files.upload.ok."
+  },
+  {
+   "id": "shares.revoked",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 1
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/files/{fid}/shares, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by shares.create.ok."
+  }
+ ],
  "auth": {
   "admin_username": "admin",
   "auth_flow": null,
@@ -22,6 +48,7 @@
  "checks": [
   {
    "actor": "anon",
+   "also": [],
    "category": "infra",
    "depends_on": [],
    "endpoint": null,
@@ -33,6 +60,8 @@
     "status": 200
    },
    "id": "health",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -52,6 +81,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "infra",
    "depends_on": [
     "health"
@@ -67,6 +97,8 @@
     "status": 200
    },
    "id": "index_served",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -86,6 +118,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "infra",
    "depends_on": [
     "health"
@@ -101,6 +134,8 @@
     "status": 200
    },
    "id": "spa_fallback",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -120,6 +155,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -133,11 +169,13 @@
     "status": 201
    },
    "id": "auth.register.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
     "json": {
-     "password": "Llmlab-pw-{rand}-9!",
+     "password": "Tk7-{alpha}-Wq9!",
      "username": "llmlab{rand}"
     },
     "method": "POST",
@@ -155,6 +193,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -179,11 +218,13 @@
     "status": 200
    },
    "id": "auth.login.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
     "json": {
-     "password": "Llmlab-pw-{rand}-9!",
+     "password": "Tk7-{alpha}-Wq9!",
      "username": "llmlab{rand}"
     },
     "method": "POST",
@@ -199,11 +240,12 @@
       200,
       201
      ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
       "json": {
-       "password": "Llmlab-pw-{rand}-9!",
+       "password": "Tk7-{alpha}-Wq9!",
        "username": "llmlab{rand}"
       },
       "method": "POST",
@@ -221,6 +263,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -283,6 +326,8 @@
     "status": 201
    },
    "id": "files.upload.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": {
      "file": {
@@ -303,13 +348,12 @@
    "setup": [],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -323,6 +367,8 @@
     "status": 401
    },
    "id": "files.upload.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": {
      "file": {
@@ -350,6 +396,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "negative",
    "depends_on": [
     "health"
@@ -363,6 +410,8 @@
     "status": 413
    },
    "id": "files.upload.oversize",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": {
      "file": {
@@ -388,6 +437,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -473,13 +523,18 @@
     "status": 200
    },
    "id": "files.list.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
     "json": null,
     "method": "GET",
     "path": "/api/files",
-    "query": {}
+    "query": {
+     "page": 1,
+     "page_size": 20
+    }
    },
    "restart_before": false,
    "setup": [],
@@ -492,6 +547,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -505,13 +561,18 @@
     "status": 401
    },
    "id": "files.list.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
     "json": null,
     "method": "GET",
     "path": "/api/files",
-    "query": {}
+    "query": {
+     "page": 1,
+     "page_size": 20
+    }
    },
    "restart_before": false,
    "setup": [],
@@ -524,6 +585,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -586,6 +648,8 @@
     "status": 200
    },
    "id": "files.get.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -601,7 +665,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -629,6 +697,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -642,6 +711,8 @@
     "status": 401
    },
    "id": "files.get.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -657,7 +728,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -685,6 +760,7 @@
   },
   {
    "actor": "user_b",
+   "also": [],
    "category": "ownership",
    "depends_on": [
     "health"
@@ -698,6 +774,8 @@
     "status": 404
    },
    "id": "files.get.other_user",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -713,7 +791,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -741,6 +823,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -754,6 +837,8 @@
     "status": 200
    },
    "id": "files.download.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -769,7 +854,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -797,6 +886,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -810,6 +900,8 @@
     "status": 401
    },
    "id": "files.download.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -825,7 +917,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -853,6 +949,7 @@
   },
   {
    "actor": "user_b",
+   "also": [],
    "category": "ownership",
    "depends_on": [
     "health"
@@ -866,6 +963,8 @@
     "status": 404
    },
    "id": "files.download.other_user",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -881,7 +980,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -909,6 +1012,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -922,6 +1026,8 @@
     "status": 204
    },
    "id": "files.delete.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -937,7 +1043,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -958,13 +1068,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -978,6 +1087,8 @@
     "status": 401
    },
    "id": "files.delete.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -993,7 +1104,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1021,6 +1136,7 @@
   },
   {
    "actor": "user_b",
+   "also": [],
    "category": "ownership",
    "depends_on": [
     "health"
@@ -1034,6 +1150,8 @@
     "status": 404
    },
    "id": "files.delete.other_user",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1049,7 +1167,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1077,6 +1199,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1104,15 +1227,12 @@
     "status": 201
    },
    "id": "shares.create.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
-    "json": {
-     "content_type": "llmlab content_type",
-     "description": "llmlab description",
-     "filename": "llmlab filename",
-     "size_bytes": 1
-    },
+    "json": {},
     "method": "POST",
     "path": "/api/files/{id}/shares",
     "query": {}
@@ -1124,7 +1244,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1145,13 +1269,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -1165,15 +1288,12 @@
     "status": 401
    },
    "id": "shares.create.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
-    "json": {
-     "content_type": "llmlab content_type",
-     "description": "llmlab description",
-     "filename": "llmlab filename",
-     "size_bytes": 1
-    },
+    "json": {},
     "method": "POST",
     "path": "/api/files/{id}/shares",
     "query": {}
@@ -1185,7 +1305,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1213,6 +1337,7 @@
   },
   {
    "actor": "user_b",
+   "also": [],
    "category": "ownership",
    "depends_on": [
     "health"
@@ -1226,15 +1351,12 @@
     "status": 404
    },
    "id": "shares.create.other_user",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
-    "json": {
-     "content_type": "llmlab content_type",
-     "description": "llmlab description",
-     "filename": "llmlab filename",
-     "size_bytes": 1
-    },
+    "json": {},
     "method": "POST",
     "path": "/api/files/{id}/shares",
     "query": {}
@@ -1246,7 +1368,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1274,6 +1400,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1287,6 +1414,8 @@
     "status": 204
    },
    "id": "shares.delete.ok",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1302,7 +1431,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1325,16 +1458,15 @@
      "capture": {
       "token": "$.token"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
-      "json": {
-       "content_type": "llmlab content_type",
-       "description": "llmlab description",
-       "filename": "llmlab filename",
-       "size_bytes": 1
-      },
+      "json": {},
       "method": "POST",
       "path": "/api/files/{id}/shares",
       "query": {}
@@ -1343,13 +1475,12 @@
    ],
    "source": "compiler",
    "stated_in": [
-    "minimal",
-    "standard",
     "exhaustive"
    ]
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "auth",
    "depends_on": [
     "health"
@@ -1363,6 +1494,8 @@
     "status": 401
    },
    "id": "shares.delete.anon_401",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1378,7 +1511,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1401,16 +1538,15 @@
      "capture": {
       "token": "$.token"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
-      "json": {
-       "content_type": "llmlab content_type",
-       "description": "llmlab description",
-       "filename": "llmlab filename",
-       "size_bytes": 1
-      },
+      "json": {},
       "method": "POST",
       "path": "/api/files/{id}/shares",
       "query": {}
@@ -1426,6 +1562,7 @@
   },
   {
    "actor": "user_b",
+   "also": [],
    "category": "ownership",
    "depends_on": [
     "health"
@@ -1439,6 +1576,8 @@
     "status": 404
    },
    "id": "shares.delete.other_user",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1454,7 +1593,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1477,16 +1620,15 @@
      "capture": {
       "token": "$.token"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
-      "json": {
-       "content_type": "llmlab content_type",
-       "description": "llmlab description",
-       "filename": "llmlab filename",
-       "size_bytes": 1
-      },
+      "json": {},
       "method": "POST",
       "path": "/api/files/{id}/shares",
       "query": {}
@@ -1502,6 +1644,7 @@
   },
   {
    "actor": "user_a",
+   "also": [],
    "category": "persistence",
    "depends_on": [
     "health"
@@ -1515,6 +1658,8 @@
     "status": 200
    },
    "id": "files.get.persists",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1530,7 +1675,11 @@
      "capture": {
       "id": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1558,6 +1707,7 @@
   },
   {
    "actor": "anon",
+   "also": [],
    "category": "functional",
    "depends_on": [
     "health"
@@ -1571,6 +1721,8 @@
     "status": 404
    },
    "id": "shares.revoked",
+   "label": null,
+   "overlay": false,
    "request": {
     "files": null,
     "form": null,
@@ -1586,7 +1738,11 @@
      "capture": {
       "fid": "$.id"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": {
        "file": {
@@ -1607,7 +1763,11 @@
      "capture": {
       "tok": "$.token"
      },
-     "expect_status": 201,
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1621,6 +1781,7 @@
      "actor": "user_a",
      "capture": {},
      "expect_status": 204,
+     "fresh": false,
      "request": {
       "files": null,
       "form": null,
@@ -1638,7 +1799,7 @@
    ]
   }
  ],
- "compiler_version": 1,
+ "compiler_version": 2,
  "has_frontend": true,
  "health_path": "/api/health",
  "mock_host": "mock.internal",
@@ -1671,7 +1832,7 @@
    },
    "positive_control": {
     "actor": "user_a",
-    "expect_status": 201,
+    "expect_status": null,
     "files": {
      "file": {
       "content": "llmlab file {rand}\n",
@@ -1709,7 +1870,10 @@
       "capture": {
        "id": "$.id"
       },
-      "expect_status": 201,
+      "expect_status": [
+       200,
+       201
+      ],
       "request": {
        "files": {
         "file": {
@@ -1734,7 +1898,7 @@
    },
    "positive_control": {
     "actor": "user_a",
-    "expect_status": 200,
+    "expect_status": null,
     "files": null,
     "form": null,
     "headers": {},
@@ -1748,5 +1912,7 @@
    ]
   }
  ],
- "signed_routes": []
+ "signed_routes": [],
+ "skipped": [],
+ "upstream": null
 }

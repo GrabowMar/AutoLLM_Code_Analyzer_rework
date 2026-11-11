@@ -49,6 +49,7 @@ RUN_COLUMNS: Final = (
     "usable",
     "truncated",
     "termination",
+    "route_error_terminated",
     "model",
     "seed",
     "config_fingerprint",
@@ -115,6 +116,10 @@ def _run_rows(study: Study) -> list[dict[str, Any]]:
                 "usable": run.usable,
                 "truncated": bool(validity.get("truncated")),
                 "termination": validity.get("termination"),
+                "route_error_terminated": any(
+                    isinstance(n, dict) and n.get("code") == "route_error_terminated"
+                    for n in validity.get("notes") or []
+                ),
                 "model": run.model.model_id if run.model_id else "",
                 "seed": run.seed,
                 "config_fingerprint": run.config_fingerprint,

@@ -81,6 +81,13 @@ class JobAuth:
     priority: int
     endpoint_id: int | None
     checked: float
+    # The run's ``caching`` policy (manifest ``resources.effective``): only the native Anthropic route reads it
+    # (``off`` sends no cache breakpoints; the TTL is recorded when it is not 5 minutes).
+    prompt_cache: str = "auto"
+    cache_ttl: str = "5m"
+    # The run's frozen ``reasoning.mode`` (manifest ``resources.effective``): an OpenCode Go call carries the
+    # gateway's ``reasoning`` object upstream only when the policy forces an effort (C2).
+    reasoning_mode: str = "provider_default"
 
     def live(self) -> bool:
         from backend.generation.models.choices import RunPhase
@@ -128,6 +135,24 @@ def manifest_wall_clock_s(manifest: dict[str, Any]) -> int:
     return DEFAULT_WALL_CLOCK_S
 
 
+def _reasoning_mode(manifest: dict[str, Any]) -> str:
+    """``reasoning.mode`` of the run's effective policy (``provider_default`` when absent)."""
+    reasoning = _effective_content(manifest).get("reasoning")
+    mode = reasoning.get("mode") if isinstance(reasoning, dict) else None
+    return str(mode or "provider_default")
+
+
+def _caching(manifest: dict[str, Any]) -> dict[str, str]:
+    """``{prompt_cache, cache_ttl}`` of the run's effective ``caching`` policy (defaults: auto, 5m)."""
+    caching = _effective_content(manifest).get("caching") or {}
+    if not isinstance(caching, dict):
+        caching = {}
+    return {
+        "prompt_cache": str(caching.get("prompt_cache") or "auto"),
+        "cache_ttl": str(caching.get("ttl") or "5m"),
+    }
+
+
 class AuthCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -164,6 +189,8 @@ class AuthCache:
             priority=int(run.priority or 0),
             endpoint_id=run.endpoint_id,
             checked=now,
+            reasoning_mode=_reasoning_mode(manifest),
+            **_caching(manifest),
         )
         with self._lock:
             self._jobs[key] = auth
@@ -204,8 +231,10 @@ def _error(code: str, message: str, status: int) -> dict[str, Any]:
 def upstream_request(auth: JobAuth, body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """Translate the gateway's OpenAI body into the upstream ``(path, body)`` using the frozen endpoint."""
     from backend.inference.access import access_from_snapshot
+    from backend.inference.anthropic_native import Options
     from backend.inference.chat import build_upstream_body
     from backend.inference.models import LLMEndpoint
+    from backend.inference.upstream import is_opencode
 
     section = auth.endpoint
     endpoint = LLMEndpoint.objects.get(pk=section["id"])
@@ -213,12 +242,20 @@ def upstream_request(auth: JobAuth, body: dict[str, Any]) -> tuple[str, dict[str
     clean = {k: v for k, v in body.items() if k not in DROPPED_KEYS}
     params = {k: v for k, v in clean.items() if k not in _NON_PARAM_KEYS}
     seed = params.pop("seed", None)
+    if is_opencode(access.base_url) and auth.reasoning_mode != "effort":
+        # Only the policy's forced effort reaches OpenCode Go (as ``reasoning_effort``, C2): a harness's own
+        # ``reasoning`` object under ``provider_default`` is dropped, as it always was for this endpoint.
+        params.pop("reasoning", None)
     path, upstream_body = build_upstream_body(
         access,
         clean.get("messages") or [],
         params,
         seed,
         tools=clean.get("tools"),
+        # Read by the native Anthropic builder only; the other flavors never send them.
+        tool_choice=clean.get("tool_choice"),
+        parallel_tool_calls=clean.get("parallel_tool_calls"),
+        anthropic_options=Options(prompt_cache=auth.prompt_cache, cache_ttl=auth.cache_ttl),
     )
     return path, upstream_body
 
@@ -431,6 +468,15 @@ def _budget_refusal_payload(refusal) -> tuple[int, dict[str, Any]]:
     if refusal.exhausted:
         return 400, _error("budget_exhausted", refusal.message, 400)
     return 400, _error("context_length_exceeded", refusal.message, 400)
+
+
+def _transient_exhausted(row) -> bool:
+    """The row's answer is OpenCode Go's transient error after the pump's retries (``pump.RETRIES_KEY``)."""
+    from backend.inference.pump import RETRIES_KEY
+
+    response = row.response if isinstance(row.response, dict) else {}
+    info = response.get(RETRIES_KEY)
+    return isinstance(info, dict) and bool(info.get("exhausted"))
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -649,6 +695,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return 507, _error("upstream_oom", str(exc), 507), "upstream_oom"
             if exc.code == "upstream_error" and exc.status_code and exc.status_code < 500:
                 return exc.status_code, _error("upstream_error", str(exc), exc.status_code), None
+            if _transient_exhausted(row):
+                # C1: still failing after the pump's retries; 503 lets the gateway's own retry re-submit it.
+                return 503, _error("upstream_transient", str(exc), 503), "upstream_transient"
             return 503, _error("endpoint_unavailable", str(exc), 503), "endpoint_unavailable"
         section = auth.endpoint
         access = access_from_snapshot(section, row.endpoint)

@@ -71,6 +71,7 @@ from backend.generation.contracts.outcome import RunResult
 from backend.generation.contracts.outcome import Termination
 from backend.generation.contracts.outcome import note_code_valid
 from backend.generation.contracts.resources import EffectivePolicy
+from backend.generation.services import token_metrics
 
 if TYPE_CHECKING:
     from backend.generation.agentic.sandbox import SandboxBackend
@@ -173,21 +174,30 @@ def budget_exhausted_kind(
 
 
 def attempt_usage(calls: list[dict[str, Any]]) -> AttemptUsage:
-    """Totals over every gateway call of one attempt (failed calls included: a failed call may be billed)."""
+    """Totals over every gateway call of one attempt (failed calls included: a failed call may be billed).
+
+    Two keys are derived, not summed (definitions in ``services.token_metrics``): ``tokens_per_s_p50`` is the
+    median end-to-end output rate of the attempt's clean calls (``tokens_per_s_calls`` of them), never the
+    gateway's own ``tokens_per_s``; ``reasoning_tokens`` is ``None`` unless every call that produced output
+    reported a reasoning-token count (an unreported count is not 0).
+    """
     requests: Counter[str] = Counter()
     totals = Counter[str]()
     cost = list_cost = 0.0
     dropped: Counter[str] = Counter()
     rates: list[float] = []
+    reasoning: list[tuple[Any, Any]] = []
     for call in calls:
         usage = call.get("usage") or {}
         if call_ok(call):
             klass = str(call.get("request_class") or MAIN)
             requests[klass if klass in {"main", "subagent", "compaction", "auxiliary"} else "auxiliary"] += 1
-        for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens", "cache_write_tokens"):
+        for key in ("prompt_tokens", "completion_tokens", "cached_tokens", "cache_write_tokens"):
             value = usage.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
                 totals[key] += value
+        if usage:
+            reasoning.append((usage.get("completion_tokens"), usage.get("reasoning_tokens")))
         if isinstance(usage.get("cost"), (int, float)):
             cost += float(usage["cost"])
         if isinstance(call.get("list_cost"), (int, float)):
@@ -195,24 +205,24 @@ def attempt_usage(calls: list[dict[str, Any]]) -> AttemptUsage:
         for field, count in (call.get("translation_dropped") or {}).items():
             if isinstance(count, int):
                 dropped[str(field)] += count
-        rate = call.get("tokens_per_s")
-        if isinstance(rate, (int, float)) and not isinstance(rate, bool) and rate > 0:
-            rates.append(float(rate))
-    rates.sort()
+        rate = call_telemetry(call).get("tokens_per_s")
+        if rate is not None:
+            rates.append(rate)
     truncations = sum(1 for call in calls if call_ok(call) and call.get("finish_reason") == "length")
     return AttemptUsage(
         requests_by_class=dict(requests),  # type: ignore[arg-type]
         prompt_tokens=totals["prompt_tokens"],
         uncached_prompt_tokens=max(0, totals["prompt_tokens"] - totals["cached_tokens"]),
         completion_tokens=totals["completion_tokens"],
-        reasoning_tokens=totals["reasoning_tokens"],
+        reasoning_tokens=token_metrics.reasoning_total(reasoning),
         cached_tokens=totals["cached_tokens"],
         cache_write_tokens=totals["cache_write_tokens"],
         cost_usd=round(cost, 10),
         list_cost_usd=round(list_cost, 10),
         call_truncations=truncations,
         translation_dropped=dict(dropped),
-        tokens_per_s_p50=rates[len(rates) // 2] if rates else None,
+        tokens_per_s_p50=token_metrics.median_rate(rates),
+        tokens_per_s_calls=len(rates),
     )
 
 
@@ -240,7 +250,13 @@ def _iso(epoch: Any) -> str | None:
 
 
 def call_telemetry(call: Mapping[str, Any]) -> dict[str, Any]:
-    """The normalized per-call telemetry of ``GenerationArtifact.telemetry`` (keys absent = unknown)."""
+    """The normalized per-call telemetry of ``GenerationArtifact.telemetry`` (keys absent = unknown).
+
+    ``tokens_per_s`` is the end-to-end output rate of ``services.token_metrics`` (basis ``e2e``), derived from
+    the keys stored next to it and absent for a call that has none; the gateway's own ``tokens_per_s`` is not
+    copied. The gateway's ``ttft_ms`` is the time to the first upstream byte of any kind (a keep-alive on the
+    proxied routes), so it is stored as ``first_byte_ms`` and not as a time to first token.
+    """
     from backend.generation.services.call_telemetry import SCHEMA
 
     usage = call.get("usage") or {}
@@ -253,8 +269,8 @@ def call_telemetry(call: Mapping[str, Any]) -> dict[str, Any]:
     put("started_at", _iso(call.get("started")))
     put("ended_at", _iso(call.get("ended")))
     put("duration_s", call.get("duration_s"))
-    put("ttft_ms", call.get("ttft_ms"))
-    put("tokens_per_s", call.get("tokens_per_s"))
+    put("first_byte_ms", call.get("ttft_ms"))
+    out.update(token_metrics.rate_facts(call))
     put("status", call.get("status"))
     put("provider", call.get("served_provider"))
     put("served_model", call.get("served_model") or call.get("upstream_model"))
@@ -280,6 +296,10 @@ def call_telemetry(call: Mapping[str, Any]) -> dict[str, Any]:
         out["translation_dropped"] = call["translation_dropped"]
     if call.get("error") or not call_ok(call):
         out["error"] = {"status": call.get("status"), "message": str(call.get("error") or "")[:500]}
+    rate = token_metrics.telemetry_tokens_per_s(out)
+    if rate is not None:
+        out["tokens_per_s"] = rate
+        out["tokens_per_s_basis"] = token_metrics.RATE_BASIS
     return out
 
 

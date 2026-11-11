@@ -1,0 +1,31 @@
+schema: 1
+notes: |
+  Two entries: the `to` query value of outbox.list.ok and the body of the reset request. No sample, no setup,
+  no expectation change, no skip.
+
+  Sources. Standard and exhaustive prose: "`GET /api/outbox` lists the outbox messages sent to the address
+  given in `to`"; exhaustive prose: "`to` is the recipient address (required). It answers 400 without `to`."
+  task.yaml: OutboxMessage.to has type `email`. The value uses the same address shape the compiler sends for
+  every `email` field of this task ("llmlab{rand}@example.com").
+
+  endpoints.reset.request (core round 2). Standard and exhaustive prose: "`POST /api/auth/password-reset` takes
+  a `username` or an `email`". The compiled valid body carries every property of the request schema, here both
+  `username` and `email` (two unrelated values); the conventional request names the account one way. The
+  `email` is removed, the body is `{username}`. No compiled check uses this endpoint (auth paths have none; the
+  hand-written reset checks carry their own bodies), so the only request this changes is the repeated request
+  of `probe.reset.rate_limit`, where the compiler names user_a (an existing account) as `username`.
+endpoints:
+  reset.request:
+    json: {email: null}
+checks:
+  outbox.list.ok:
+    why: >-
+      Request not valid per spec. `to` is "the address" / "the recipient address" (prose) and the outbox
+      field it filters on is typed `email` (task.yaml OutboxMessage.to), but the compiled query sends the
+      generic string sample "llmlab to", which is not an e-mail address; an app that validates the address
+      may answer 400 to it and would fail a functional check for refusing malformed input. The value becomes
+      a well-formed address nobody was mailed, for which the stated answer is 200 with an `items` list.
+      Expectation unchanged.
+    request:
+      query:
+        to: "llmlab{rand}@example.com"

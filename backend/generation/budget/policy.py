@@ -433,6 +433,24 @@ def effective_policy(
             )
             clamp.set("reasoning.effort", None, "model has no reasoning support")
             clamp.set("reasoning.max_tokens", None, "model has no reasoning support")
+        modes = facts.extra.get("reasoning_modes") if isinstance(facts.extra, Mapping) else None
+        if facts.supports_reasoning and modes:
+            # A route that honours only some modes (OpenCode Go: ``reasoning_effort`` only): any other forced
+            # mode would be recorded but never sent, so it is provider default, as for an unsupported model.
+            mode = clamp.get("reasoning.mode")
+            if mode != "provider_default" and mode not in modes:
+                reason = f"route honours only reasoning mode {'/'.join(modes)}"
+                clamp.set("reasoning.mode", "provider_default", reason, note="reasoning_unsupported")
+                clamp.set("reasoning.effort", None, reason)
+                clamp.set("reasoning.max_tokens", None, reason)
+            if clamp.get("reasoning.exclude"):
+                no_exclude = False
+                clamp.set(
+                    "reasoning.exclude",
+                    no_exclude,
+                    "route cannot exclude reasoning output",
+                    note="reasoning_exclude_unsupported",
+                )
         reasoning_budget = clamp.get("reasoning.max_tokens") or 0
         if facts.max_output:
             limit = max(1, facts.max_output - reasoning_budget)

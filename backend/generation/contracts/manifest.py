@@ -143,6 +143,10 @@ class ManifestEndpoint(ContractModel):
     (context size, residency, request dialect, whether ``think`` is sent). They are frozen here for local
     endpoints (``None`` for OpenRouter); the LLM proxy takes a frozen value over the live endpoint row
     (``inference.proxy_server.frozen_endpoint``). Recorded, not hashed into identity.
+
+    ``native`` is what a native upstream API will be sent for this model, for ``api_flavor="anthropic"``
+    only (``inference.anthropic_native.planned_settings``: effort and its source, thinking, thinking replay,
+    forced tool_choice support, cache TTL). Recorded, not hashed.
     """
 
     id: int
@@ -154,6 +158,7 @@ class ManifestEndpoint(ContractModel):
     keep_alive: str | None = None
     api_flavor: str | None = None
     capabilities: list[str] | None = None
+    native: dict[str, Any] | None = None
 
 
 class ManifestPricing(ContractModel):
@@ -176,6 +181,9 @@ class ManifestSampling(ContractModel):
     policy: Literal["provider_default", "explicit"]
     forced_params: dict[str, Any] = Field(default_factory=dict)
     stripped_params: list[str] = Field(default_factory=list)
+    # Forced params the upstream API never receives (the native Anthropic route sends no sampling knobs):
+    # the gateway still forces them on the harness body, the proxy drops them before Claude sees them.
+    not_sent_upstream: list[str] = Field(default_factory=list)
     seed: NonNegInt | None = None
     seed_forwarded: bool
 

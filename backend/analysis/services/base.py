@@ -9,6 +9,7 @@ normalized in-memory shapes that parsers and runners produce.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
@@ -49,9 +50,25 @@ NON_SOURCE_DIRS = frozenset(
 )
 
 
+# A Python virtual environment under any directory name. Agents create throw-away ones with names of
+# their own (``.test_venv``, ``.tmpv_25.3``, ``_venv`` ...: 20 of the 2026-11 study apps), so the name
+# cannot be listed in NON_SOURCE_DIRS; the layout inside is fixed by ``python -m venv``.
+_VENV_PATH = re.compile(
+    r"(?:^|/)(?:"
+    r"(?:site|dist)-packages/"
+    r"|lib(?:64)?/python\d+(?:\.\d+)?/"
+    r"|pyvenv\.cfg$"
+    r"|(?:bin|Scripts)/(?:[Aa]ctivate(?:\.\w+|_this\.py)?|pip[\d.]*|python[\d.]*|wheel|easy_install[\d.-]*)$"
+    r")",
+)
+
+
 def is_non_source_path(path: str) -> bool:
-    """Whether *path* lies inside one of :data:`NON_SOURCE_DIRS` (any directory level)."""
-    return any(part in NON_SOURCE_DIRS for part in path.strip("/").split("/")[:-1])
+    """Whether *path* lies inside one of :data:`NON_SOURCE_DIRS` (any directory level) or inside a
+    Python virtual environment of any name (``site-packages``, ``lib/pythonX.Y``, ``pyvenv.cfg``, the
+    interpreter and activation files of its ``bin``)."""
+    clean = path.strip("/")
+    return any(part in NON_SOURCE_DIRS for part in clean.split("/")[:-1]) or _VENV_PATH.search(clean) is not None
 
 
 def is_dependency_advisory(tool_slug: str, category: str, rule_id: str = "") -> bool:

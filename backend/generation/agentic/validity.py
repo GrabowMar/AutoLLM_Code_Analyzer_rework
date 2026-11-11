@@ -20,11 +20,21 @@ Note semantics (all computed from facts, never from what a harness claims about 
 * ``routing_partial``: the gateway could not apply every routing field (appendix B);
 * ``vendor_affinity``: a vendor-affine harness (Claude Code, Codex) ran another vendor's model;
 * ``unsupported_knob:<key>``: a policy knob the harness cannot map (gateway limits apply instead);
-* ``call_cap_without_compaction``: a per-call input cap on a harness that cannot compact its context.
+* ``call_cap_without_compaction``: a per-call input cap on a harness that cannot compact its context;
+* ``route_error_terminated``: an evaluated attempt whose last **main** gateway call failed upstream (HTTP >=
+  400, an error answer or a transport failure) after at least one successful call, so the result may be the
+  route's and not the model's. A failed auxiliary / side call after the main loop's last call does not count
+  (the trajectory did not end on it), and neither do context refusals (``context_length_exceeded``: the
+  treatment's per-call input cap refused by the proxy, or the model's own context overflow, which is a
+  property of the harness and model, not of the route). The outcome is unchanged (``infra_override`` only
+  covers zero-successful-call attempts); the detail is ``kind=<http|transport> status=<n> code=<code>
+  call=<seq> request_class=main ok_calls=<n> calls=<n> error=<text>``. Query:
+  ``GenerationRun.objects.filter(validity__notes__contains=[{"code": "route_error_terminated"}])``.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
@@ -52,6 +62,7 @@ __all__ = [
     "is_usable",
     "note",
     "policy_knob",
+    "route_error_note",
     "validity_for",
 ]
 
@@ -75,7 +86,18 @@ NOTE_LEVELS: Final[Mapping[str, Level]] = {
     "unsupported_knob": "info",
     "call_cap_without_compaction": "warn",
     "depcache_unavailable": "warn",
+    "route_error_terminated": "warn",
 }
+ROUTE_ERROR_NOTE: Final = "route_error_terminated"
+# Gateway / proxy refusals that are the treatment's own caps, and context overflows: never a route error.
+# ``context_length_exceeded`` is both the proxy's ``call.max_input_tokens`` refusal
+# (``proxy_server._budget_refusal_payload``) and a provider's own overflow (``anthropic_native.error_payload``).
+_TREATMENT_REFUSALS: Final = frozenset({"budget_exhausted", "context_length_exceeded"})
+# The same, recognised in an error recorded as plain text (``trajectory.common.llm_error_tail`` does the same).
+_TREATMENT_REFUSAL_TEXT: Final = re.compile(
+    r"budget[ _]exhausted|context_budget|context_length_exceeded|prompt is too long",
+    re.IGNORECASE,
+)
 # Harness knobs whose absence makes a per-call input cap bite without compaction (section 5.3, mini-swe).
 _COMPACTION_KNOBS: Final = frozenset(
     {"compaction", "context.compaction", "context_limit", "context.max_context_tokens"},
@@ -113,6 +135,64 @@ def policy_knob(effective: Mapping[str, Any] | None, dotted: str) -> Any:
     return data
 
 
+def _seq(call: Mapping[str, Any]) -> int:
+    for key in ("seq", "index"):
+        value = call.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return 0
+
+
+def route_error_note(termination: Termination | None, calls: Iterable[Mapping[str, Any]]) -> Note | None:
+    """``route_error_terminated`` when an evaluated attempt's trajectory ended on a failed LLM call after at
+    least one successful one (a flag for the analysis only: the outcome is never changed here).
+
+    The trajectory's end is its last ``main`` call (request classes as in ``trajectory.common``, unknown
+    classes count as auxiliary); successful calls are counted over every class.
+
+    Not flagged: attempts that are not analysed as model data (``llm_error``, ``infra_interrupted``, ...),
+    ``budget_exhausted`` (the treatment's own cap), a context refusal / overflow
+    (``context_length_exceeded``), a last call cut because the harness went away (``client_gone``: wall
+    clock / idle kill), or a failed auxiliary call after the last main one.
+    """
+    from backend.generation.harnesses.trajectory.common import _request_class
+
+    if termination is None or termination == Termination.BUDGET or not TERMINATION_OUTCOME[termination].usable:
+        return None
+    ordered = sorted((c for c in calls if isinstance(c, Mapping)), key=_seq)
+    main = [c for c in ordered if _request_class(c) == "main"]
+    if not main or call_ok(main[-1]):
+        return None
+    ok_calls = sum(1 for c in ordered if call_ok(c))
+    last = main[-1]
+    if not ok_calls or last.get("client_gone"):
+        return None
+    error = last.get("error")
+    code = None
+    message = ""
+    upstream_status = None
+    if isinstance(error, Mapping):
+        code = error.get("code") or error.get("type")
+        message = str(error.get("message") or "")
+        upstream_status = error.get("status")
+    elif error:
+        message = str(error)
+    status = last.get("status")
+    if isinstance(upstream_status, int) and not isinstance(upstream_status, bool) and upstream_status >= 400:
+        status = upstream_status  # an error event inside a 200 stream carries the proxy's status
+    transport = bool(last.get("transport_error"))
+    failed = transport or bool(error) or (isinstance(status, int) and status >= 400)
+    if not failed or (code is not None and str(code) in _TREATMENT_REFUSALS):
+        return None
+    if _TREATMENT_REFUSAL_TEXT.search(message):
+        return None
+    detail = (
+        f"kind={'transport' if transport else 'http'} status={status} code={code or '-'} call={_seq(last)} "
+        f"request_class=main ok_calls={ok_calls} calls={len(ordered)} error={' '.join(message.split())[:160]}"
+    )
+    return note(ROUTE_ERROR_NOTE, detail=detail)
+
+
 def _vendor(slug: str | None) -> str | None:
     if not slug or "/" not in slug:
         return None
@@ -138,7 +218,10 @@ def build_validity(
             notes.append(note(f"budget_exhausted:{kind}"))
         elif rule.note:
             notes.append(note(rule.note))
+    calls = [call for call in calls if isinstance(call, Mapping)]
     ok_calls = [call for call in calls if call_ok(call)]
+    if (route_error := route_error_note(term, calls)) is not None:
+        notes.append(route_error)
     truncations = sum(1 for call in ok_calls if call.get("finish_reason") == "length")
     if truncations:
         notes.append(note(f"call_truncations:{truncations}"))

@@ -1,7 +1,16 @@
-"""Build the rankings list from LLMModel + benchmarks + local stats."""
+"""Build the rankings list: the MSS v2 frame (one row per canonical model) plus local stats.
+
+Rows are (a) one per canonical model of the MSS v2 frame, keyed by its catalog
+(anchor) row's ``model_id`` and carrying ``canonical_id``, and (b) every other
+``LLMModel`` with compared runs (route copies, dated members), whose MSS
+fields are inherited from its canonical model (``mss_inherited_from``).
+Empirical quality and the composite stay per row: rows are never merged and
+statistics are never pooled across rows.
+"""
 
 from __future__ import annotations
 
+import datetime as dt
 import statistics as pystats
 from collections import defaultdict
 from typing import TYPE_CHECKING
@@ -22,15 +31,9 @@ from backend.generation.models.choices import RunStatus
 from backend.generation.models.choices import Stage
 from backend.generation.runs.view import run_views
 from backend.llm_models.models import LLMModel
-from backend.rankings.models import BenchmarkResult
 from backend.rankings.services.constants import SEVERITY_WEIGHTS
-from backend.rankings.services.scoring import compute_accessibility_score
-from backend.rankings.services.scoring import compute_adoption_score
-from backend.rankings.services.scoring import compute_benchmark_score
 from backend.rankings.services.scoring import compute_composite
-from backend.rankings.services.scoring import compute_cost_efficiency_score
 from backend.rankings.services.scoring import compute_empirical_quality
-from backend.rankings.services.scoring import compute_mss
 from backend.statistics.services.runs import study_current_runs
 
 if TYPE_CHECKING:
@@ -384,11 +387,163 @@ def _local_app_stats(
     return out
 
 
-def _benchmarks_by_model() -> dict[str, dict[str, float]]:
-    out: dict[str, dict[str, float]] = {}
-    for r in BenchmarkResult.objects.all().values("model_id", "benchmark", "score"):
-        out.setdefault(r["model_id"], {})[r["benchmark"]] = float(r["score"])
-    return out
+def mss_context(as_of: dt.date | None = None) -> dict[str, Any]:
+    """The MSS v2 frame scored on the nominal specification (read-only; no network).
+
+    Returns ``{"as_of", "inputs", "scored": {canonical_id: row}, "member_of":
+    {model_id: canonical_id}, "tiers": {canonical_id: tier}, "tier_info"}``.
+    """
+    from django.utils import timezone
+
+    from backend.rankings.services.mss import score_frame
+    from backend.rankings.services.selection import assign_tiers
+    from backend.rankings.services.study_selection import build_inputs
+
+    as_of = as_of or timezone.now().date()
+    inputs = build_inputs(as_of)
+    scored = score_frame(inputs["frame"]["candidates"], as_of=as_of, market=inputs.get("market"))
+    member_of: dict[str, str] = {}
+    for row in scored:
+        for member in row.get("members") or []:
+            member_of[member["model_id"]] = row["canonical_id"]
+    eligible = {r["canonical_id"]: r["raw"]["run_cost_usd"] for r in scored if r["eligible"]}
+    tiers, tier_info = assign_tiers(eligible) if eligible else ({}, {})
+    return {
+        "as_of": as_of.isoformat(),
+        "inputs": inputs,
+        "scored": {r["canonical_id"]: r for r in scored},
+        "member_of": member_of,
+        "tiers": tiers,
+        "tier_info": tier_info,
+    }
+
+
+def preferred_route(routes: dict[str, Any], vendor: str) -> str | None:
+    """Claude on the Anthropic key, else OpenCode Go when served, else OpenRouter (no budgets here)."""
+    paid = {k for k, v in (routes or {}).items() if v.get("paid")}
+    if vendor == "anthropic" and "anthropic" in paid:
+        return "anthropic"
+    for kind in ("go", "openrouter", "anthropic"):
+        if kind in paid:
+            return kind
+    return None
+
+
+def _mss_fields(r: dict[str, Any] | None, tiers: dict[str, str]) -> dict[str, Any]:
+    """The MSS v2 fields of one rankings row (all None when the model is not in the frame)."""
+    if r is None:
+        return {
+            "canonical_id": None,
+            "vendor": None,
+            "origin": None,
+            "open_weights": None,
+            "release_date": None,
+            "pinned_version": None,
+            "routes": {},
+            "preferred_route": None,
+            "eligible": False,
+            "exclusion": {
+                "step": "K",
+                "code": "not_in_frame",
+                "detail": "router, alias, :batch or unlinked local row",
+            },
+            "popularity_score": None,
+            "price_score": None,
+            "capability_score": None,
+            "recency_score": None,
+            "mss_score": None,
+            "mss_coverage": None,
+            "mss_missing": [],
+            "mss_flags": [],
+            "run_cost_usd": None,
+            "planning_cost_usd": None,
+            "price_tier": None,
+            "popularity": None,
+            "webdev_rating": None,
+            "list_price": None,
+        }
+    raw = r.get("raw") or {}
+    pop = raw.get("popularity") or None
+    webdev = raw.get("webdev") or None
+    price = (r.get("inputs") or {}).get("list_price") or None
+    scores = r.get("scores") or {}
+    return {
+        "canonical_id": r["canonical_id"],
+        "vendor": r.get("vendor"),
+        "origin": r.get("origin"),
+        "open_weights": r.get("open_weights"),
+        "release_date": r.get("release_date"),
+        "line_key": r.get("line_key"),
+        "pinned_version": r.get("pinned_version"),
+        "routes": {
+            kind: {k: v.get(k) for k in ("model_id", "available", "paid", "prerelease", "served_name", "permaslug")}
+            for kind, v in (r.get("routes") or {}).items()
+        },
+        "preferred_route": preferred_route(r.get("routes") or {}, r.get("vendor") or ""),
+        "eligible": bool(r.get("eligible")),
+        "exclusion": r.get("exclusion"),
+        "popularity_score": scores.get("popularity"),
+        "price_score": scores.get("price"),
+        "capability_score": scores.get("capability"),
+        "recency_score": scores.get("recency"),
+        "mss_score": r.get("mss"),
+        "mss_coverage": r.get("coverage") if r.get("mss") is not None else None,
+        "mss_missing": r.get("missing") or [],
+        "mss_flags": r.get("flags") or [],
+        "run_cost_usd": raw.get("run_cost_usd"),
+        "planning_cost_usd": raw.get("planning_cost_usd"),
+        "price_tier": tiers.get(r["canonical_id"]),
+        "popularity": (
+            {
+                "source": raw.get("popularity_source"),
+                "definition": pop.get("definition"),
+                "volume_share": pop.get("volume_share"),
+                "value_share": pop.get("value_share"),
+                "days_available": pop.get("days_available"),
+                "days_listed": pop.get("days_listed"),
+                "days_censored": pop.get("days_censored"),
+                "censored": pop.get("censored"),
+                "short_exposure": pop.get("short_exposure"),
+                "window": pop.get("window"),
+                "as_of": pop.get("as_of"),
+            }
+            if pop
+            else ({"source": raw.get("popularity_source")} if raw.get("popularity_source") else None)
+        ),
+        "webdev_rating": (
+            {
+                k: webdev.get(k)
+                for k in (
+                    "rating",
+                    "rating_lower",
+                    "rating_upper",
+                    "arena_name",
+                    "publish_date",
+                    "match",
+                    "from_model",
+                )
+            }
+            if webdev
+            else None
+        ),
+        "list_price": (
+            {
+                k: price.get(k)
+                for k in (
+                    "input",
+                    "output",
+                    "cache_read",
+                    "cache_write",
+                    "unit",
+                    "source",
+                    "fetched_at",
+                    "discount_undone",
+                )
+            }
+            if price
+            else None
+        ),
+    }
 
 
 def aggregate_rankings(
@@ -397,15 +552,20 @@ def aggregate_rankings(
     prompt_hash: str | None = None,
     config_fingerprint: str | None = None,
     study_id: str | None = None,
+    context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build the ranking list from LLMModel + benchmarks + local stats.
+    """Build the ranking rows: the MSS v2 frame plus locally measured quality.
 
     With ``user`` given, local stats (apps, findings, empirical scores) are
-    scoped to that user's generation runs; benchmarks and metadata are global
-    either way. ``prompt_hash``/``config_fingerprint``/``study_id`` further
-    narrow local stats to runs generated from one prompt version, one
-    configuration or one study: comparisons across models are only
-    apples-to-apples when they used the same prompt material.
+    scoped to that user's generation runs; the MSS fields are global either
+    way. ``prompt_hash``/``config_fingerprint``/``study_id`` further narrow
+    local stats to runs generated from one prompt version, one configuration
+    or one study: comparisons across models are only apples-to-apples when
+    they used the same prompt material. ``context`` is a precomputed
+    :func:`mss_context` (tests, callers that already built one).
+
+    A model without MSS (insufficient evidence, not in the frame) has no
+    composite either; rows are sorted by composite with those last.
     """
 
     local = _local_app_stats(
@@ -414,19 +574,18 @@ def aggregate_rankings(
         config_fingerprint=config_fingerprint,
         study_id=study_id,
     )
-    bench = _benchmarks_by_model()
+    ctx = context or mss_context()
+    scored, tiers, member_of = ctx["scored"], ctx["tiers"], ctx["member_of"]
+    models = {m.model_id: m for m in LLMModel.objects.all()}
 
-    rows: list[dict[str, Any]] = []
-    for m in LLMModel.objects.all():
-        local_row = local.get(m.model_id, {})
-        bench_row = bench.get(m.model_id, {})
-
-        entry: dict[str, Any] = {
+    def base_entry(m: LLMModel, local_row: dict[str, Any]) -> dict[str, Any]:
+        return {
             "model_id": m.model_id,
             "model_name": m.model_name,
             "provider": m.provider,
             "is_free": m.is_free,
             "context_length": m.context_window,
+            # The catalog's cheapest-endpoint price (reference only; MSS uses the list price).
             "price_per_million_input": (m.input_price_per_token * 1_000_000 if m.input_price_per_token else None),
             "price_per_million_output": (m.output_price_per_token * 1_000_000 if m.output_price_per_token else None),
             "apps": local_row.get("apps", 0),
@@ -449,55 +608,69 @@ def aggregate_rankings(
             "variance": local_row.get("variance"),
             "instrument_set": local_row.get("instrument_set"),
         }
-        # Hoist benchmark scores into entry for normalization
-        entry.update(bench_row)
 
-        # Pull metadata-driven attributes (license_type, api_stability, etc.)
-        meta = m.metadata or {}
-        for k in (
-            "license_type",
-            "api_stability",
-            "documentation_quality",
-            "openrouter_programming_rank",
-        ):
-            if k in meta and entry.get(k) is None:
-                entry[k] = meta[k]
-
-        # Compute component scores
-        entry["benchmark_score"] = round(compute_benchmark_score(entry), 4)
-        entry["cost_efficiency_score"] = round(
-            compute_cost_efficiency_score(entry),
-            4,
-        )
-        entry["accessibility_score"] = round(
-            compute_accessibility_score(entry),
-            4,
-        )
-        entry["adoption_score"] = round(compute_adoption_score(entry), 4)
-        entry["mss_score"] = compute_mss(entry)
+    def finish(entry: dict[str, Any]) -> dict[str, Any]:
         entry["empirical_quality_score"] = compute_empirical_quality(entry)
-        # Metadata-based MSS blended with locally measured quality; models
-        # never exercised here keep composite == MSS.
-        entry["composite_score"] = compute_composite(
-            entry["mss_score"],
-            entry["empirical_quality_score"],
-        )
+        # MSS blended with locally measured quality; models never exercised
+        # here keep composite == MSS, models without MSS have no composite.
+        entry["composite_score"] = compute_composite(entry["mss_score"], entry["empirical_quality_score"])
+        return entry
 
-        rows.append(entry)
+    rows: list[dict[str, Any]] = []
+    anchors: dict[str, str] = {}
+    for canon, r in scored.items():
+        m = models.get(r["anchor_model_id"])
+        if m is None:
+            continue
+        anchors[canon] = m.model_id
+        entry = base_entry(m, local.get(m.model_id, {}))
+        entry.update(_mss_fields(r, tiers))
+        entry["display_name"] = r.get("display_name")
+        entry["context_length"] = r.get("context_window") or m.context_window
+        entry["members"] = [mm["model_id"] for mm in r.get("members") or []]
+        entry["mss_inherited_from"] = None
+        rows.append(finish(entry))
+    anchor_ids = set(anchors.values())
+    for model_id, local_row in local.items():
+        if model_id in anchor_ids or model_id not in models:
+            continue
+        m = models[model_id]
+        entry = base_entry(m, local_row)
+        canon = member_of.get(model_id)
+        r = scored.get(canon) if canon else None
+        entry.update(_mss_fields(r, tiers))
+        entry["mss_inherited_from"] = anchors.get(canon) if r is not None else None
+        rows.append(finish(entry))
 
-    rows.sort(key=lambda r: r.get("composite_score") or 0.0, reverse=True)
+    rows.sort(key=lambda r: (r.get("composite_score") is None, -(r.get("composite_score") or 0.0), r["model_id"]))
     return rows
 
 
-def get_status() -> dict[str, Any]:
-    """Diagnostic info: counts of seeded benchmarks per benchmark name."""
+def mss_sources(context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Provenance of every MSS v2 input: as_of, fetched_at, window, license, citation and coverage."""
+    from backend.rankings.services.study_selection import sources_for
 
-    counts: dict[str, int] = {}
-    for r in BenchmarkResult.objects.values("benchmark").annotate(c=Count("id")):
-        counts[r["benchmark"]] = int(r["c"])
+    ctx = context or mss_context()
+    scored = list(ctx["scored"].values())
+    eligible = [r for r in scored if r["eligible"]]
+    frame_ok = [r for r in scored if r.get("exclusion") is None or (r.get("exclusion") or {}).get("step") == "E8"]
+
+    def count(rows: list[dict[str, Any]], component: str) -> int:
+        return sum(1 for r in rows if (r.get("scores") or {}).get(component) is not None)
+
     return {
-        "benchmarks": counts,
-        "total_benchmark_rows": sum(counts.values()),
-        "models_with_benchmarks": (BenchmarkResult.objects.values("model_id").distinct().count()),
-        "total_models": LLMModel.objects.count(),
+        "as_of": ctx["as_of"],
+        "sources": sources_for(ctx["inputs"], scored),
+        "coverage": {
+            "canonical_models": len(scored),
+            "passing_filters_e1_e7": len(frame_ok),
+            "eligible": len(eligible),
+            "with_popularity": count(frame_ok, "popularity"),
+            "with_price": count(frame_ok, "price"),
+            "with_capability": count(frame_ok, "capability"),
+            "with_recency": count(frame_ok, "recency"),
+            "popularity_proxy": sum(1 for r in frame_ok if "lmarena_proxy" in (r.get("flags") or [])),
+        },
+        "tiers": ctx["tier_info"],
+        "flow": [*ctx["inputs"]["frame"]["flow"]],
     }

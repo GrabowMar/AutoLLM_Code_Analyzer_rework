@@ -121,6 +121,13 @@ def extract_build_error(exc) -> str:
     return text[-3000:] if len(text) > 3000 else text
 
 
+def _app_mem_limit() -> str:
+    """Per-app memory cap, staff-editable on the System page (FootprintSettings)."""
+    from backend.system.services.footprint import app_mem_limit
+
+    return app_mem_limit()
+
+
 def run_container(
     image: str,
     name: str,
@@ -147,7 +154,7 @@ def run_container(
         "detach": True,
         "cap_drop": ["ALL"],
         "read_only": False,
-        "mem_limit": "512m",
+        "mem_limit": _app_mem_limit(),
         "cpu_period": 100000,
         "cpu_quota": 50000,
         "labels": {
@@ -386,6 +393,8 @@ def run_detached(
     container stays alive running *command* (typically ``sleep infinity``) so
     tools can be installed and executed via :func:`exec_in`.
     """
+    from django.conf import settings
+
     c = client()
     if c is None:
         msg = "Docker daemon unavailable"
@@ -399,9 +408,10 @@ def run_detached(
         "cap_drop": ["ALL"],
         "security_opt": ["no-new-privileges"],
         "pids_limit": 256,
-        "mem_limit": "1g",
+        # CodeQL's query evaluator needs more than 1 GB and one core (its --ram is set under this cap).
+        "mem_limit": str(getattr(settings, "ANALYZER_WORKSPACE_MEMORY", "2g")),
         "cpu_period": 100000,
-        "cpu_quota": 100000,
+        "cpu_quota": int(100000 * float(getattr(settings, "ANALYZER_WORKSPACE_CPUS", 2))),
         "labels": {
             "backend.managed": "true",
             "backend.kind": "analyzer-workspace",

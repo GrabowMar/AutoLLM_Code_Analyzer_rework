@@ -71,6 +71,7 @@ from backend.inference.snapshot import effective_num_ctx
 router = Router(tags=["inference"])
 
 _SYSTEM_EDITABLE = frozenset({"max_concurrency", "max_active_jobs"})
+ANTHROPIC_FLAVOR_ERROR = "The Anthropic flavor needs a direct OpenAI-compatible endpoint."
 _CAP_FIELDS = (
     "max_concurrency",
     "max_active_jobs",
@@ -400,6 +401,8 @@ def create_endpoint(request, data: EndpointCreate):
     flavor = data.api_flavor or ("native" if data.kind == "ollama" else "openai")
     if flavor == "native" and data.kind != "ollama":
         raise HttpError(400, "The native API flavor exists only for Ollama.")
+    if flavor == "anthropic" and (data.kind != "openai_compatible" or data.connection != "direct"):
+        raise HttpError(400, ANTHROPIC_FLAVOR_ERROR)
     endpoint = LLMEndpoint(
         slug=slug,
         name=data.name,
@@ -456,6 +459,8 @@ def update_endpoint(request, endpoint_id: int, data: EndpointUpdate):
         if changes["api_flavor"] == "native" and endpoint.kind != "ollama":
             raise HttpError(400, "The native API flavor exists only for Ollama.")
         endpoint.api_flavor = changes["api_flavor"]
+    if endpoint.api_flavor == "anthropic" and (endpoint.kind != "openai_compatible" or connection != "direct"):
+        raise HttpError(400, ANTHROPIC_FLAVOR_ERROR)
     if connection == "direct":
         url = changes.get("base_url", endpoint.base_url)
         if not url:

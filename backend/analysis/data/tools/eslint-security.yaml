@@ -1,9 +1,11 @@
 slug: eslint-security
 name: ESLint Security
 description: >-
-  Security rules for JavaScript and Node.js via eslint-plugin-security: eval
-  with expressions, non-literal regular expressions (ReDoS), unsafe child
-  processes, timing-unsafe comparisons and pseudo-random bytes.
+  Security rules for JavaScript and TypeScript (browser and Node.js):
+  eslint-plugin-security (eval with expressions, non-literal regular
+  expressions, unsafe child processes, timing-unsafe comparisons) and
+  eslint-plugin-no-unsanitized (innerHTML, outerHTML, insertAdjacentHTML and
+  document.write with unescaped values: DOM XSS sinks).
 category: security
 kind: container
 target_language: javascript
@@ -12,15 +14,15 @@ technologies: [javascript, express]
 icon: shield-check
 version: "1"
 docs_url: https://github.com/eslint-community/eslint-plugin-security
-install_cmd: "npm install -g eslint@8 eslint-plugin-security@1"
-verify_cmd: "eslint --version && npm ls -g eslint-plugin-security >/dev/null"
-uninstall_cmd: "npm uninstall -g eslint-plugin-security"
+install_cmd: "npm install -g eslint@8 eslint-plugin-security@1 eslint-plugin-no-unsanitized@4 @typescript-eslint/parser@7 @typescript-eslint/eslint-plugin@7 typescript@5"
+verify_cmd: "eslint --version && npm ls -g eslint-plugin-security eslint-plugin-no-unsanitized @typescript-eslint/parser >/dev/null"
+uninstall_cmd: "npm uninstall -g eslint-plugin-security eslint-plugin-no-unsanitized"
 # detect-object-injection flags every obj[key] and drowns out real issues.
 run_cmd: |
-  printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"plugins":["security"],"extends":["plugin:security/recommended"],"rules":{"security/detect-object-injection":"off"}}' > /tmp/eslint-security.json
-  eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc -c /tmp/eslint-security.json --resolve-plugins-relative-to "$(npm root -g)" --ignore-pattern node_modules 2>/dev/null
+  g="$(npm root -g)"; printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"plugins":["security","no-unsanitized"],"extends":["plugin:security/recommended","plugin:no-unsanitized/recommended-legacy"],"rules":{"security/detect-object-injection":"off"},"overrides":[{"files":["*.ts","*.tsx","*.mts","*.cts"],"parser":"PARSER"}]}' | sed "s#PARSER#$g/@typescript-eslint/parser/dist/index.js#" > /tmp/eslint-security.json
+  eslint {target} --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.mts,.cts -f json --no-eslintrc -c /tmp/eslint-security.json --resolve-plugins-relative-to "$g" --ignore-pattern node_modules 2>/dev/null
 parser_key: eslint_security
-file_patterns: ["*.js", "*.jsx", "*.cjs", "*.mjs"]
+file_patterns: ["*.js", "*.jsx", "*.cjs", "*.mjs", "*.ts", "*.tsx", "*.mts", "*.cts"]
 run_timeout: 120
 install_timeout: 300
 display_order: 30

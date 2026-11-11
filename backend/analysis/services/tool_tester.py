@@ -85,7 +85,9 @@ def test_tool(
             result = docker_manager.exec_in(
                 container_name,
                 cmd,
-                timeout_s=min(tool.run_timeout, 60),
+                # A sample is small: a minute, or a quarter of the run timeout for the tools
+                # whose start-up alone takes longer (CodeQL builds a database first).
+                timeout_s=min(tool.run_timeout, max(60, tool.run_timeout // 4)),
                 workdir="/tmp/analyzer-test",
             )
             raw = {"exit_code": result.get("exit_code"), "stdout": (result.get("output") or "")[:4000]}
@@ -93,6 +95,11 @@ def test_tool(
                 parsed = parsers.parse(tool.parser_key, result.get("output", ""))
                 findings = [asdict(f) for f in parsed.findings]
                 metrics = parsed.metrics
+                if parsed.error and not findings:
+                    # The sample run measured nothing (killed, crashed, unparsable): say so
+                    # instead of showing an empty, clean-looking result.
+                    code = result.get("exit_code")
+                    message = f"{message or 'Tool available'} — sample run failed (exit {code}): {parsed.error}"[:500]
         except RuntimeError as exc:
             return {"available": True, "message": str(exc), "findings": [], "metrics": {}, "raw_output": {}}
 
