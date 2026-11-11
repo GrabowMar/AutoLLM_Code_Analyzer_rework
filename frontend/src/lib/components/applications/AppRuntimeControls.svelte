@@ -44,7 +44,9 @@
 		if (!silent) loading = true;
 		try {
 			const res = await getContainers({ job_id: jobId, per_page: 1 });
-			const next = res.containers[0] ?? null;
+			// A removed container is history, not a container: show Build again (the image may still be cached).
+			const latest = res.containers[0] ?? null;
+			const next = latest && latest.status === 'removed' ? null : latest;
 			container = next;
 			onChange?.(next);
 		} catch {

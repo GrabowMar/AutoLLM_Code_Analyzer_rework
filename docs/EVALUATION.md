@@ -113,8 +113,8 @@ checked offline, so its downloaded `go.sum` is used as produced. Maven never rea
 ## 3. The tester (spec 8.1-8.5)
 
 `images/eval-tester/tester.py`, standard library only (`http.client`); the same file runs in-process in the
-backend tests and the conformance kit. Version constants: `VERSION=1`, `TESTER_RULES_VERSION=1`,
-`PROBE_RULES_VERSION=1`.
+backend tests and the conformance kit. Version constants under eval-v2@2: `VERSION=2`, `TESTER_RULES_VERSION=3`,
+`PROBE_RULES_VERSION=2` (eval-v2@1: 1, 1, 1; its stored results are kept).
 
 **Plan.** `acceptance.compile(task_version, auth_mode, stack)` (`COMPILER_VERSION=1`) writes `/in/plan.json`: the
 `AcceptancePlan` contract plus `health_path`, `signed_routes`, `mock_host`/`mock_port`, `has_frontend`
@@ -166,7 +166,14 @@ Phase `pre` runs every other check plus those setups and saves the state; the su
 `auth_flow` (endpoint ids resolved to paths). An actor that cannot log in makes its checks `skipped`
 (`skipped_due_to: ["auth:<actor>"]`), which counts as a fail.
 
-**Tolerances** (`TESTER_RULES_VERSION=1`):
+**Attribution of refusals** (`TESTER_RULES_VERSION=3`): an `<endpoint>.invalid.*` check sends the endpoint's valid
+request with one fault and expects a refusal. When the endpoint's own `<endpoint>.ok` check (the same request without
+the fault) was already answered with one of the refusal statuses the `.invalid` check accepts, the refusal says
+nothing about the fault: the check is `skipped` (`skipped_due_to: ["<endpoint>.ok"]`, note "not measurable") and,
+like every skipped check, counts as a fail. An `.ok` check that failed for another reason (a 200 where 201 was
+expected, a schema mismatch) does not trigger the rule.
+
+**Tolerances** (`TESTER_RULES_VERSION=1`, unchanged since):
 
 1. One same-origin trailing-slash redirect (301/302/307/308 to the same path with or without the trailing slash,
    e.g. Django `APPEND_SLASH`) is followed by retrying the canonical path, for any method. A check that expects
