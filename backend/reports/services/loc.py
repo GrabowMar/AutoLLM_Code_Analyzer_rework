@@ -15,6 +15,7 @@ import re
 from typing import TYPE_CHECKING
 from typing import Any
 
+from backend.analysis.services.base import is_generated_bundle
 from backend.analysis.services.base import is_non_source_path
 
 if TYPE_CHECKING:
@@ -107,6 +108,8 @@ def loc_from_files(files: dict[str, Any]) -> dict[str, int]:
     for rel_path, content in files.items():
         if not isinstance(content, str) or not is_source_file(rel_path) or is_test_path(rel_path):
             continue
+        if is_generated_bundle(rel_path, content):  # bundler output is not the app's source
+            continue
         ext = _ext(rel_path)
         lines = _count_lines(content, _COMMENT_PREFIX_BY_EXT.get(ext, "#"))
         source_files += 1
@@ -126,7 +129,12 @@ def loc_of_test_files(files: dict[str, Any]) -> dict[str, int]:
     """LOC and file count of the test code (:func:`is_test_path`) in a ``{path: text}`` map."""
     test_loc = test_files = 0
     for rel_path, content in files.items():
-        if isinstance(content, str) and is_source_file(rel_path) and is_test_path(rel_path):
+        if (
+            isinstance(content, str)
+            and is_source_file(rel_path)
+            and is_test_path(rel_path)
+            and not is_generated_bundle(rel_path, content)
+        ):
             test_loc += _count_lines(content, _COMMENT_PREFIX_BY_EXT.get(_ext(rel_path), "#"))
             test_files += 1
     return {"test_loc": test_loc, "test_files": test_files}

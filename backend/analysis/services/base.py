@@ -71,6 +71,27 @@ def is_non_source_path(path: str) -> bool:
     return any(part in NON_SOURCE_DIRS for part in clean.split("/")[:-1]) or _VENV_PATH.search(clean) is not None
 
 
+# A JavaScript or CSS file this large is bundler output (an app's own dependencies compiled into one
+# file), not code the model wrote: agents leave such files behind after bundling the frontend for a
+# smoke test (``frontend/dist-test/test-entry.js``, ``.smoketest/app.bundle.js``, ``.ssrsmoke.mjs``).
+# In the 2026-11 study the largest hand-written script is 44 KB and the smallest bundle 1.2 MB; the
+# five bundles of four apps drew 13% of all static findings (React's code) and made jscpd run out of
+# memory. Names and directories vary, so the rule is the size.
+BUNDLE_MIN_BYTES = 256 * 1024
+_BUNDLE_EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".css")
+
+
+def is_generated_bundle(path: str, content: object) -> bool:
+    """Whether *content* of the file at *path* is bundler output (see :data:`BUNDLE_MIN_BYTES`)."""
+    return isinstance(content, str) and len(content) >= BUNDLE_MIN_BYTES and path.lower().endswith(_BUNDLE_EXTENSIONS)
+
+
+def non_source_paths(code: dict) -> list[str]:
+    """Sorted paths of *code* (``{path: content}``) the analysis leaves out: files in non-source
+    directories (:func:`is_non_source_path`) and generated bundles (:func:`is_generated_bundle`)."""
+    return sorted(path for path, text in code.items() if is_non_source_path(path) or is_generated_bundle(path, text))
+
+
 def is_dependency_advisory(tool_slug: str, category: str, rule_id: str = "") -> bool:
     """Whether a finding is a dependency advisory of a known-vulnerability scanner (not a code issue).
 

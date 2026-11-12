@@ -49,6 +49,7 @@ from backend.analysis.services import runner
 from backend.analysis.services.base import NON_SOURCE_DIRS
 from backend.analysis.services.base import is_dependency_advisory
 from backend.analysis.services.base import is_non_source_path
+from backend.analysis.services.base import non_source_paths
 from backend.generation.models import GenerationRun
 from backend.generation.models import choices
 from backend.generation.runs.view import RunView
@@ -123,7 +124,7 @@ def _source_loc(run: AnalysisRun) -> dict[str, Any] | None:
     code = run.get_code_for_analysis()
     if not code:
         return None
-    excluded = sorted(path for path in code if is_non_source_path(path))
+    excluded = non_source_paths(code)
     dirs = Counter(
         next((part for part in path.strip("/").split("/")[:-1] if part in NON_SOURCE_DIRS), "") for path in excluded
     )

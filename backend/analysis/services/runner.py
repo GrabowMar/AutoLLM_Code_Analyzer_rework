@@ -37,7 +37,9 @@ from backend.analysis.services.base import AnalyzerOutput
 from backend.analysis.services.base import ParsedOutput
 from backend.analysis.services.base import build_severity_counts
 from backend.analysis.services.base import fingerprint
+from backend.analysis.services.base import is_generated_bundle
 from backend.analysis.services.base import is_non_source_path
+from backend.analysis.services.base import non_source_paths
 from backend.analysis.services.serialize import serialize_result
 from backend.common.threading import dispatch_in_thread
 from backend.realtime import events as realtime
@@ -564,7 +566,7 @@ def _execute_locked(run: AnalysisRun) -> AnalysisRun:
         return run
     _set_phase(run, PHASE_PREPARING)
     code = run.get_code_for_analysis()
-    excluded_paths = sorted(k for k in code if is_non_source_path(k))
+    excluded_paths = non_source_paths(code)
     files = analysis_files(run, code)
     origins = _record_code_scope(run, files)
     truncated_inputs = _truncated_inputs(run)
@@ -1289,13 +1291,13 @@ def run_scope_counts(run_ids) -> dict:
 
 def analysis_files(run: AnalysisRun, code: dict[str, str] | None = None) -> dict[str, str]:
     """The ``{path: content}`` the tools receive: *code* (default ``run.get_code_for_analysis()``)
-    without files in non-source directories.
+    without files in non-source directories and generated bundles.
 
     A generation run's app tree already has real relative paths and is kept verbatim; pasted code
     may use bare semantic keys (``backend``) and goes through :func:`_materialize`.
     """
     code = run.get_code_for_analysis() if code is None else code
-    kept = {k: v for k, v in code.items() if not is_non_source_path(k)}
+    kept = {k: v for k, v in code.items() if not is_non_source_path(k) and not is_generated_bundle(k, v)}
     if run.generation_job_id and not run.source_code:
         return {path.lstrip("/"): text for path, text in kept.items() if isinstance(text, str)}
     return _materialize(kept)
