@@ -30,6 +30,7 @@ from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
 from backend.analysis.services import ai_runner
+from backend.analysis.services import dast_seed
 from backend.analysis.services import parsers
 from backend.analysis.services import workspace_service
 from backend.analysis.services.base import ADVISORY_TOOLS
@@ -608,6 +609,7 @@ def _execute_locked(run: AnalysisRun) -> AnalysisRun:
     _set_phase(run, PHASE_TOOLS)
     statuses: list[str] = []
     cancelled = False
+    scan_scope: dict | None = None
     for slug in run.tool_slugs:
         tool = tools.get(slug)
         cancelled = cancelled or is_cancelled(run)
@@ -616,6 +618,9 @@ def _execute_locked(run: AnalysisRun) -> AnalysisRun:
             # Resolved per tool, right before it: the app may have died (or
             # moved to another address) while the previous tools ran.
             app_url, app_url_error = _live_app_url(run, container_name)
+            if app_url and container_name and scan_scope is None:
+                # Once per run, before its first dynamic tool: sign in and describe the API to the scanners.
+                scan_scope = _seed_dynamic_scan(run, container_name, app_url)
         skip = _skip(tool, files, cancelled=cancelled, app_url=app_url, app_url_error=app_url_error)
         if skip is not None:
             reason, message = skip
@@ -657,6 +662,7 @@ def _execute_locked(run: AnalysisRun) -> AnalysisRun:
                 tool_version=tool_versions.get(slug, ""),
                 app_url=app_url,
                 origins=origins,
+                scan_scope=scan_scope if tool.analysis_mode == "dynamic" else None,
             )
         except Exception as exc:
             # One tool's crash (a provider's odd response, an unsavable value)
@@ -687,6 +693,7 @@ def _run_tool(
     tool_version: str,
     app_url: str,
     origins: dict[str, str] | None = None,
+    scan_scope: dict | None = None,
 ) -> bool:
     """Execute *tool* and store its outcome on *result*; returns whether the run was cancelled meanwhile."""
     started_at = result.started_at or timezone.now()
@@ -738,10 +745,26 @@ def _run_tool(
         output.summary["parser_sha"] = parser_sha
     if patterns_sha := patterns_fingerprint(tool):
         output.summary["patterns_sha"] = patterns_sha
+    if scan_scope is not None:
+        # What the scanner was given besides the start page (dast_seed): API description, signed-in identity.
+        output.summary["scan_scope"] = scan_scope
     # It ran: the app has files it reads (dynamic tools: a running app).
     output.summary["tool_applicable"] = True
     _persist_result(result, output, origins or {})
     return False
+
+
+def _seed_dynamic_scan(run: AnalysisRun, container_name: str, app_url: str) -> dict:
+    """``dast_seed.prepare`` that never fails the run: an unseeded scan is still a (shallower) scan."""
+    try:
+        return dast_seed.prepare(run, container_name, app_url)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Seeding the dynamic scan of AnalysisRun %s failed", run.pk, exc_info=True)
+        try:
+            dast_seed.clear(container_name)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not clear the seed files of AnalysisRun %s", run.pk, exc_info=True)
+        return {"seeded": False, "reason": f"seeding failed: {type(exc).__name__}: {exc}"[:300]}
 
 
 def _live_app_url(run: AnalysisRun, container_name: str) -> tuple[str, str]:

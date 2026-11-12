@@ -4,9 +4,9 @@ description: >-
   Black-box web vulnerability scanner. Crawls the running app and fuzzes its
   forms and parameters for XSS, SQL and command injection, path traversal,
   open redirects, CRLF and CSRF, and checks cookie flags and security
-  headers. The crawler does not run JavaScript, so it reaches only what the
-  start page links to: the API endpoints of a single-page app are not fuzzed.
-  Requires the app's container to be running.
+  headers. The crawler does not run JavaScript; for a generated app the scan
+  is seeded with the task's API endpoints and a signed-in session, so the JSON
+  API is fuzzed too. Requires the app's container to be running.
 category: security
 kind: container
 target_language: any
@@ -24,12 +24,17 @@ install_cmd: >-
   ln -sf /home/analyzer/.local/opt/wapiti/bin/wapiti /home/analyzer/.local/bin/wapiti
 verify_cmd: 'v=$(wapiti --version 2>/dev/null | tail -1) && [ -n "$v" ] && echo "wapiti $v"'
 uninstall_cmd: "rm -rf /home/analyzer/.local/opt/wapiti /home/analyzer/.local/bin/wapiti"
-run_cmd: >-
-  rm -rf /tmp/wapiti && mkdir -p /tmp/wapiti &&
-  wapiti -u {url}/ --scope folder -m {config:modules}
-  --max-scan-time {config:max_scan_seconds} --max-attack-time 60
-  -f json -o /tmp/wapiti/report.json --store-session /tmp/wapiti/session
-  --flush-session --no-bugreport >/tmp/wapiti/wapiti.log 2>&1;
+# For a generated app the runner writes /tmp/dast/openapi.json and
+# /tmp/dast/headers first (analysis/services/dast_seed.py): the task's API
+# endpoints and the scan's credential, one "Name: value" header per line.
+run_cmd: |
+  rm -rf /tmp/wapiti && mkdir -p /tmp/wapiti
+  set -- -u {url}/ --scope folder -m {config:modules} --max-scan-time {config:max_scan_seconds} --max-attack-time 60 -f json -o /tmp/wapiti/report.json --store-session /tmp/wapiti/session --flush-session --no-bugreport
+  [ -f /tmp/dast/openapi.json ] && set -- "$@" --swagger /tmp/dast/openapi.json
+  if [ -f /tmp/dast/headers ]; then
+    while IFS= read -r h; do [ -n "$h" ] && set -- "$@" -H "$h"; done < /tmp/dast/headers
+  fi
+  wapiti "$@" >/tmp/wapiti/wapiti.log 2>&1
   cat /tmp/wapiti/report.json
 parser_key: wapiti
 run_timeout: 900
