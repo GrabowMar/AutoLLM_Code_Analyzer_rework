@@ -80,6 +80,8 @@ PER_APP_KEYS = (
     "code_unique_tests",
     "code_unique_auxiliary",
     "formatting_unique_model",
+    "low_confidence_unique_model",
+    "code_unique_inherited",
     "manifest_unique",
     "runtime_unique",
     "runtime_unique_low_confidence",
@@ -140,6 +142,7 @@ ISSUE_KEYS = (
     "dependency_added",
     "auxiliary",
     "formatting",
+    "inherited_from_starter",
     "low_confidence",
 )
 # Per-app code metrics exactly as the metric tools printed them (``ToolResult.metrics``
@@ -379,8 +382,60 @@ def is_formatting(cluster: IssueCluster) -> bool:
     )
 
 
+def is_low_confidence_static(cluster: IssueCluster) -> bool:
+    """Whether every member of a code issue carries its tool's lowest stated confidence.
+
+    vulture's 60% class ("unused attribute 'row_factory'" on ``conn.row_factory = sqlite3.Row``, in every
+    app of the 2026-11 study) and bandit's LOW. A tool that states no confidence is never low.
+    """
+    return bool(cluster.members) and all(
+        str(m.get("tool_confidence") or "").lower() in _LOW_CONFIDENCE for m in cluster.members
+    )
+
+
+def _inherited_from_starter(
+    clusters: list[IssueCluster],
+    kind: dict[int, str],
+    in_model: dict[int, bool],
+    starter_of: dict[str, Any],
+) -> set[int]:
+    """Ids of the model-scope code issues that the starter's own file already has.
+
+    A finding is attributed by file, so an issue on a line the starter wrote counts as the model's once
+    the model edits that file (the starter Dockerfile's ``RUN cd``, missing HEALTHCHECK and root user: 186
+    findings in the 31 apps of the 2026-11 study that touched the Dockerfile). The evidence is the scope
+    itself: what the same tools report, under the same path and issue class, in apps that kept that
+    starter's file unmodified. Per app, at most that many issues of the class in the edited file are
+    inherited (the lowest lines first); anything beyond is the model's.
+    """
+    evidence: dict[tuple, int] = {}
+    per_run: Counter = Counter()
+    for c in clusters:
+        if kind[id(c)] == CODE and c.members and all(m.get("file_origin") == "starter" for m in c.members):
+            per_run[(c.run_id, starter_of.get(c.run_id), normalize_path(c.file_path), c.issue_class)] += 1
+    for (_run, starter, path, cls), n in per_run.items():
+        key = (starter, path, cls)
+        evidence[key] = max(evidence.get(key, 0), n)
+    candidates: dict[tuple, list[IssueCluster]] = defaultdict(list)
+    for c in clusters:
+        if (
+            kind[id(c)] == CODE
+            and in_model.get(id(c))
+            and c.members
+            and all(m.get("file_origin") == "modified" for m in c.members)
+        ):
+            key = (starter_of.get(c.run_id), normalize_path(c.file_path), c.issue_class)
+            if key in evidence:
+                candidates[(c.run_id, *key)].append(c)
+    inherited: set[int] = set()
+    for (_run, *key), group in candidates.items():
+        group.sort(key=lambda c: (c.line or 0, min(str(m["id"]) for m in c.members)))
+        inherited.update(id(c) for c in group[: evidence[tuple(key)]])
+    return inherited
+
+
 # What a scanner says when it is least sure, or reports an observation rather than a flaw.
-_LOW_CONFIDENCE = frozenset({"low", "false positive"})
+_LOW_CONFIDENCE = frozenset({"low", "false positive", "60%"})
 _INFORMATIONAL_LEVELS = frozenset({"informational", "info"})
 
 
@@ -418,6 +473,8 @@ _SUMMED = (
     "code_unique_tests",
     "code_unique_auxiliary",
     "formatting_unique_model",
+    "low_confidence_unique_model",
+    "code_unique_inherited",
     "manifest_unique",
     "runtime_unique",
     "runtime_unique_low_confidence",
@@ -609,6 +666,10 @@ def _issue_breakdowns(
     code = load_code([runs_by_id[r] for r in in_table])
     model_paths = {r: code.model_paths(r) for r in in_table}
     in_model = {id(c): normalize_path(c.file_path) in model_paths.get(c.run_id, frozenset()) for c in clusters}
+    # Issues the starter's own file has are the starter's even in a file the model edited.
+    starter_of = {r: getattr(runs_by_id[r], "starter_id", None) for r in in_table}
+    inherited = _inherited_from_starter(clusters, kind, in_model, starter_of)
+    in_model = {key: value and key not in inherited for key, value in in_model.items()}
     starter_memo: dict = {}
     # Only advisories in versions the model chose are its own: not the
     # starter's pins, nor transitive packages the starter pulls in. What a
@@ -671,6 +732,11 @@ def _issue_breakdowns(
                 "code_unique_auxiliary": sum(1 for c in tests if is_auxiliary_path(c.file_path)),
                 # Of code_unique_model: layout rules (line length, whitespace, import order).
                 "formatting_unique_model": formatting_model,
+                # Of code_unique_model: every reporting tool at its lowest stated confidence (vulture 60%, bandit LOW).
+                "low_confidence_unique_model": sum(1 for c in model_code if is_low_confidence_static(c)),
+                # Of code_unique, outside code_unique_model: issues of the starter's own lines in a file the model
+                # edited (the same tools report them in apps that kept the starter's file).
+                "code_unique_inherited": sum(1 for c in code_issues if id(c) in inherited),
                 # deptry/depcheck: the app's own manifest mistakes, part of code_unique.
                 "manifest_unique": len(manifest) if manifest_measured else None,
                 # One per issue class: a header missing on every crawled URL is one issue.
@@ -792,6 +858,10 @@ def _issue_breakdowns(
         row["dependency_added"] = model_added.get(id(c)) if row["kind"] == DEPENDENCY else None
         row["auxiliary"] = row["kind"] == TEST and is_auxiliary_path(c.file_path)
         row["formatting"] = row["kind"] in (CODE, TEST) and is_formatting(c)
+        row["inherited_from_starter"] = id(c) in inherited
+        if row["kind"] in (CODE, TEST):
+            row["low_confidence"] = is_low_confidence_static(c)
+            return row
         row["low_confidence"] = is_low_confidence(c) if row["kind"] == RUNTIME else None
         return row
 
@@ -844,6 +914,7 @@ __all__ = [
     "group_summary",
     "is_formatting",
     "is_low_confidence",
+    "is_low_confidence_static",
     "issue_breakdowns",
     "issue_kind",
     "run_labels",

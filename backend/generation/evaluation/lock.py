@@ -70,7 +70,12 @@ LOCK_UNRESOLVABLE: Final = "lock_unresolvable"
 _UNRESOLVABLE: Final = re.compile(
     r"No solution found|depends on .* (?:which|but)|no matching distribution|Could not find a version|"
     r"No matching version found|ETARGET|E404|is not in (?:the npm|this) registry|ERESOLVE|unsatisfiable|"
-    r"Invalid requirement|Failed to parse|EJSONPARSE|not found in the package registry",
+    r"Invalid requirement|Failed to parse|EJSONPARSE|not found in the package registry|"
+    # A requirements.txt the resolver cannot read: broken syntax (a stray backslash, a hand-written hash
+    # block) or an ``-r``/``-c`` include, which the platform never accepts (``lock_covers``: every line must
+    # be a named requirement). Both runs of the 2026-11 study that hit these were labelled infra_error.
+    r"expected '-c', '-e', '-r' or the start of a requirement|Error parsing included file|"
+    r"Couldn't parse requirement|Unexpected '.{1,20}', expected",
     re.IGNORECASE,
 )
 # Go (``go mod download``) output that is the module's fault: a version or module that does not exist, a

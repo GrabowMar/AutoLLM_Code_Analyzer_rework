@@ -20,7 +20,7 @@ budget preset allows it (`caches.reuse_eval_by_tree`), sets the run's outcome, a
 
 | Stage | Runs at level | Result | Outcome |
 |---|---|---|---|
-| lock (`lock.resolve_lock`) | static and above | `stages.lock` ok / fail / error | `lock_unresolvable` -> `build_fail`; registry/docker outage -> `infra_error` (`lock_infra`) |
+| lock (`lock.resolve_lock`) | static and above | `stages.lock` ok / fail / error | `lock_unresolvable` -> `build_fail` (requirements that cannot be satisfied, and a `requirements.txt` the resolver cannot read: broken syntax or an `-r`/`-c` include); registry/docker outage -> `infra_error` (`lock_infra`) |
 | build (`sample_builds.build_sample`) | build and above | `stages.build` | failure -> `build_fail`; `infra_suspected` retried once, a repeat -> `infra_error` (`build_infra`); `base_not_allowed` -> `build_fail`; `allowed_bases_changed`, `variant_not_assembled`, `lock_incomplete` -> `infra_error` |
 | start | functional and above | `stages.start` (`credentials_ref`) | not healthy within `timeouts.start_s` -> `start_fail` |
 | tester | functional and above | `stages.tester` (`only_checks`, `probes`, `image_override`, `overlay`), `result.checks` | a tester crash is retried once inside the stage; a repeat -> `RunEvaluation.status=error`, outcome `infra_error` (`tester_crash`) |

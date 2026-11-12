@@ -419,7 +419,12 @@ def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
         "title": row["title"],
         "tool_severity": row.get("tool_severity") or "",
         # The scanner's own confidence in the finding (ZAP, bandit ...), "" when it states none.
-        "tool_confidence": str(extra.get("tool_confidence") or ""),
+        # (vulture prints a percentage: 60% is its lowest class, "may be used in a way it cannot see").
+        "tool_confidence": str(
+            extra.get("tool_confidence") or (f"{extra['confidence_pct']}%" if extra.get("confidence_pct") else ""),
+        ),
+        # Where the finding's file comes from (starter, authored, modified, slot, parent), as the runner tagged it.
+        "file_origin": str(extra.get("file_origin") or ""),
         "fixed_versions": _fixed_versions(extra),
         # The version the scanner found installed (vulnerability scanners), "" when not said.
         "installed_version": str(extra.get("installed_version") or extra.get("version") or ""),

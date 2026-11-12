@@ -470,6 +470,21 @@ def test_lock_unresolvable_is_build_fail(golden: Any, monkeypatch: pytest.Monkey
     assert "build" not in row.stages
 
 
+@pytest.mark.parametrize(
+    "output",
+    [
+        "error: Unexpected '\\\\', expected '-c', '-e', '-r' or the start of a requirement: requirements.txt:2:84",
+        "error: Error parsing included file in `requirements.txt` at position 0\n"
+        "  cause: failed to read from file `/work/requirements.lock`: No such file or directory (os error 2)",
+    ],
+)
+def test_unreadable_manifest_is_build_fail(golden: Any, monkeypatch: pytest.MonkeyPatch, output: str) -> None:
+    """A requirements.txt with broken syntax or an include is the sample's failure, not an outage."""
+    monkeypatch.setattr(build_locks, "DockerLockRunner", lambda: FakeLockRunner(output))
+    row = suite_mod.evaluate(make_run(golden, _tree_with_manifest()), suite_of(golden))
+    assert suite_mod.outcome_of(row) == (choices.Outcome.BUILD_FAIL, "lock_unresolvable")
+
+
 def test_registry_outage_is_infra_error(golden: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(build_locks, "DockerLockRunner", lambda: FakeLockRunner("Connection refused (depcache)"))
     row = suite_mod.evaluate(make_run(golden, _tree_with_manifest()), suite_of(golden))
