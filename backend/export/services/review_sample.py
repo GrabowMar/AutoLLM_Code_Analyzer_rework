@@ -57,7 +57,7 @@ from backend.export.services.runs import files_csv
 from backend.export.services.runs import resolved_lock
 from backend.generation.models import GenerationRun
 from backend.generation.models import choices
-from backend.reports.services.loc import is_test_path
+from backend.reports.services.loc import is_outside_app
 from backend.reports.services.loc import loc_from_view
 from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import SEVERITY_RANK
@@ -420,15 +420,16 @@ def issue_kind(cluster: IssueCluster, dynamic: set[str]) -> str:
     A dependency advisory (a known-vulnerability scanner's report about a
     package, by the analyzer's one rule :func:`is_dependency_advisory`) is
     about a package, a runtime issue (every member from a dynamic scanner)
-    about the running app, and a test-code issue (:func:`is_test_path`)
-    about code that is not the delivered app.
+    about the running app, and a test-code issue (:func:`is_outside_app`:
+    tests and, under the default scope, scratch scripts) about code that is
+    not the delivered app.
     """
     members = cluster.members
     if any(is_dependency_advisory(m["tool"], m.get("category") or "", m.get("rule_id") or "") for m in members):
         return DEPENDENCY
     if members and all(m["tool"] in dynamic for m in members):
         return RUNTIME
-    if is_test_path(cluster.file_path):
+    if is_outside_app(cluster.file_path):
         return TEST
     return CODE
 

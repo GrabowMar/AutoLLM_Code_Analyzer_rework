@@ -647,7 +647,7 @@ def test_export_scopes_to_one_study(tmp_path):
     _run(_job(user, LLMModelFactory()), {"bandit": [("B105", 10, "low")]})  # another run, outside the study
     call_command("export_study_tables", out=str(tmp_path / "out"), study=str(built.study.id))
     summary = json.loads((tmp_path / "out" / "study_summary.json").read_text(encoding="utf-8"))
-    assert summary["scope"] == {"study": str(built.study.id), "stage": "main", "runs": 1}
+    assert summary["scope"] == {"study": str(built.study.id), "stage": "main", "runs": 1, "code_scope": "app"}
     assert summary["issues"]["totals"]["runs"] == 1
     with pytest.raises(CommandError, match="no study"):
         call_command("export_study_tables", out=str(tmp_path / "x"), study="6f1c1d5e-9a43-4a8b-b6a4-3c3f4f0b9d2e")

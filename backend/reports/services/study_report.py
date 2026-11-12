@@ -1154,6 +1154,8 @@ def protocol_section(
         "settings": {
             "include_ai": bool(config.get("include_ai")),
             "line_tolerance": int(config.get("line_tolerance", 2)),
+            # What counts as the delivered app (tests and scratch scripts apart by default).
+            "code_scope": config.get("code_scope"),
             "exclude_truncated": bool(config.get("exclude_truncated", False)),
             "seed": int(config.get("seed", 0)),
         },
@@ -1626,6 +1628,20 @@ def scope_runs(config: dict[str, Any], user, study: Study | None):
 
 
 def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any]:
+    """The study report of *config*. ``config["code_scope"]`` (``reports.services.loc.CODE_SCOPES``;
+    absent: ``settings.STUDY_CODE_SCOPE``) says what counts as the delivered app in every table of it."""
+    from backend.reports.services.loc import CODE_SCOPES
+    from backend.reports.services.loc import use_code_scope
+
+    scope = config.get("code_scope")
+    if scope is not None and scope not in CODE_SCOPES:
+        msg = f"code_scope must be one of {', '.join(CODE_SCOPES)}"
+        raise ValueError(msg)
+    with use_code_scope(scope) as in_force:
+        return _generate_study_report({**config, "code_scope": in_force}, user=user)
+
+
+def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any]:
     study = _study(config, user)
     seed = int(config.get("seed", 0))
     include_ai = bool(config.get("include_ai", False))

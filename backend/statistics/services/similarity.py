@@ -40,8 +40,8 @@ from django.core.cache import cache
 
 from backend.analysis.services.base import is_dependency_advisory
 from backend.analysis.services.base import is_non_source_path
+from backend.reports.services.loc import is_outside_app
 from backend.reports.services.loc import is_source_file
-from backend.reports.services.loc import is_test_path
 from backend.statistics.services.runs import code_loc
 from backend.statistics.services.runs import normalize_path
 
@@ -134,7 +134,7 @@ def model_source_map(files: dict[str, str] | None) -> dict[str, str]:
     return {
         path: text
         for path, text in (files or {}).items()
-        if isinstance(text, str) and is_source_file(path) and not is_test_path(path)
+        if isinstance(text, str) and is_source_file(path) and not is_outside_app(path)
     }
 
 
@@ -351,7 +351,7 @@ def finding_sets(run_ids: Iterable[str]) -> FindingSets:
             # One project, several manifests: an advisory is matched within its directory.
             dependency[run_id][slug].add((rule_id or "", posixpath.dirname(path)))
             continue
-        if slug in dynamic or (path and (is_test_path(path) or is_non_source_path(path))):
+        if slug in dynamic or (path and (is_outside_app(path) or is_non_source_path(path))):
             continue  # runtime issues and test code are counted apart, not as code issues
         code[run_id][slug].add((rule_id or "", path))
     return FindingSets(

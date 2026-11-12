@@ -21,6 +21,7 @@ nothing) and every key holding them says so (``unique_normalized_<sev>``, ``raw_
 
 from __future__ import annotations
 
+import re
 import statistics as pystats
 from collections import Counter
 from collections import defaultdict
@@ -77,8 +78,11 @@ PER_APP_KEYS = (
     "code_unique",
     "code_unique_model",
     "code_unique_tests",
+    "code_unique_auxiliary",
+    "formatting_unique_model",
     "manifest_unique",
     "runtime_unique",
+    "runtime_unique_low_confidence",
     "dependency_unique",
     "dependency_added",
     "dependency_inherited",
@@ -87,6 +91,7 @@ PER_APP_KEYS = (
     "security_unique_model",
     "security_unique_tests",
     "unique_per_kloc",
+    "unique_per_kloc_without_formatting",
     *(f"unique_normalized_{s}" for s in SEVERITIES),
     *(f"security_normalized_{s}" for s in SEVERITIES),
 )
@@ -133,6 +138,9 @@ ISSUE_KEYS = (
     "kind",
     "model_scope",
     "dependency_added",
+    "auxiliary",
+    "formatting",
+    "low_confidence",
 )
 # Per-app code metrics exactly as the metric tools printed them (``ToolResult.metrics``
 # of each tool's latest result for the app): column -> (tool, metrics key). radon is
@@ -319,18 +327,75 @@ def issue_kind(cluster: IssueCluster, dynamic: set[str]) -> str:
 
     A dependency advisory is about a package, a runtime issue (every member
     from a dynamic scanner) about the deployed app's HTTP behaviour, and a
-    test-code issue about code that is not the delivered app; none of them is
-    a line of app code the model wrote.
+    ``test`` issue about code that is not the delivered app: test code and,
+    under the default scope, an agent's scratch and verification scripts
+    (``reports.services.loc.is_outside_app``; the scope is switchable). None
+    of them is a line of app code the model wrote.
     """
-    from backend.reports.services.loc import is_test_path
+    from backend.reports.services.loc import is_outside_app
 
     if cluster.is_advisory:
         return DEPENDENCY
     if cluster.members and all(m["tool"] in dynamic for m in cluster.members):
         return RUNTIME
-    if is_test_path(cluster.file_path):
+    if is_outside_app(cluster.file_path):
         return TEST
     return CODE
+
+
+# pycodestyle's layout codes (E1 indentation, E2 whitespace, E3 blank lines, E5 line length, E7xx statement
+# layout is left out: it holds real smells such as bare except, W whitespace warnings) and pylint's
+# equivalents. Their counts follow an arbitrary limit (100 or 120 characters) more than the code's quality.
+_FORMATTING_RULE_RE = re.compile(r"^(E[1235]\d\d|W[1-6]\d\d)$")
+_FORMATTING_PYLINT = frozenset(
+    {
+        "line-too-long",
+        "trailing-whitespace",
+        "missing-final-newline",
+        "trailing-newlines",
+        "multiple-statements",
+        "superfluous-parens",
+        "bad-indentation",
+        "mixed-line-endings",
+        "unexpected-line-ending-format",
+        "wrong-import-order",
+        "wrong-import-position",
+        "ungrouped-imports",
+        "C0301",
+        "C0303",
+        "C0304",
+        "C0305",
+    },
+)
+
+
+def is_formatting(cluster: IssueCluster) -> bool:
+    """Whether every member of *cluster* is a layout rule (line length, whitespace, blank lines, import order)."""
+    return bool(cluster.members) and all(
+        m.get("category") == "style"
+        or bool(_FORMATTING_RULE_RE.match(m.get("rule_id") or ""))
+        or (m.get("tool") == "pylint" and (m.get("rule_id") or "") in _FORMATTING_PYLINT)
+        for m in cluster.members
+    )
+
+
+# What a scanner says when it is least sure, or reports an observation rather than a flaw.
+_LOW_CONFIDENCE = frozenset({"low", "false positive"})
+_INFORMATIONAL_LEVELS = frozenset({"informational", "info"})
+
+
+def is_low_confidence(cluster: IssueCluster) -> bool:
+    """Whether every member is the scanner's lowest confidence or an informational observation.
+
+    ZAP raises "Path Traversal" and "Cross Site Scripting Weakness (Persistent in JSON Response)" at
+    low confidence when a request merely succeeds or stored input comes back in JSON; in the 2026-11
+    study's sample none of them was a flaw. A finding without a stated confidence is not low.
+    """
+    return bool(cluster.members) and all(
+        str(m.get("tool_confidence") or "").lower() in _LOW_CONFIDENCE
+        or str(m.get("tool_severity") or "").lower() in _INFORMATIONAL_LEVELS
+        for m in cluster.members
+    )
 
 
 def _per_kloc(count: int, loc: int | None) -> float | None:
@@ -351,8 +416,11 @@ _SUMMED = (
     "code_unique",
     "code_unique_model",
     "code_unique_tests",
+    "code_unique_auxiliary",
+    "formatting_unique_model",
     "manifest_unique",
     "runtime_unique",
+    "runtime_unique_low_confidence",
     "dependency_unique",
     "dependency_added",
     "dependency_inherited",
@@ -378,11 +446,13 @@ def group_summary(apps: list[dict[str, Any]]) -> dict[str, Any]:
         units[app_unit(a)].append(a)
     unique = [pystats.fmean(r["unique_issues"] for r in rows) for rows in units.values()]
     code = 0.0
+    formatting = 0.0
     loc = 0.0
     for rows in units.values():
         sized = [r for r in rows if r.get("loc") is not None]
         if sized:
             code += pystats.fmean(r["code_unique_model"] for r in sized)
+            formatting += pystats.fmean(r.get("formatting_unique_model") or 0 for r in sized)
             loc += pystats.fmean(r["loc"] for r in sized)
     raw = _total(apps, "raw_findings")
     total_unique = _total(apps, "unique_issues")
@@ -397,6 +467,8 @@ def group_summary(apps: list[dict[str, Any]]) -> dict[str, Any]:
         "sd_unique_per_app": round(pystats.stdev(unique), 2) if len(unique) > 1 else None,
         **{key: _total(apps, key) for key in _SUMMED},
         "unique_per_kloc": round(code * 1000 / loc, 2) if loc else None,
+        # The same density without formatting issues (line length, whitespace): see :func:`is_formatting`.
+        "unique_per_kloc_without_formatting": round((code - formatting) * 1000 / loc, 2) if loc else None,
     }
 
 
@@ -412,8 +484,9 @@ def _sort_key(key: tuple) -> tuple:
     return tuple((v is None, v if isinstance(v, int) else str(v)) for v in key)
 
 
-def _runtime_issues(runtime: list[IssueCluster]) -> list[tuple[str, set[str]]]:
-    """One (highest normalized severity, tools) per issue class: a header missing on every crawled URL is one issue."""
+def _runtime_issues(runtime: list[IssueCluster]) -> list[tuple[str, set[str], bool]]:
+    """One (highest normalized severity, tools, low confidence) per issue class: a header missing on every
+    crawled URL is one issue. A class is low-confidence when every cluster of it is (:func:`is_low_confidence`)."""
     by_class: dict[str, list[IssueCluster]] = defaultdict(list)
     for c in runtime:
         by_class[c.issue_class].append(c)
@@ -421,6 +494,7 @@ def _runtime_issues(runtime: list[IssueCluster]) -> list[tuple[str, set[str]]]:
         (
             max((c.severity for c in group), key=lambda s: SEVERITY_RANK.get(s, 0)),
             {t for c in group for t in c.tools},
+            all(is_low_confidence(c) for c in group),
         )
         for _cls, group in sorted(by_class.items())
     ]
@@ -439,8 +513,14 @@ def issue_breakdowns(
     include_ai: bool = False,
     line_tolerance: int = DEFAULT_LINE_TOLERANCE,
     common_tools_only: bool = True,
+    code_scope: str | None = None,
 ) -> dict[str, Any]:
     """Raw vs deduplicated issue counts per app, model, condition, task, model x task and tool.
+
+    *code_scope* (one of ``reports.services.loc.CODE_SCOPES``; None: ``settings.STUDY_CODE_SCOPE``) says
+    what counts as the delivered app: by default tests and an agent's scratch scripts are counted apart
+    (``code_unique_tests``, of which ``code_unique_auxiliary`` are scratch scripts), in findings and in
+    the LOC denominator alike. ``params.code_scope`` records the scope the tables were computed with.
 
     Only runs with a finished analysis appear; ``by_tool_rule`` is the "which tool finds which kind of
     issue" table. With *common_tools_only* (the default) findings count only from tools that measured every
@@ -460,6 +540,28 @@ def issue_breakdowns(
     Severities here are the normalized ones (a heuristic for tools that rate nothing); ``reported_levels``
     are the levels the tools printed.
     """
+    from backend.reports.services.loc import use_code_scope
+
+    with use_code_scope(code_scope) as scope:
+        return _issue_breakdowns(
+            runs,
+            include_ai=include_ai,
+            line_tolerance=line_tolerance,
+            common_tools_only=common_tools_only,
+            scope=scope,
+        )
+
+
+def _issue_breakdowns(
+    runs: QuerySet[GenerationRun] | Iterable[GenerationRun],
+    *,
+    include_ai: bool,
+    line_tolerance: int,
+    common_tools_only: bool,
+    scope: str,
+) -> dict[str, Any]:
+    from backend.reports.services.loc import is_auxiliary_path
+
     runs_by_id = {str(r.pk): r for r in runs}
     result_ids = ToolResult.latest_ids_per_job(runs_by_id.keys())
     result_rows = list(
@@ -548,7 +650,8 @@ def issue_breakdowns(
         # Runtime issues once per issue class, as runtime_unique counts them.
         runtime_issues = _runtime_issues(runtime)
         static = [*code_issues, *tests, *deps]
-        sev = Counter([*(c.severity for c in static), *(level for level, _tools in runtime_issues)])
+        sev = Counter([*(c.severity for c in static), *(level for level, _tools, _low in runtime_issues)])
+        formatting_model = sum(1 for c in model_code if is_formatting(c))
         security_sev = Counter(c.severity for c in security)
         apps.append(
             {
@@ -560,14 +663,22 @@ def issue_breakdowns(
                 "raw_findings": raw_by_run.get(run_id, 0),
                 "unique_issues": len(static) + len(runtime_issues),
                 "multi_tool_issues": sum(1 for c in static if len(c.tools) > 1)
-                + sum(1 for _level, tools in runtime_issues if len(tools) > 1),
+                + sum(1 for _level, tools, _low in runtime_issues if len(tools) > 1),
                 "code_unique": len(code_issues),
                 "code_unique_model": len(model_code),
                 "code_unique_tests": len(tests),
+                # Of code_unique_tests: issues in scratch and verification scripts (not test code proper).
+                "code_unique_auxiliary": sum(1 for c in tests if is_auxiliary_path(c.file_path)),
+                # Of code_unique_model: layout rules (line length, whitespace, import order).
+                "formatting_unique_model": formatting_model,
                 # deptry/depcheck: the app's own manifest mistakes, part of code_unique.
                 "manifest_unique": len(manifest) if manifest_measured else None,
                 # One per issue class: a header missing on every crawled URL is one issue.
                 "runtime_unique": len(runtime_issues) if runtime_measured else None,
+                # Of runtime_unique: classes the scanners raised only at their lowest confidence or as information.
+                "runtime_unique_low_confidence": sum(1 for _level, _tools, low in runtime_issues if low)
+                if runtime_measured
+                else None,
                 "dependency_unique": len(deps) if deps_measured else None,
                 "dependency_added": added if deps_measured else None,
                 "dependency_inherited": len(deps) - added if deps_measured else None,
@@ -579,6 +690,7 @@ def issue_breakdowns(
                 "security_unique_model": sum(1 for c in security if in_model[id(c)]),
                 "security_unique_tests": sum(1 for c in tests if c.category in _SECURITY_CATEGORIES),
                 "unique_per_kloc": _per_kloc(len(model_code), loc),
+                "unique_per_kloc_without_formatting": _per_kloc(len(model_code) - formatting_model, loc),
                 **{f"unique_normalized_{s}": sev.get(s, 0) for s in SEVERITIES},
                 **{f"security_normalized_{s}": security_sev.get(s, 0) for s in SEVERITIES},
             },
@@ -678,6 +790,9 @@ def issue_breakdowns(
         # Whether the issue is in a file of the model's own scope (None: the run's code was not read).
         row["model_scope"] = in_model[id(c)] if c.run_id in model_paths else None
         row["dependency_added"] = model_added.get(id(c)) if row["kind"] == DEPENDENCY else None
+        row["auxiliary"] = row["kind"] == TEST and is_auxiliary_path(c.file_path)
+        row["formatting"] = row["kind"] in (CODE, TEST) and is_formatting(c)
+        row["low_confidence"] = is_low_confidence(c) if row["kind"] == RUNTIME else None
         return row
 
     return {
@@ -685,6 +800,8 @@ def issue_breakdowns(
             "include_ai": include_ai,
             "line_tolerance": line_tolerance,
             "common_tools_only": common_tools_only,
+            # What counts as the delivered app (reports.services.loc.CODE_SCOPES).
+            "code_scope": scope,
             # Asking for AI findings counts them only where the reviewer is in
             # the instrument set; a reviewer that missed apps is dropped (ai_partial).
             "ai_counted": sorted(ai & counted),
@@ -725,6 +842,8 @@ __all__ = [
     "condition_label",
     "dynamic_slugs",
     "group_summary",
+    "is_formatting",
+    "is_low_confidence",
     "issue_breakdowns",
     "issue_kind",
     "run_labels",

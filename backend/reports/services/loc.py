@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -79,6 +81,117 @@ def is_test_path(path: str) -> bool:
     )
 
 
+# Scratch and verification scripts an agent leaves next to the app: ``.tmp_test_api.py``,
+# ``.scratch/edge.py``, ``check_api.py``, ``probe_xml.py``, ``npmprobe/package.json``. They are code the
+# model wrote, but not the delivered app, and :func:`is_test_path` does not know their names. In the
+# 2026-11 study they held about 10% of the findings counted as app code, between 0 and 235 per model.
+# Hidden paths are the safe part of the rule; the names can misfire on a real module (a task about
+# "checks"), so the two parts can be switched separately (:data:`CODE_SCOPES`).
+_PROJECT_DOTFILES = (
+    ".eslintrc",
+    ".prettierrc",
+    ".babelrc",
+    ".stylelintrc",
+    ".env",
+    ".gitignore",
+    ".dockerignore",
+    ".editorconfig",
+    ".npmrc",
+    ".nvmrc",
+    ".flake8",
+    ".pylintrc",
+    ".coveragerc",
+    ".browserslistrc",
+)
+_PROJECT_DOTDIRS = frozenset({".github", ".husky", ".vscode", ".storybook", ".config"})
+_AUX_STEM_RE = re.compile(
+    r"^(check|verify|probe|debug|scratch|repro|tmp)[_\-]"
+    r"|^(tmp|scratch)[a-z0-9_\-]*$"
+    r"|^temp[_\-]"
+    r"|[_\-](check|checks|probe|verify)\d*$"
+    r"|^(probe|apitest|api_?test)\d*$",
+)
+_AUX_DIR_RE = re.compile(r"^(tmp|temp$|scratch|probe)|probe$")
+
+
+def is_hidden_scratch_path(path: str) -> bool:
+    """Whether *path* has a hidden component that is not a conventional project dotfile or directory."""
+    for part in (path or "").replace("\\", "/").lower().strip("/").split("/"):
+        if not part.startswith(".") or part in (".", ".."):
+            continue
+        if part in _PROJECT_DOTDIRS or part.startswith(_PROJECT_DOTFILES):
+            continue
+        return True
+    return False
+
+
+def is_named_scratch_path(path: str) -> bool:
+    """Whether *path* is named like a throwaway check (``check_api.py``, ``probe_xml.py``, ``tmpjsdom/x.mjs``)."""
+    parts = (path or "").replace("\\", "/").lower().strip("/").split("/")
+    if not parts or not parts[-1]:
+        return False
+    if any(_AUX_DIR_RE.search(part) for part in parts[:-1]):
+        return True
+    stem = parts[-1].split(".", 1)[0] if not parts[-1].startswith(".") else parts[-1][1:].split(".", 1)[0]
+    return bool(_AUX_STEM_RE.search(stem))
+
+
+def is_auxiliary_path(path: str, *, names: bool = True) -> bool:
+    """Whether *path* is an agent's scratch or verification script (and not test code by :func:`is_test_path`)."""
+    if not path or is_test_path(path):
+        return False
+    return is_hidden_scratch_path(path) or (names and is_named_scratch_path(path))
+
+
+# What the study tables count as the delivered app's code (findings and LOC alike):
+#   app          tests and scratch scripts (hidden paths and check/probe/tmp names) are counted apart
+#   app_named    tests and hidden scratch paths are counted apart; scripts matched by name only stay
+#                app code (the sensitivity check for the name rule)
+#   with_scratch only tests are counted apart (the rule before 2026-11-12)
+#   all          everything the model wrote counts as app code, tests included
+CODE_SCOPES = ("app", "app_named", "with_scratch", "all")
+DEFAULT_CODE_SCOPE = "app"
+_code_scope_override: ContextVar[str | None] = ContextVar("study_code_scope", default=None)
+
+
+def code_scope() -> str:
+    """The scope in force: a :func:`use_code_scope` override, else ``settings.STUDY_CODE_SCOPE``."""
+    from django.conf import settings
+
+    scope = _code_scope_override.get() or getattr(settings, "STUDY_CODE_SCOPE", DEFAULT_CODE_SCOPE)
+    return scope if scope in CODE_SCOPES else DEFAULT_CODE_SCOPE
+
+
+@contextmanager
+def use_code_scope(scope: str | None):
+    """Count with *scope* (one of :data:`CODE_SCOPES`; None keeps the configured one) inside the block."""
+    if scope is not None and scope not in CODE_SCOPES:
+        msg = f"unknown code scope {scope!r}; one of {', '.join(CODE_SCOPES)}"
+        raise ValueError(msg)
+    token = _code_scope_override.set(scope) if scope is not None else None
+    try:
+        yield code_scope()
+    finally:
+        if token is not None:
+            _code_scope_override.reset(token)
+
+
+def is_outside_app(path: str) -> bool:
+    """Whether the study counts *path* apart from the delivered app under the scope in force.
+
+    The classifier of the analysis and statistics tables. Generation-side code (the collector's
+    ``RunFile.is_test``, slot context) keeps :func:`is_test_path`, which never changes with the scope.
+    """
+    scope = code_scope()
+    if scope == "all":
+        return False
+    if is_test_path(path):
+        return True
+    if scope == "with_scratch":
+        return False
+    return is_auxiliary_path(path, names=scope == "app")
+
+
 def _count_lines(text: str | None, comment_prefix: str = "#") -> int:
     if not text:
         return 0
@@ -106,7 +219,7 @@ def loc_from_files(files: dict[str, Any]) -> dict[str, int]:
     """
     backend_loc = frontend_loc = source_files = 0
     for rel_path, content in files.items():
-        if not isinstance(content, str) or not is_source_file(rel_path) or is_test_path(rel_path):
+        if not isinstance(content, str) or not is_source_file(rel_path) or is_outside_app(rel_path):
             continue
         if is_generated_bundle(rel_path, content):  # bundler output is not the app's source
             continue
@@ -132,7 +245,7 @@ def loc_of_test_files(files: dict[str, Any]) -> dict[str, int]:
         if (
             isinstance(content, str)
             and is_source_file(rel_path)
-            and is_test_path(rel_path)
+            and is_outside_app(rel_path)
             and not is_generated_bundle(rel_path, content)
         ):
             test_loc += _count_lines(content, _COMMENT_PREFIX_BY_EXT.get(_ext(rel_path), "#"))
@@ -152,11 +265,23 @@ def source_loc(path: str, text: str | None) -> int:
 
 def _is_layer_source(entry: FileEntry) -> bool:
     """A model-scope row whose stored LOC counts (the ``RunView.loc`` rules)."""
-    return not entry.excluded and not entry.is_test and is_source_file(entry.path) and not is_test_path(entry.path)
+    return not entry.excluded and not entry.is_test and is_source_file(entry.path) and not is_outside_app(entry.path)
 
 
 def _is_test_source(entry: FileEntry) -> bool:
-    return not entry.excluded and is_source_file(entry.path) and (entry.is_test or is_test_path(entry.path))
+    if code_scope() == "all":
+        return False
+    return not entry.excluded and is_source_file(entry.path) and (entry.is_test or is_outside_app(entry.path))
+
+
+def _is_test_counted_as_app(entry: FileEntry) -> bool:
+    """Scope ``all``: a test file counts as app code. Its stored LOC is 0, so its lines are read from the blob."""
+    return (
+        code_scope() == "all"
+        and not entry.excluded
+        and is_source_file(entry.path)
+        and (entry.is_test or is_test_path(entry.path))
+    )
 
 
 _UNKNOWN: dict[str, int | None] = dict.fromkeys(
@@ -167,7 +292,8 @@ _UNKNOWN: dict[str, int | None] = dict.fromkeys(
 def loc_from_view(view: RunView) -> dict[str, int | None]:
     """Source LOC of a run's **model** scope by layer, plus its test code counted apart.
 
-    ``total_loc`` equals ``RunView.loc("model")``: the stored ``RunFile.loc`` of the source rows. Frontend
+    ``total_loc`` is the stored ``RunFile.loc`` of the source rows the scope in force counts as the app
+    (:func:`is_outside_app`; under ``with_scratch`` it equals ``RunView.loc("model")``). Frontend
     is everything under ``frontend/`` plus web-asset files elsewhere; backend is the rest. ``test_loc``
     counts the test files' lines (read from their blobs). Every value is ``None`` when the run has no
     collected tree.
@@ -178,21 +304,33 @@ def loc_from_view(view: RunView) -> dict[str, int | None]:
         return dict(_UNKNOWN)
     backend_loc = frontend_loc = source_files = 0
     tests = []
+    tests_as_app = []
     for entry in entries:
         if _is_test_source(entry):
             tests.append(entry.path)
             continue
-        if not _is_layer_source(entry):
+        lines = entry.loc
+        if _is_test_counted_as_app(entry):
+            tests_as_app.append(entry.path)
+            lines = 0  # added below from the blob
+        elif not _is_layer_source(entry):
             continue
         source_files += 1
         if entry.path.startswith("frontend/") or _ext(entry.path) in _FRONTEND_EXTENSIONS:
-            frontend_loc += entry.loc
+            frontend_loc += lines
         else:
-            backend_loc += entry.loc
+            backend_loc += lines
     test = {"test_loc": 0, "test_files": 0}
-    if tests:
+    if tests or tests_as_app:
         texts = view.code_files("model")
-        test = loc_of_test_files({path: texts.get(path) for path in tests})
+        if tests:
+            test = loc_of_test_files({path: texts.get(path) for path in tests})
+        for path in tests_as_app:
+            lines = _count_lines(texts.get(path), _COMMENT_PREFIX_BY_EXT.get(_ext(path), "#"))
+            if path.startswith("frontend/") or _ext(path) in _FRONTEND_EXTENSIONS:
+                frontend_loc += lines
+            else:
+                backend_loc += lines
     return {
         "backend_loc": backend_loc,
         "frontend_loc": frontend_loc,

@@ -530,5 +530,9 @@ LLM_LOCAL_AGENT_RUNS = env.bool("LLM_LOCAL_AGENT_RUNS", default=bool(APPS_DOCKER
 ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)
 # Memory and CPU caps of an analyzer workspace container (applied when it is provisioned; an existing
 # workspace keeps its caps until it is torn down and provisioned again).
+# What the study tables count as the delivered app's code (reports.services.loc.CODE_SCOPES):
+# "app" counts tests and an agent's scratch/verification scripts apart, "app_named" keeps scripts
+# matched only by name as app code, "with_scratch" counts only tests apart, "all" counts everything.
+STUDY_CODE_SCOPE = env.str("STUDY_CODE_SCOPE", default="app")
 ANALYZER_WORKSPACE_MEMORY = env.str("ANALYZER_WORKSPACE_MEMORY", default="2g")
 ANALYZER_WORKSPACE_CPUS = env.float("ANALYZER_WORKSPACE_CPUS", default=2.0)

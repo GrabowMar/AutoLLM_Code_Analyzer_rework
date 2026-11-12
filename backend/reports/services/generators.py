@@ -44,7 +44,7 @@ from backend.rankings.services.constants import SEVERITY_WEIGHTS
 from backend.statistics.services.dedup import VULN_TOOLS
 from backend.statistics.services.dedup import reported_level
 
-from .loc import is_test_path
+from .loc import is_outside_app
 from .loc import loc_for_runs
 from .loc import loc_from_view
 from .study_report import generate_study_report
@@ -236,7 +236,7 @@ def _finding_kind(tool: str, category: str, file_path: str, dynamic: set[str]) -
         return "dependency"
     if tool in dynamic:
         return "runtime"
-    if is_test_path(file_path):
+    if is_outside_app(file_path):
         return "test"
     return "code"
 

@@ -59,6 +59,11 @@ export interface StudyReportConfig {
    */
   exclude_truncated?: boolean;
   ranking_criteria?: unknown;
+  /**
+   * What counts as the delivered app. Unset: tests and the agent's scratch scripts are counted apart.
+   * `with_scratch` counts scratch scripts as app code, `all` counts test code too.
+   */
+  code_scope?: "app" | "app_named" | "with_scratch" | "all";
 }
 
 /**

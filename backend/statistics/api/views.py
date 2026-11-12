@@ -105,6 +105,14 @@ def _study_scope(request, study_id: str | None):
     return study_runs(request.auth, study_id=_uuid_param(study_id, "study_id"))
 
 
+def _code_scope_param(value: str | None) -> str | None:
+    from backend.reports.services.loc import CODE_SCOPES
+
+    if value is not None and value not in CODE_SCOPES:
+        raise HttpError(400, f"code_scope must be one of {', '.join(CODE_SCOPES)}")
+    return value
+
+
 @router.get("/study/breakdowns/")
 def get_study_breakdowns(
     request,
@@ -113,8 +121,13 @@ def get_study_breakdowns(
     line_tolerance: int = Query(2, ge=0, le=20),
     include_issues: bool = False,
     common_tools_only: bool = True,
+    code_scope: str | None = None,
 ):
     """Raw vs cross-tool-deduplicated issues per app, model, task and tool, plus tool overlap.
+
+    ``code_scope`` says what counts as the delivered app: ``app`` (the default: tests and an agent's
+    scratch scripts are counted apart), ``app_named`` (scripts matched only by name stay app code),
+    ``with_scratch`` (only tests are counted apart) or ``all`` (tests count as app code too).
 
     Scope: the study's current runs (first usable attempt per cell), else every run the caller owns. By
     default only tools that measured every app in scope are counted (see ``coverage``).
@@ -126,6 +139,7 @@ def get_study_breakdowns(
         include_ai=include_ai,
         line_tolerance=line_tolerance,
         common_tools_only=common_tools_only,
+        code_scope=_code_scope_param(code_scope),
     )
     if not include_issues:
         data.pop("issues")

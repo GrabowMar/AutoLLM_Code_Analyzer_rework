@@ -37,6 +37,8 @@ from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
 
 from backend.export.services.csv_safe import safe_cell
+from backend.reports.services.loc import CODE_SCOPES
+from backend.reports.services.loc import use_code_scope
 from backend.statistics.services.accounting import run_accounting
 from backend.statistics.services.accounting import tool_inventory
 from backend.statistics.services.study import BY_TOOL_KEYS
@@ -128,6 +130,15 @@ class Command(BaseCommand):
         parser.add_argument("--include-ai", action="store_true", help="Count AI-reviewer findings too")
         parser.add_argument("--line-tolerance", type=int, default=2, help="Line distance for cross-tool merges")
         parser.add_argument(
+            "--code-scope",
+            default=None,
+            choices=CODE_SCOPES,
+            help=(
+                "What counts as the delivered app: app (default; tests and scratch scripts apart), app_named "
+                "(scripts matched only by name stay app code), with_scratch (only tests apart), all"
+            ),
+        )
+        parser.add_argument(
             "--all-tools",
             action="store_true",
             help="Count every tool's findings, not only tools that measured every app in scope",
@@ -140,6 +151,11 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
+        # Every table of one export is computed with the same scope (findings and LOC alike).
+        with use_code_scope(opts.get("code_scope")) as scope:
+            self._export(scope, **opts)
+
+    def _export(self, scope: str, **opts):
         out = Path(opts["out"])
         out.mkdir(parents=True, exist_ok=True)
         study_id = opts["study"]
@@ -190,7 +206,7 @@ class Command(BaseCommand):
         write("tool_executions.csv", accounting["tools"]["latest"], TOOL_EXECUTION_KEYS)
 
         summary = {
-            "scope": {"study": study_id, "stage": opts["stage"], "runs": len(runs)},
+            "scope": {"study": study_id, "stage": opts["stage"], "runs": len(runs), "code_scope": scope},
             "issues": {"params": issues["params"], "coverage": issues["coverage"], "totals": issues["totals"]},
             "tool_counts": inventory["counts"],
             "accounting": accounting,

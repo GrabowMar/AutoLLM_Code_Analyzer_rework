@@ -418,6 +418,8 @@ def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
         "issue_key": extra.get("issue_key") or "",
         "title": row["title"],
         "tool_severity": row.get("tool_severity") or "",
+        # The scanner's own confidence in the finding (ZAP, bandit ...), "" when it states none.
+        "tool_confidence": str(extra.get("tool_confidence") or ""),
         "fixed_versions": _fixed_versions(extra),
         # The version the scanner found installed (vulnerability scanners), "" when not said.
         "installed_version": str(extra.get("installed_version") or extra.get("version") or ""),

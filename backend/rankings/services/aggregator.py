@@ -46,10 +46,11 @@ _MODEL_FAILURES = frozenset({Outcome.BUILD_FAIL, Outcome.START_FAIL, Outcome.OUT
 
 
 def _is_test_path(path: str) -> bool:
-    """``reports.services.loc.is_test_path``, the one test-path rule (imported per call, like ``tool_coverage``)."""
-    from backend.reports.services.loc import is_test_path
+    """``reports.services.loc.is_outside_app``: test code and, under the default scope, scratch scripts
+    (the study tables' rule; imported per call, like ``tool_coverage``)."""
+    from backend.reports.services.loc import is_outside_app
 
-    return is_test_path(path)
+    return is_outside_app(path)
 
 
 def _stdev(values: list[float]) -> float | None:

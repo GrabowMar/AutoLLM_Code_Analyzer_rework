@@ -60,7 +60,7 @@ from backend.generation.models import GenerationRun
 from backend.generation.runs.view import RunView
 from backend.generation.runs.view import run_view
 from backend.generation.runs.view import run_views
-from backend.reports.services.loc import is_test_path
+from backend.reports.services.loc import is_outside_app
 from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import cluster_findings
 from backend.statistics.services.dedup import finding_record
@@ -314,7 +314,7 @@ def code_finding_parts(findings) -> tuple[set, set]:
     for finding_id, path in rows:
         if is_non_source_path(path):
             excluded.add(finding_id)
-        elif is_test_path(path):
+        elif is_outside_app(path):
             in_tests.add(finding_id)
     return in_tests, excluded
 
