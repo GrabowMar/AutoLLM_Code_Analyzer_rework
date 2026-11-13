@@ -407,6 +407,11 @@ def parse_nuclei(raw: str) -> ParsedOutput:
 _WAPITI_LEVEL = {4: "critical", 3: "high", 2: "medium", 1: "low", 0: "info"}
 
 
+def wapiti_anomaly_rule(name: str) -> str:
+    """The rule id of a Wapiti anomaly: its name as a slug (``Internal Server Error`` -> ``internal-server-error``)."""
+    return re.sub(r"[^a-z0-9]+", "-", str(name).lower()).strip("-") or "anomaly"
+
+
 @register("wapiti")
 def parse_wapiti(raw: str) -> ParsedOutput:
     """Wapiti's JSON report.
@@ -414,8 +419,12 @@ def parse_wapiti(raw: str) -> ParsedOutput:
     ``vulnerabilities`` are security issues — except level 0 (Wapiti's info
     level) ones, ``best_practice`` like ZAP's informational alerts, unless
     they are a CORS misconfiguration. ``anomalies`` are server errors the
-    attacks provoked (a robustness signal). ``additionals`` (fingerprints,
-    allowed HTTP methods) are informational noise and skipped.
+    attacks provoked (a robustness signal): their rule id is the anomaly's
+    name (``internal-server-error``), not the attack module that happened to
+    provoke it (``sql``, ``file``, ``exec``), which would read as that
+    vulnerability; the module is kept in ``tool_specific_data``.
+    ``additionals`` (fingerprints, allowed HTTP methods) are informational
+    noise and skipped.
     """
     if not (raw or "").strip():
         # The run_cmd prints the report file; a scan always writes one.
@@ -446,13 +455,16 @@ def parse_wapiti(raw: str) -> ParsedOutput:
                         description=str(meta.get("desc") or "").strip(),
                         suggestion=str(meta.get("sol") or "").strip(),
                         file_path=item.get("path") or "/",
-                        rule_id=item.get("module") or name,
+                        rule_id=(item.get("module") or name)
+                        if section == "vulnerabilities"
+                        else wapiti_anomaly_rule(name),
                         confidence="medium",
                         # Wapiti's JSON has only the numeric level (4 critical .. 0 info).
                         tool_severity=_label(level),
                         tool_specific_data=_compact(
                             {
                                 "rule_name": name,
+                                "module": item.get("module", ""),
                                 "method": item.get("method", ""),
                                 "param": item.get("parameter", ""),
                                 "curl": item.get("curl_command", ""),

@@ -332,16 +332,17 @@ def issue_kind(cluster: IssueCluster, dynamic: set[str]) -> str:
     from a dynamic scanner) about the deployed app's HTTP behaviour, and a
     ``test`` issue about code that is not the delivered app: test code and,
     under the default scope, an agent's scratch and verification scripts
-    (``reports.services.loc.is_outside_app``; the scope is switchable). None
-    of them is a line of app code the model wrote.
+    (``reports.services.loc.issue_outside_app``; the scope is switchable), as
+    well as a block duplicated only between the app and such a file. None of
+    them is a line of app code the model wrote.
     """
-    from backend.reports.services.loc import is_outside_app
+    from backend.reports.services.loc import issue_outside_app
 
     if cluster.is_advisory:
         return DEPENDENCY
     if cluster.members and all(m["tool"] in dynamic for m in cluster.members):
         return RUNTIME
-    if is_outside_app(cluster.file_path):
+    if issue_outside_app(cluster.file_path, cluster.counterpart_paths):
         return TEST
     return CODE
 
@@ -617,7 +618,7 @@ def _issue_breakdowns(
     common_tools_only: bool,
     scope: str,
 ) -> dict[str, Any]:
-    from backend.reports.services.loc import is_auxiliary_path
+    from backend.reports.services.loc import issue_is_auxiliary
 
     runs_by_id = {str(r.pk): r for r in runs}
     result_ids = ToolResult.latest_ids_per_job(runs_by_id.keys())
@@ -729,7 +730,7 @@ def _issue_breakdowns(
                 "code_unique_model": len(model_code),
                 "code_unique_tests": len(tests),
                 # Of code_unique_tests: issues in scratch and verification scripts (not test code proper).
-                "code_unique_auxiliary": sum(1 for c in tests if is_auxiliary_path(c.file_path)),
+                "code_unique_auxiliary": sum(1 for c in tests if issue_is_auxiliary(c.file_path, c.counterpart_paths)),
                 # Of code_unique_model: layout rules (line length, whitespace, import order).
                 "formatting_unique_model": formatting_model,
                 # Of code_unique_model: every reporting tool at its lowest stated confidence (vulture 60%, bandit LOW).
@@ -856,7 +857,7 @@ def _issue_breakdowns(
         # Whether the issue is in a file of the model's own scope (None: the run's code was not read).
         row["model_scope"] = in_model[id(c)] if c.run_id in model_paths else None
         row["dependency_added"] = model_added.get(id(c)) if row["kind"] == DEPENDENCY else None
-        row["auxiliary"] = row["kind"] == TEST and is_auxiliary_path(c.file_path)
+        row["auxiliary"] = row["kind"] == TEST and issue_is_auxiliary(c.file_path, c.counterpart_paths)
         row["formatting"] = row["kind"] in (CODE, TEST) and is_formatting(c)
         row["inherited_from_starter"] = id(c) in inherited
         if row["kind"] in (CODE, TEST):

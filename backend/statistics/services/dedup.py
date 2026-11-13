@@ -271,6 +271,17 @@ class IssueCluster:
         return sorted({m["tool"] for m in self.members})
 
     @property
+    def counterpart_paths(self) -> list[str]:
+        """The other files of a duplicated-code issue: set only when every member names one.
+
+        A clone lives in two places. When the second copy is a test or an
+        agent's scratch script, the duplication is not in the delivered app,
+        whichever of the two files the tool happened to report first.
+        """
+        paths = [str(m.get("counterpart_path") or "") for m in self.members]
+        return sorted(set(paths)) if paths and all(paths) else []
+
+    @property
     def severity(self) -> str:
         """The members' highest *normalized* severity (a heuristic for tools that rate nothing)."""
         return max((m["severity"] for m in self.members), key=lambda s: SEVERITY_RANK.get(s, 0))
@@ -398,6 +409,13 @@ def _deptry_declared(tool: str, rule: str, extra: dict[str, Any]) -> str:
     return ""
 
 
+def _counterpart_path(extra: dict[str, Any]) -> str:
+    """The file holding the other copy of a duplicated block (``duplicate_of.file``, older rows ``second_file``)."""
+    other = extra.get("duplicate_of")
+    path = other.get("file") if isinstance(other, dict) else None
+    return str(path or extra.get("second_file") or "")
+
+
 def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
     """A :func:`cluster_findings` record from a ``Finding.objects.values(*RECORD_FIELDS)`` row."""
     extra = row["tool_specific_data"] if isinstance(row["tool_specific_data"], dict) else {}
@@ -416,6 +434,8 @@ def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
         "vuln_id": extra.get("vuln_id") or "",
         "aliases": extra.get("aliases") or [],
         "issue_key": extra.get("issue_key") or "",
+        # The other side of a duplicated block (jscpd), "" for every other finding.
+        "counterpart_path": _counterpart_path(extra),
         "title": row["title"],
         "tool_severity": row.get("tool_severity") or "",
         # The scanner's own confidence in the finding (ZAP, bandit ...), "" when it states none.

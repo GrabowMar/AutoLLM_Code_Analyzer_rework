@@ -70,3 +70,39 @@ def test_confidence_splits() -> None:
     assert is_low_confidence(zap_low)
     assert is_low_confidence(zap_info)
     assert not is_low_confidence(zap_real)
+
+
+def test_a_clone_of_app_code_in_a_scratch_script_is_not_an_app_code_issue() -> None:
+    from backend.statistics.services.dedup import finding_record
+    from backend.statistics.services.study import TEST
+    from backend.statistics.services.study import issue_kind
+
+    def clone(other: str, **extra) -> IssueCluster:
+        row = {
+            "id": 1,
+            "result__tool_slug": "jscpd",
+            "rule_id": "duplicate-code",
+            "severity": "low",
+            "category": "quality",
+            "file_path": "backend/app.py",
+            "line_number": 10,
+            "tool_specific_data": {"duplicate_of": {"file": other}, **extra} if other else extra,
+            "title": "Duplicated block",
+            "tool_severity": "",
+        }
+        record = finding_record(row, "run")
+        return IssueCluster(
+            run_id="run",
+            issue_class="jscpd:duplicate-code",
+            file_path="backend/app.py",
+            line=10,
+            members=[record],
+        )
+
+    assert issue_kind(clone("backend/models.py"), set()) == CODE
+    assert issue_kind(clone(".scratch/edge.py"), set()) == TEST
+    assert issue_kind(clone("backend/test_app.py"), set()) == TEST
+    assert issue_kind(clone("", second_file=".scratch/edge.py"), set()) == TEST  # rows stored before duplicate_of
+    # A finding with no counterpart (every other tool) is judged by its own file alone.
+    assert clone("").counterpart_paths == []
+    assert issue_kind(clone(""), set()) == CODE

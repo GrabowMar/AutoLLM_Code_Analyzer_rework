@@ -143,8 +143,11 @@ def test_wapiti_vulnerabilities_and_anomalies():
     findings = _parse("wapiti", json.dumps(report))
     assert [(f.category, f.severity, f.file_path, f.rule_id) for f in findings] == [
         ("security", "high", "/search", "xss"),
-        ("reliability", "medium", "/api/items", "exec"),
+        # An anomaly is named after what happened, not after the attack module that provoked it.
+        ("reliability", "medium", "/api/items", "internal-server-error"),
     ]
+    assert findings[1].tool_specific_data["module"] == "exec"
+    assert findings[0].tool_specific_data["module"] == "xss"
     assert findings[0].tool_specific_data["cwe"] == "CWE-79"
     assert findings[0].suggestion == "Escape output"
 
