@@ -192,6 +192,29 @@ def is_outside_app(path: str) -> bool:
     return is_auxiliary_path(path, names=scope == "app")
 
 
+def issue_outside_app(file_path: str, counterpart_paths: Iterable[str] = ()) -> bool:
+    """Whether an issue at *file_path* is counted apart from the delivered app (:func:`is_outside_app`).
+
+    A duplicated block has a second location (*counterpart_paths*, jscpd's other file). When every
+    counterpart is a test or a scratch script, the duplication exists only because of that copy, so
+    the issue is counted with it even though the tool reported the app's file first.
+    """
+    if is_outside_app(file_path):
+        return True
+    others = [p for p in counterpart_paths if p]
+    return bool(others) and all(is_outside_app(p) for p in others)
+
+
+def issue_is_auxiliary(file_path: str, counterpart_paths: Iterable[str] = ()) -> bool:
+    """Whether an issue counted apart from the app sits in (or only duplicates) an agent's scratch script."""
+    if is_auxiliary_path(file_path):
+        return True
+    if is_outside_app(file_path):
+        return False
+    others = [p for p in counterpart_paths if p]
+    return bool(others) and all(is_outside_app(p) for p in others) and any(is_auxiliary_path(p) for p in others)
+
+
 def _count_lines(text: str | None, comment_prefix: str = "#") -> int:
     if not text:
         return 0

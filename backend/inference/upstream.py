@@ -204,6 +204,8 @@ def _connect(target: Target, timeout: float) -> http.client.HTTPConnection:
     last_error: OSError | None = None
     for address in target.addresses:
         context = ssl.create_default_context() if target.scheme == "https" else None
+        if context is not None:
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
         try:
             sock = socket.create_connection((address, target.port), timeout=timeout)
             if context is not None:

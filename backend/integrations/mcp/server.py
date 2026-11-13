@@ -222,7 +222,7 @@ def handle_message(caller: tools.Caller, message: Any) -> dict[str, Any] | None:
     except RpcError as exc:
         return None if is_notification else _error(msg_id, exc.code, exc.message, exc.data)
     except Exception:
-        logger.exception("MCP %s failed", method)
+        logger.exception("MCP %r failed", str(method)[:80])
         return None if is_notification else _error(msg_id, INTERNAL_ERROR, "internal error")
     if is_notification:
         return None

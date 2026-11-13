@@ -111,8 +111,10 @@ def _proxy(
             timeout=_PROXY_TIMEOUT,
         )
     except requests.RequestException as exc:
-        logger.warning("App proxy to %s failed: %s", url, exc)
-        return HttpResponse(f"Bad gateway: {exc}", status=502)
+        # Neither the request's path and query nor the exception text go to the log line or the client:
+        # both carry caller-controlled input.
+        logger.warning("App proxy to container %s failed: %s", container.name, type(exc).__name__)
+        return HttpResponse("Bad gateway", status=502, content_type="text/plain")
 
     response = StreamingHttpResponse(
         upstream.iter_content(chunk_size=8192),

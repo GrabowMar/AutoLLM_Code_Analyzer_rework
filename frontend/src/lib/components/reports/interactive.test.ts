@@ -233,6 +233,10 @@ describe("table interaction", () => {
       'A,B\r\n"x, y","say ""hi"""\r\n',
     );
     expect(toMarkdown(["A"], [["a|b"]])).toBe("| A |\n| --- |\n| a\\|b |\n");
+    // A trailing backslash must not escape the column separator.
+    expect(toMarkdown(["A", "B"], [["C:\\", "x\r\ny"]])).toBe(
+      "| A | B |\n| --- | --- |\n| C:\\\\ | x y |\n",
+    );
   });
 });
 

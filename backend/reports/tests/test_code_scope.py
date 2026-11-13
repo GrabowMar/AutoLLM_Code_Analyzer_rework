@@ -89,3 +89,24 @@ def test_loc_follows_the_scope() -> None:
     with use_code_scope("all"):
         assert loc.loc_from_files(files)["total_loc"] == 4
         assert loc.loc_of_test_files(files)["test_loc"] == 0
+
+
+def test_a_clone_shared_only_with_a_test_or_scratch_file_is_counted_apart() -> None:
+    from backend.reports.services.loc import issue_is_auxiliary
+    from backend.reports.services.loc import issue_outside_app
+
+    app, scratch, test = "backend/app.py", ".scratch/edge.py", "backend/test_app.py"
+    assert not issue_outside_app(app)
+    assert not issue_outside_app(app, ["backend/models.py"])  # duplication inside the app
+    assert issue_outside_app(app, [scratch])
+    assert issue_outside_app(app, [test])
+    assert not issue_outside_app(app, [scratch, "backend/models.py"])  # one copy is app code
+    assert issue_is_auxiliary(app, [scratch])
+    assert not issue_is_auxiliary(app, [test])  # a test copy is test code, not scratch
+    assert not issue_is_auxiliary(test, [scratch])
+    assert issue_is_auxiliary(scratch)
+    with use_code_scope("with_scratch"):
+        assert not issue_outside_app(app, [scratch])
+        assert issue_outside_app(app, [test])
+    with use_code_scope("all"):
+        assert not issue_outside_app(app, [test])

@@ -562,10 +562,14 @@ export function toCsv(columns: string[], rows: string[][]): string {
   );
 }
 
-/** A GitHub-flavoured Markdown table (pipes escaped). */
+/** A GitHub-flavoured Markdown table (backslashes and pipes escaped). */
 export function toMarkdown(columns: string[], rows: string[][]): string {
+  // Backslashes first: a cell ending in "\" would otherwise escape the column separator.
   const esc = (v: string) =>
-    (v ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+    (v ?? "")
+      .replace(/\\/g, "\\\\")
+      .replace(/\|/g, "\\|")
+      .replace(/\r?\n/g, " ");
   const line = (r: string[]) => `| ${r.map(esc).join(" | ")} |`;
   return (
     [line(columns), line(columns.map(() => "---")), ...rows.map(line)].join(
