@@ -29,7 +29,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
 # Python 'run' stage
-FROM python:3.13.14-slim-bookworm AS python-run-stage
+FROM python:3.13.18-slim-bookworm AS python-run-stage
 
 # Sample image builds use an explicit, resource-limited BuildKit builder on
 # the same daemon used by the Docker SDK.
