@@ -2363,6 +2363,8 @@ export interface RunFacetsOut {
     measured: number;
     mean_pass_rate: number | null;
   };
+  /** Lifecycle statuses (pending, running, completed, failed, cancelled), in that order. */
+  statuses: RunFacetValue[];
   outcomes: RunFacetValue[];
   models: RunFacetValue[];
   tasks: RunFacetValue[];

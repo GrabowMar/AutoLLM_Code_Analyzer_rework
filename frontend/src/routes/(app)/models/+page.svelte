@@ -4,7 +4,8 @@ import {
 	getModelsExportUrl,
 	getModels,
 	getModelsStats,
-	getProviders,
+	getModelFacets,
+	type ModelFacets,
 	syncModelsFromOpenRouter,
 	type PaginatedModels,
 	type ModelsStats,
@@ -14,32 +15,41 @@ import { onMount } from 'svelte';
 import { toast } from 'svelte-sonner';
 import Upload from '@lucide/svelte/icons/upload';
 import Trophy from '@lucide/svelte/icons/trophy';
-import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
+import Download from '@lucide/svelte/icons/download';
+import ChevronDown from '@lucide/svelte/icons/chevron-down';
+import CloudDownload from '@lucide/svelte/icons/cloud-download';
+import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+import FileJson from '@lucide/svelte/icons/file-json';
+import FileText from '@lucide/svelte/icons/file-text';
+import { DropdownMenu } from 'bits-ui';
 import { getModelCovariatesCsvUrl } from '$lib/api/model-covariates';
 import ModelsFiltersBar from '$lib/components/models/ModelsFiltersBar.svelte';
-import type { FilterTag } from '$lib/components/FilterBar.svelte';
+import {
+	EMPTY_FILTERS,
+	countActive,
+	filtersFromUrl,
+	filtersToQuery,
+	filtersToUrl,
+	type ModelFilters,
+} from '$lib/components/models/filters';
+import { page } from '$app/state';
+import { replaceState } from '$app/navigation';
 import ModelsTable from '$lib/components/models/ModelsTable.svelte';
 import PaginationBar from '$lib/components/PaginationBar.svelte';
 import PageHeader from '$lib/components/PageHeader.svelte';
 import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 
-let searchQuery = $state('');
-let selectedProvider = $state('');
+// Filters live in the URL (?provider=…&capability=seed,reasoning…), so a filtered view is a shareable link.
+let filters = $state<ModelFilters>(filtersFromUrl(page.url.searchParams));
 let currentPage = $state(1);
 let perPage = $state(50);
-let sortBy = $state('');
-let sortDir = $state<'asc' | 'desc'>('asc');
-
-let filterCapability = $state('');
-let filterPriceRange = $state('');
-let filterContextRange = $state('');
-let filterFreeOnly = $state(false);
-let filterUsedInApps = $state(false);
+let sortBy = $state(page.url.searchParams.get('sort') ?? '');
+let sortDir = $state<'asc' | 'desc'>(page.url.searchParams.get('dir') === 'desc' ? 'desc' : 'asc');
 
 let data = $state<PaginatedModels | null>(null);
 let stats = $state<ModelsStats | null>(null);
-let providers = $state<string[]>([]);
+let facets = $state<ModelFacets | null>(null);
 let loading = $state(true);
 let syncing = $state(false);
 let error = $state('');
@@ -51,105 +61,70 @@ const allVisibleSelected = $derived(
 	visibleModelSlugs.length > 0 && visibleModelSlugs.every((slug) => selectedModelSlugs.has(slug)),
 );
 
-const activeFilters = $derived.by(() => {
-	const tags: FilterTag[] = [];
-	if (filterCapability) {
-		const capLabels: Record<string, string> = { vision: 'Vision', function_calling: 'Functions', streaming: 'Streaming', json_mode: 'JSON Mode' };
-		tags.push({ key: 'cap', label: capLabels[filterCapability] ?? filterCapability, onRemove: () => { filterCapability = ''; applyFilterAndReload(); } });
-	}
-	if (filterPriceRange) {
-		const priceLabels: Record<string, string> = { free: 'Free', low: '<$1/1M', medium: '$1–$10/1M', high: '>$10/1M' };
-		tags.push({ key: 'price', label: priceLabels[filterPriceRange] ?? filterPriceRange, onRemove: () => { filterPriceRange = ''; applyFilterAndReload(); } });
-	}
-	if (filterContextRange) {
-		const ctxLabels: Record<string, string> = { small: '<8K ctx', medium: '8K–32K ctx', large: '32K–128K ctx', xlarge: '>128K ctx' };
-		tags.push({ key: 'ctx', label: ctxLabels[filterContextRange] ?? filterContextRange, onRemove: () => { filterContextRange = ''; applyFilterAndReload(); } });
-	}
-	if (filterFreeOnly) {
-		tags.push({ key: 'free', label: 'Free only', onRemove: () => { filterFreeOnly = false; applyFilterAndReload(); } });
-	}
-	if (filterUsedInApps) {
-		tags.push({ key: 'used_in_apps', label: 'Used in Apps', onRemove: () => { filterUsedInApps = false; applyFilterAndReload(); } });
-	}
-	if (selectedProvider) {
-		tags.push({ key: 'provider', label: `Provider: ${selectedProvider}`, onRemove: () => { selectedProvider = ''; applyFilterAndReload(); } });
-	}
-	return tags;
-});
+/** Active filters (search excluded): drives the empty state's wording. */
+const activeCount = $derived(countActive(filters));
 
+function syncUrl() {
+	const params = filtersToUrl(filters, page.url.searchParams);
+	if (sortBy) params.set('sort', sortBy);
+	else params.delete('sort');
+	if (sortBy && sortDir === 'desc') params.set('dir', 'desc');
+	else params.delete('dir');
+	const qs = params.toString();
+	const next = `${page.url.pathname}${qs ? `?${qs}` : ''}`;
+	if (next !== `${page.url.pathname}${page.url.search}`) replaceState(next, page.state);
+}
+
+let loadSeq = 0;
 async function load() {
+	const seq = ++loadSeq;
 	loading = true;
 	error = '';
+	syncUrl();
 	try {
-		data = await getModels({
+		const result = await getModels({
 			page: currentPage,
 			per_page: perPage,
-			search: searchQuery,
-			provider: selectedProvider,
-			capability: filterCapability,
-			free_only: filterFreeOnly,
 			sort_by: sortBy,
 			sort_dir: sortDir,
-			price_range: filterPriceRange,
-			context_range: filterContextRange,
-			used_in_apps: filterUsedInApps,
+			...filtersToQuery(filters),
 		});
+		// Rapid filter clicks: only the newest request may land.
+		if (seq === loadSeq) data = result;
 	} catch {
-		error = 'Failed to load models.';
+		if (seq === loadSeq) error = 'Failed to load models.';
 	} finally {
-		loading = false;
+		if (seq === loadSeq) loading = false;
 	}
 }
 
 async function loadMeta() {
-	const [s, p] = await Promise.all([getModelsStats(), getProviders()]);
+	const [s, f] = await Promise.all([getModelsStats(), getModelFacets()]);
 	stats = s;
-	providers = p;
+	facets = f;
 }
 
-function debouncedLoad() {
+function setSearch(value: string) {
+	filters.search = value;
 	clearTimeout(debounceTimer);
 	currentPage = 1;
 	debounceTimer = setTimeout(load, 300);
 }
 
-function applyFilterAndReload() {
+function setFilters(patch: Partial<ModelFilters>) {
+	filters = { ...filters, ...patch };
 	currentPage = 1;
 	load();
 }
 
-function resetFilterState() {
-	filterCapability = '';
-	filterPriceRange = '';
-	filterContextRange = '';
-	filterFreeOnly = false;
-	filterUsedInApps = false;
-	selectedProvider = '';
-	searchQuery = '';
-	sortBy = '';
-	sortDir = 'asc';
-	currentPage = 1;
+/** Toolbar "Clear": drops the filters, keeps the search text and the sort. */
+function clearFilters() {
+	setFilters({ ...EMPTY_FILTERS, search: filters.search });
 }
 
+/** Empty state "Clear all filters": search included. */
 function clearAllFilters() {
-	resetFilterState();
-	load();
-}
-
-function applyQuickFilter(type: string) {
-	resetFilterState();
-	if (type === 'free') { filterPriceRange = 'free'; }
-	else if (type === 'vision') { filterCapability = 'vision'; }
-	else if (type === 'large-context') { filterContextRange = 'xlarge'; }
-	else if (type === 'efficient') { sortBy = 'cost_efficiency'; sortDir = 'desc'; }
-	else if (type === 'functions') { filterCapability = 'function_calling'; }
-	else if (type === 'used-in-apps') { filterUsedInApps = true; }
-	load();
-}
-
-function toggleUsedInApps() {
-	filterUsedInApps = !filterUsedInApps;
-	applyFilterAndReload();
+	setFilters({ ...EMPTY_FILTERS });
 }
 
 function toggleSort(field: string) {
@@ -217,20 +192,8 @@ function downloadCovariates() {
 	window.location.href = getModelCovariatesCsvUrl(true);
 }
 
-function toggleCapability(value: string) {
-	filterCapability = filterCapability === value ? '' : value;
-	applyFilterAndReload();
-}
-
-function togglePriceRange(value: string) {
-	filterPriceRange = filterPriceRange === value ? '' : value;
-	applyFilterAndReload();
-}
-
-function toggleContextRange(value: string) {
-	filterContextRange = filterContextRange === value ? '' : value;
-	applyFilterAndReload();
-}
+const menuItemClass =
+	'flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors duration-150 data-[highlighted]:bg-surface-2 [&>svg]:size-3.5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground';
 
 function changeMobileSort() {
 	currentPage = 1;
@@ -252,19 +215,49 @@ onMount(() => {
 <div class="space-y-4">
 	<PageHeader title="Models" description="Browse and manage AI models available for research.">
 		{#snippet actions()}
-			<Button variant="outline" size="sm" onclick={openComparison} disabled={selectedModelSlugs.size === 0}>
-				<GitCompareArrows class="h-3.5 w-3.5 sm:mr-2" />
-				<span class="hidden sm:inline">Compare{selectedModelSlugs.size > 0 ? ` (${selectedModelSlugs.size})` : ''}</span>
-			</Button>
-			<Button variant="outline" size="sm" onclick={downloadCovariates} aria-label="Covariates CSV" title="Per-model research covariates (models used in your jobs) as CSV">
-				<FileSpreadsheet class="h-3.5 w-3.5 sm:mr-2" />
-				<span class="hidden sm:inline">Covariates CSV</span>
-			</Button>
 			<Button variant="outline" size="sm" href="/rankings">
 				<Trophy class="h-3.5 w-3.5 sm:mr-2" />
 				<span class="hidden sm:inline">Rankings</span>
 			</Button>
-			<Button variant="outline" size="sm" href="/models/import">
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger>
+					{#snippet child({ props })}
+						<Button {...props} variant="outline" size="sm" aria-label="Download">
+							<Download class="h-3.5 w-3.5 sm:mr-2" />
+							<span class="hidden sm:inline">Download</span>
+							<ChevronDown class="ml-1 hidden h-3 w-3 opacity-60 sm:inline" />
+						</Button>
+					{/snippet}
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Portal>
+					<DropdownMenu.Content
+						align="end"
+						sideOffset={6}
+						collisionPadding={12}
+						class="z-50 min-w-56 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+					>
+						<DropdownMenu.Item class={menuItemClass} onSelect={() => downloadExport('csv')}>
+							<FileText />Catalog as CSV
+						</DropdownMenu.Item>
+						<DropdownMenu.Item class={menuItemClass} onSelect={() => downloadExport('json')}>
+							<FileJson />Catalog as JSON
+						</DropdownMenu.Item>
+						<DropdownMenu.Separator class="-mx-1 my-1 h-px bg-border" />
+						<DropdownMenu.Item class={menuItemClass} onSelect={downloadCovariates}>
+							<FileSpreadsheet />
+							<span class="flex flex-col">
+								Research covariates CSV
+								<span class="text-[11px] text-muted-foreground">Models used in your jobs</span>
+							</span>
+						</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Portal>
+			</DropdownMenu.Root>
+			<Button variant="outline" size="sm" onclick={handleSync} disabled={syncing} title="Refresh the catalog from OpenRouter">
+				{#if syncing}<LoaderCircle class="h-3.5 w-3.5 animate-spin sm:mr-2" />{:else}<CloudDownload class="h-3.5 w-3.5 sm:mr-2" />{/if}
+				<span class="hidden sm:inline">{syncing ? 'Syncing…' : 'Sync'}</span>
+			</Button>
+			<Button size="sm" href="/models/import">
 				<Upload class="h-3.5 w-3.5 sm:mr-2" />
 				<span class="hidden sm:inline">Import</span>
 			</Button>
@@ -281,30 +274,6 @@ onMount(() => {
 		{/if}
 	</PageHeader>
 
-	<ModelsFiltersBar
-		bind:searchQuery
-		bind:selectedProvider
-		{filterCapability}
-		{filterPriceRange}
-		{filterContextRange}
-		{filterUsedInApps}
-		{sortBy}
-		{sortDir}
-		{providers}
-		{syncing}
-		{activeFilters}
-		onSearchInput={debouncedLoad}
-		onProviderChange={applyFilterAndReload}
-		onApplyQuickFilter={applyQuickFilter}
-		onToggleCapability={toggleCapability}
-		onTogglePriceRange={togglePriceRange}
-		onToggleContextRange={toggleContextRange}
-		onToggleUsedInApps={toggleUsedInApps}
-		onClearAllFilters={clearAllFilters}
-		onSync={handleSync}
-		onExport={downloadExport}
-	/>
-
 	{#if error}
 		<ErrorAlert message={error} onretry={load} />
 	{/if}
@@ -317,7 +286,7 @@ onMount(() => {
 		{selectedModelSlugs}
 		{visibleModelSlugs}
 		{allVisibleSelected}
-		hasActiveFilters={activeFilters.length > 0}
+		hasActiveFilters={activeCount > 0 || !!filters.search}
 		onToggleSort={toggleSort}
 		onToggleModelSelection={toggleModelSelection}
 		onToggleVisibleSelection={toggleVisibleModelSelection}
@@ -327,6 +296,9 @@ onMount(() => {
 		onClearSelection={clearSelection}
 		onCompare={openComparison}
 	>
+		{#snippet toolbar()}
+			<ModelsFiltersBar {filters} {facets} onSearch={setSearch} onChange={setFilters} onClear={clearFilters} />
+		{/snippet}
 		{#snippet footer()}
 			<PaginationBar
 				resultsText={data && !loading

@@ -10,8 +10,9 @@
 
 	let { children }: { children: Snippet } = $props();
 
-	const active = $derived.by((): LibraryApiKind | 'playground' | null => {
+	const active = $derived.by((): LibraryApiKind | 'playground' | 'dry-run' | null => {
 		if (page.url.pathname.startsWith('/library/prompts/playground')) return 'playground';
+		if (page.url.pathname.startsWith('/library/dry-run')) return 'dry-run';
 		const kind = page.params.kind;
 		return isLibraryApiKind(kind) ? kind : null;
 	});
@@ -19,7 +20,7 @@
 </script>
 
 <div class="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
-	<div class="min-w-0 lg:sticky lg:top-20 lg:self-start">
+	<div class="min-w-0 lg:sticky lg:top-[4.25rem] lg:self-start">
 		<LibraryNav {active} {counts} />
 	</div>
 	<div class="min-w-0">

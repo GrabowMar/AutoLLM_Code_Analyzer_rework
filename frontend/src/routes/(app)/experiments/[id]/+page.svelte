@@ -160,7 +160,7 @@
 		{#if actionError}<ErrorAlert message={actionError} />{/if}
 
 		{#if tab === 'summary'}
-			<AbstractSection {study} {results} {cellsDone} {cellsTotal} />
+			<AbstractSection {study} {results} {cellsDone} {cellsTotal} budget={live?.budget ?? null} onOpenTab={setTab} />
 		{:else if tab === 'method'}
 			<MethodSection {study} {conditions} number={numberOf('method')} />
 		{:else if tab === 'results'}

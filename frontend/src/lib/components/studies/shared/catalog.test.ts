@@ -8,6 +8,15 @@ import {
   modelLevelsFromRefs,
   modelIneligibility,
   selectionByEndpoint,
+  applyFacets,
+  paginateGroups,
+  blendedPrice,
+  facetCounts,
+  highlightParts,
+  isNewModel,
+  matchesTokens,
+  searchTokens,
+  sortModels,
 } from "./catalog";
 
 let nextId = 1;
@@ -241,5 +250,118 @@ describe("modelLevelsFromRefs", () => {
       levels: ["vendor/gone"],
       unknown: ["99999"],
     });
+  });
+});
+
+describe("search, facets and sorting", () => {
+  const now = Date.parse("2026-11-05T00:00:00Z");
+
+  it("matches every token anywhere (name, id, endpoint)", () => {
+    const m = model({
+      model_name: "Qwen: Qwen3 235B A22B",
+      model_id: "qwen/qwen3-235b-a22b",
+    });
+    expect(matchesTokens(m, searchTokens("qwen 235b"))).toBe(true);
+    expect(matchesTokens(m, searchTokens("235B  QWEN"))).toBe(true);
+    expect(matchesTokens(m, searchTokens("qwen 14b"))).toBe(false);
+    expect(
+      matchesTokens(local(gpu1, "llama3"), searchTokens("zeta llama")),
+    ).toBe(true);
+    expect(searchTokens("   ")).toEqual([]);
+  });
+
+  it("narrows by every active facet and counts what each would keep", () => {
+    const a = model({
+      supports_reasoning: true,
+      open_weights: true,
+      released_at: "2026-10-01",
+    });
+    const b = model({
+      supports_reasoning: true,
+      supports_vision: true,
+      released_at: "2025-01-01",
+    });
+    const c = model({ is_free: true });
+    const d = local(gpu1, "llama3");
+    const all = [a, b, c, d];
+    expect(applyFacets(all, new Set(["reasoning"]), now)).toEqual([a, b]);
+    expect(applyFacets(all, new Set(["reasoning", "vision"]), now)).toEqual([
+      b,
+    ]);
+    expect(applyFacets(all, new Set(["open_weights"]), now)).toEqual([a, d]); // local weights are open
+    const counts = facetCounts(all, new Set(["reasoning"]), now);
+    expect(counts.reasoning).toBe(2);
+    expect(counts.vision).toBe(1);
+    expect(counts.new).toBe(1);
+    expect(isNewModel(a, now)).toBe(true);
+    expect(isNewModel(model({ released_at: "2027-01-01" }), now)).toBe(false); // future date is not "new"
+  });
+
+  it("sorts by blended price, context and release date without mutating", () => {
+    const cheap = model({
+      model_name: "Cheap",
+      input_price_per_million: 0.1,
+      output_price_per_million: 0.4,
+    });
+    const dear = model({
+      model_name: "Dear",
+      input_price_per_million: 3,
+      output_price_per_million: 15,
+      context_window: 200000,
+      released_at: "2026-06-01",
+    });
+    const loc = local(gpu1, "Local");
+    const list = [dear, cheap, loc];
+    expect(sortModels(list, "price").map((m) => m.model_name)).toEqual([
+      "Local",
+      "Cheap",
+      "Dear",
+    ]);
+    expect(sortModels(list, "context")[0]).toBe(dear);
+    expect(sortModels(list, "newest")[0]).toBe(dear);
+    expect(list[0]).toBe(dear);
+    expect(blendedPrice(dear)).toBeCloseTo((3 * 3 + 15) / 4);
+    const router = model({
+      model_name: "Auto Router",
+      input_price_per_million: -1,
+      output_price_per_million: -1,
+    });
+    expect(
+      sortModels([router, dear, cheap], "price").map((m) => m.model_name),
+    ).toEqual(["Cheap", "Dear", "Auto Router"]);
+  });
+
+  it("pages grouped rows across group boundaries", () => {
+    const groups = groupModels(
+      [
+        ...Array.from({ length: 30 }, () => model({ provider: "a" })),
+        ...Array.from({ length: 5 }, () => model({ provider: "b" })),
+        model({ provider: "c" }),
+      ],
+      "provider",
+    );
+    const page = paginateGroups(groups, 33);
+    expect(page.groups.map((g) => [g.key, g.shown.length])).toEqual([
+      ["provider:a", 30],
+      ["provider:b", 3],
+    ]);
+    expect(page.remaining).toBe(3);
+    expect(paginateGroups(groups, 100).remaining).toBe(0);
+  });
+
+  it("splits text around the search tokens for highlighting", () => {
+    expect(highlightParts("Qwen3 235B", ["235b", "qwen"])).toEqual([
+      { text: "Qwen", match: true },
+      { text: "3 ", match: false },
+      { text: "235B", match: true },
+    ]);
+    expect(highlightParts("a.b", ["."])).toEqual([
+      { text: "a", match: false },
+      { text: ".", match: true },
+      { text: "b", match: false },
+    ]);
+    expect(highlightParts("plain", [])).toEqual([
+      { text: "plain", match: false },
+    ]);
   });
 });

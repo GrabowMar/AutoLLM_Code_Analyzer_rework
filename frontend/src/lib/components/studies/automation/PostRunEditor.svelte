@@ -72,6 +72,23 @@
 	const isDynamic = (t: AnalyzerTool) => t.analysis_mode === 'dynamic';
 	const usable = (t: AnalyzerTool) => !isDynamic(t) && (t.kind === 'ai' || t.installed);
 
+	// Collapsed by default: a summary of the chosen analyzers; "Choose" opens them grouped by category.
+	let open = $state(false);
+	const usableTools = $derived((tools ?? []).filter(usable));
+	const otherTools = $derived((tools ?? []).filter((t) => !usable(t)));
+	const byCategory = $derived.by(() => {
+		const groups = new Map<string, AnalyzerTool[]>();
+		for (const t of usableTools) groups.set(t.category || 'other', [...(groups.get(t.category || 'other') ?? []), t]);
+		return [...groups].sort((a, b) => a[0].localeCompare(b[0]));
+	});
+	const chosenNames = $derived((tools ?? []).filter((t) => value.tool_slugs.includes(t.slug)).map((t) => t.name));
+
+	function setGroup(list: AnalyzerTool[], on: boolean) {
+		const set = new Set(value.tool_slugs);
+		for (const t of list) on ? set.add(t.slug) : set.delete(t.slug);
+		update({ ...value, tool_slugs: [...set] });
+	}
+
 	function unusableReason(t: AnalyzerTool): string {
 		if (isDynamic(t)) return 'Dynamic scanner: runs through the evaluation level "full", not as a post-run';
 		return 'Not installed in your analyzer workspace';
@@ -92,21 +109,52 @@
 		{:else if tools.length === 0}
 			<p class="text-xs text-muted-foreground">No analyzers are enabled. <a href="/analyzers" class="underline">Set them up</a>.</p>
 		{:else}
-			<fieldset class="grid gap-1.5 sm:grid-cols-2" aria-label="Analyzers">
-				{#each tools as tool (tool.slug)}
-					<label class="flex items-center gap-2 text-xs" title={usable(tool) ? tool.description : unusableReason(tool)}>
-						<Checkbox
-							checked={value.tool_slugs.includes(tool.slug)}
-							disabled={disabled || !usable(tool)}
-							onCheckedChange={(v) => toggleTool(tool.slug, v === true)}
-						/>
-						<span class="truncate">{tool.name}</span>
-						<span class="text-xs text-muted-foreground"
-							>{tool.category}{isDynamic(tool) ? ' · needs running app' : usable(tool) ? '' : ' · not installed'}</span
-						>
-					</label>
-				{/each}
-			</fieldset>
+			<div class="pr-summary">
+				<span class="min-w-0 truncate text-sm">
+					{#if chosenNames.length}
+						<b>{chosenNames.length} analyzer{chosenNames.length === 1 ? '' : 's'}</b>
+						<span class="text-muted-foreground"> · {chosenNames.slice(0, 5).join(', ')}{chosenNames.length > 5 ? ` +${chosenNames.length - 5}` : ''}</span>
+					{:else}
+						<span class="text-muted-foreground">No post-run analysis</span>
+					{/if}
+				</span>
+				<button type="button" class="pr-toggle" aria-expanded={open} onclick={() => (open = !open)} {disabled}>
+					{open ? 'Done' : 'Choose'}
+				</button>
+			</div>
+			{#if open}
+				<div class="pr-groups">
+					{#each byCategory as [category, list] (category)}
+						{@const allOn = list.every((t) => value.tool_slugs.includes(t.slug))}
+						<fieldset class="pr-group" aria-label="{category} analyzers">
+							<legend class="pr-cat">
+								{category}
+								<button type="button" class="pr-all" onclick={() => setGroup(list, !allOn)} {disabled}>{allOn ? 'none' : 'all'}</button>
+							</legend>
+							<div class="pr-chips">
+								{#each list as tool (tool.slug)}
+									{@const on = value.tool_slugs.includes(tool.slug)}
+									<button
+										type="button"
+										class="pr-chip"
+										data-on={on}
+										aria-pressed={on}
+										title={tool.description}
+										{disabled}
+										onclick={() => toggleTool(tool.slug, !on)}>{tool.name}</button
+									>
+								{/each}
+							</div>
+						</fieldset>
+					{/each}
+					{#if otherTools.length}
+						<p class="text-[11px] text-muted-foreground">
+							Not available as a post-run: {#each otherTools as t, i (t.slug)}<span title={unusableReason(t)}>{t.name}{i < otherTools.length - 1 ? ', ' : ''}</span>{/each}
+							(dynamic scanners run through the evaluation level "full").
+						</p>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 		<label class="flex items-center gap-2 text-xs">
 			<Checkbox checked={value.only_passing} {disabled} onCheckedChange={(v) => update({ ...value, only_passing: v === true })} />
@@ -140,3 +188,90 @@
 		</p>
 	{/if}
 </div>
+
+<style>
+	.pr-summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 0.5rem 0.75rem;
+	}
+	.pr-toggle {
+		height: 1.75rem;
+		flex-shrink: 0;
+		cursor: pointer;
+		border-radius: calc(var(--radius) + 0.125rem);
+		border: 1px solid var(--border);
+		padding-inline: 0.625rem;
+		font-size: 0.75rem;
+		font-weight: 500;
+	}
+	.pr-toggle[aria-expanded='true'] {
+		background: var(--muted);
+	}
+	.pr-groups {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+	.pr-group {
+		display: grid;
+		grid-template-columns: 7.5rem minmax(0, 1fr);
+		align-items: start;
+		gap: 0.75rem;
+	}
+	.pr-cat {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		padding-top: 0.3rem;
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--muted-foreground);
+	}
+	.pr-all {
+		align-self: flex-start;
+		cursor: pointer;
+		font-family: var(--font-sans);
+		font-size: 0.6875rem;
+		text-transform: none;
+		letter-spacing: normal;
+		color: var(--primary);
+	}
+	.pr-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+	}
+	.pr-chip {
+		height: 1.75rem;
+		cursor: pointer;
+		border-radius: calc(var(--radius) + 0.125rem);
+		border: 1px solid var(--border);
+		padding-inline: 0.625rem;
+		font-size: 0.75rem;
+		transition: border-color 150ms, background-color 150ms;
+	}
+	.pr-chip[data-on='true'] {
+		border-color: var(--primary);
+		background: color-mix(in oklab, var(--primary) 12%, var(--card));
+		color: var(--accent-foreground);
+		font-weight: 500;
+	}
+	.pr-chip:focus-visible,
+	.pr-toggle:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 1px;
+	}
+	@media (max-width: 640px) {
+		.pr-group {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 0.375rem;
+		}
+	}
+</style>

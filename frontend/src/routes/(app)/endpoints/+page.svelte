@@ -29,6 +29,12 @@
 	const local = $derived((endpoints ?? []).filter((e) => !e.is_system));
 	const system = $derived((endpoints ?? []).filter((e) => e.is_system));
 	const ordered = $derived([...local, ...system]);
+	const stats = $derived({
+		total: endpoints?.length ?? 0,
+		online: (endpoints ?? []).filter((e) => e.status === 'online').length,
+		models: (endpoints ?? []).reduce((a, e) => a + (e.models?.available ?? 0), 0),
+		active: (endpoints ?? []).reduce((a, e) => a + (e.live?.active_jobs ?? 0), 0),
+	});
 	// One SSE connection for every visible endpoint (≤ 20 channels) plus capacity.
 	const channelKey = $derived(
 		[CAPACITY_CHANNEL, ...ordered.slice(0, MAX_CHANNELS - 1).map((e) => endpointChannel(e.id))].join(',')
@@ -109,6 +115,16 @@
 		{#snippet actions()}
 			<Button href="/endpoints/new" size="sm"><Plus />Add endpoint</Button>
 		{/snippet}
+		<div class="header-stats">
+			{#if endpoints}
+				<span class="header-stat"><b>{stats.total}</b> endpoints</span>
+				<span class="header-stat"><b class={stats.online < stats.total ? 'text-warning-fg' : ''}>{stats.online}</b> online</span>
+				<span class="header-stat" title="Local endpoint models currently served (OpenRouter's catalog is on Models)"><b>{stats.models.toLocaleString()}</b> local models available</span>
+				<span class="header-stat"><b>{stats.active}</b> active runs</span>
+			{:else}
+				<span class="header-stat text-muted-foreground">loading…</span>
+			{/if}
+		</div>
 	</PageHeader>
 
 	<CapacityCard {capacity} {isStaff} {now} onchanged={loadCapacity} />

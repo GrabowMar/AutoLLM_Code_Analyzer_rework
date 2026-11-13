@@ -102,7 +102,7 @@
 	{/if}
 
 	{#if plan}
-		<StudyFigure id="table-m4" kind="table" number="M4" title="Resolved plan: every planned cell" flush>
+		<StudyFigure id="table-m4" kind="table" number="M4" title="Resolved plan: every planned cell" flush collapsible summary={`${plan.n_cells.toLocaleString()} cells in ${plan.n_blocks} blocks`}>
 			<PlanCellsTable studyId={study.id} planHash={plan.plan_hash} {conditions} units={units.map(({ index, label }) => ({ index, label }))} />
 			{#snippet caption()}
 				Plan <span class="font-mono">{shortHash(plan.plan_hash, 16)}</span> (resolver v{plan.resolver_version}): {plural(plan.n_conditions, 'condition')}, {plural(plan.n_units, 'unit')},

@@ -12,7 +12,7 @@ export interface SummaryIssue {
   /** Prefix naming what the issue is about (a model, a condition, a cell count). */
   subject?: string;
   fixes?: IssueFix[];
-  /** Cell keys the issue concerns (the PlanRail links the first one to the cell drawer). */
+  /** Cell keys the issue concerns (the Review step links the first one to the cell drawer). */
   cells?: string[];
   path?: string | null;
 }

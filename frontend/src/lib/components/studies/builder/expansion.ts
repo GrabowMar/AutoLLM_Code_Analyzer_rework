@@ -1,7 +1,7 @@
 /**
  * Client mirror of the backend factor expansion (`backend/generation/study/expand.py:expand_grid`) and the
  * plan's cell counts, so the builder can show "conditions × units × repeats = cells" before the server
- * resolves. The server stays authoritative (the PlanRail replaces these numbers with `PlanOut`); the two
+ * resolves. The server stays authoritative (the builder's plan rail replaces these numbers with `PlanOut`); the two
  * implementations are pinned to the same fixtures (`../__fixtures__/expansion.json`, checked by
  * `backend/generation/tests/wp15_frontend/test_expansion_fixture.py` and `expansion.test.ts`).
  *

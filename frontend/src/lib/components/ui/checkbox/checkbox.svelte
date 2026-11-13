@@ -31,7 +31,8 @@
 	bind:indeterminate
 	data-slot="checkbox"
 	class={cn(
-		'peer flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-[4px] border border-muted-foreground/60 bg-surface-1 shadow-xs transition-colors duration-150',
+		// The box is 16px; the ::after extends the pointer target to 24×24 (WCAG 2.2 target size) without moving layout.
+		"peer relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-[4px] border border-muted-foreground/60 bg-surface-1 shadow-xs transition-colors duration-150 after:absolute after:-inset-1 after:content-['']",
 		'hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background',
 		'data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground',
 		'data-[state=indeterminate]:border-primary data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground',

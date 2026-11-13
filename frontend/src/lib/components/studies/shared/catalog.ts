@@ -384,3 +384,186 @@ export function selectionByEndpoint(
     return a.label.localeCompare(b.label);
   });
 }
+
+// ── search, facets, sorting (ModelPicker) ─────────────────────────────
+
+export { searchTokens, highlightParts } from "$lib/utils/search";
+
+function haystack(m: LLMModelSummary): string {
+  return [
+    m.model_name,
+    m.provider,
+    m.model_id,
+    m.canonical_slug,
+    m.served_model_name ?? "",
+    m.endpoint?.slug ?? "",
+    m.endpoint?.name ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+export function matchesTokens(m: LLMModelSummary, tokens: string[]): boolean {
+  if (tokens.length === 0) return true;
+  const text = haystack(m);
+  return tokens.every((t) => text.includes(t));
+}
+
+/** Capability filters (chips). Each one narrows; models without the data never match. */
+export type ModelFacet =
+  | "reasoning"
+  | "vision"
+  | "open_weights"
+  | "free"
+  | "new";
+export const MODEL_FACETS: { key: ModelFacet; label: string; title: string }[] =
+  [
+    {
+      key: "reasoning",
+      label: "Reasoning",
+      title: "Accepts reasoning parameters",
+    },
+    { key: "vision", label: "Vision", title: "Accepts image input" },
+    {
+      key: "open_weights",
+      label: "Open weights",
+      title: "Weights are published",
+    },
+    { key: "free", label: "Free", title: "Free tier (rate-limited)" },
+    { key: "new", label: "New", title: "Released in the last 120 days" },
+  ];
+export const NEW_MODEL_DAYS = 120;
+
+export function isNewModel(
+  m: LLMModelSummary,
+  now: number = Date.now(),
+): boolean {
+  if (!m.released_at) return false;
+  const t = Date.parse(m.released_at);
+  return (
+    Number.isFinite(t) && now - t <= NEW_MODEL_DAYS * 86_400_000 && t <= now
+  );
+}
+
+export function hasFacet(
+  m: LLMModelSummary,
+  facet: ModelFacet,
+  now: number = Date.now(),
+): boolean {
+  switch (facet) {
+    case "reasoning":
+      return !!m.supports_reasoning;
+    case "vision":
+      return (
+        !!m.supports_vision || (m.input_modalities ?? []).includes("image")
+      );
+    case "open_weights":
+      return m.open_weights === true || isLocalModel(m);
+    case "free":
+      return m.is_free;
+    case "new":
+      return isNewModel(m, now);
+  }
+}
+
+export function applyFacets(
+  models: LLMModelSummary[],
+  facets: ReadonlySet<ModelFacet>,
+  now: number = Date.now(),
+): LLMModelSummary[] {
+  if (facets.size === 0) return models;
+  return models.filter((m) => [...facets].every((f) => hasFacet(m, f, now)));
+}
+
+/** How many of `models` each facet would keep on top of the facets already on (chip counts). */
+export function facetCounts(
+  models: LLMModelSummary[],
+  active: ReadonlySet<ModelFacet>,
+  now: number = Date.now(),
+): Record<ModelFacet, number> {
+  const base = applyFacets(models, active, now);
+  const out = {} as Record<ModelFacet, number>;
+  for (const { key } of MODEL_FACETS) {
+    out[key] = active.has(key)
+      ? base.length
+      : base.filter((m) => hasFacet(m, key, now)).length;
+  }
+  return out;
+}
+
+export type ModelSort = "vendor" | "price" | "context" | "newest";
+export const MODEL_SORTS: { value: ModelSort; label: string }[] = [
+  { value: "vendor", label: "Grouped by vendor" },
+  { value: "price", label: "Cheapest first" },
+  { value: "context", label: "Longest context" },
+  { value: "newest", label: "Newest first" },
+];
+
+/** Blended $/Mtok (1 part output to 3 parts input, a typical agent mix); local models cost 0. */
+export function blendedPrice(m: LLMModelSummary): number {
+  if (isLocalModel(m) || m.is_free) return 0;
+  if (hasVariablePrice(m)) return Number.POSITIVE_INFINITY; // routers: sorted last, never "cheapest"
+  return (3 * m.input_price_per_million + m.output_price_per_million) / 4;
+}
+
+/** OpenRouter routers list a negative price: what they cost depends on the model they route to. */
+export function hasVariablePrice(m: LLMModelSummary): boolean {
+  return (
+    !isLocalModel(m) &&
+    (m.input_price_per_million < 0 || m.output_price_per_million < 0)
+  );
+}
+
+/** A flat sort (every sort but `vendor`); ties break by name. Does not mutate. */
+export function sortModels(
+  models: LLMModelSummary[],
+  sort: ModelSort,
+): LLMModelSummary[] {
+  const byName = (a: LLMModelSummary, b: LLMModelSummary) =>
+    a.model_name.localeCompare(b.model_name);
+  const time = (m: LLMModelSummary) =>
+    m.released_at ? Date.parse(m.released_at) || 0 : 0;
+  const cmp: Record<
+    ModelSort,
+    (a: LLMModelSummary, b: LLMModelSummary) => number
+  > = {
+    vendor: byName,
+    price: (a, b) => {
+      const pa = blendedPrice(a);
+      const pb = blendedPrice(b);
+      return pa === pb ? byName(a, b) : pa < pb ? -1 : 1;
+    },
+    context: (a, b) =>
+      (b.context_window ?? 0) - (a.context_window ?? 0) || byName(a, b),
+    newest: (a, b) => time(b) - time(a) || byName(a, b),
+  };
+  return [...models].sort(cmp[sort]);
+}
+
+/**
+ * The first `limit` rows of grouped models, cut across group boundaries (a group is shown with as many
+ * of its rows as still fit; later groups are left out). `remaining` counts the rows not shown, for a
+ * "Show more" row: the picker never mounts hundreds of rows at once.
+ */
+export function paginateGroups(
+  groups: ModelGroup[],
+  limit: number,
+): {
+  groups: (ModelGroup & { shown: LLMModelSummary[] })[];
+  remaining: number;
+} {
+  const out: (ModelGroup & { shown: LLMModelSummary[] })[] = [];
+  let left = limit;
+  let total = 0;
+  for (const g of groups) {
+    total += g.models.length;
+    if (left <= 0) continue;
+    const shown = g.models.slice(0, left);
+    left -= shown.length;
+    out.push({ ...g, shown });
+  }
+  return {
+    groups: out,
+    remaining: total - out.reduce((n, g) => n + g.shown.length, 0),
+  };
+}

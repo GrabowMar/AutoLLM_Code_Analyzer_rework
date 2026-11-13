@@ -85,6 +85,10 @@ def _proxy(
     if base is None:
         return HttpResponse("App routing not configured", status=502)
 
+    from backend.system.services.footprint import record_app_access
+
+    record_app_access(container.name)
+
     url = f"{base}/{upstream_path}"
     query = request.META.get("QUERY_STRING", "")
     if query:

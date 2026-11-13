@@ -274,6 +274,7 @@ class RunFacetsSummaryOut(Schema):
 
 class RunFacetsOut(Schema):
     summary: RunFacetsSummaryOut
+    statuses: list[FacetValueOut]
     outcomes: list[FacetValueOut]
     models: list[FacetValueOut]
     tasks: list[FacetValueOut]
@@ -526,6 +527,12 @@ def run_facets(request: HttpRequest, filters: Query[RunFilters]) -> Any:
         rows = qs.values(*fields).annotate(n=Count("id")).order_by("-n")
         return [(tuple(row[f] for f in fields), row["n"]) for row in rows if row[fields[0]] not in (None, "")]
 
+    status_counts = dict(counts(scope(status=None), "status"))
+    statuses = [
+        {"value": value, "label": str(label), "count": status_counts[(value,)]}
+        for value, label in RunStatus.choices
+        if (value,) in status_counts
+    ]
     outcomes = [{"value": v[0], "label": v[0], "count": n} for v, n in counts(scope(outcome=None), "outcome")]
     models = [{"value": v[0], "label": v[0], "count": n} for v, n in counts(scope(model=None), "model__model_id")]
     task_rows = counts(scope(task=None), "task_version__task__slug")
@@ -559,6 +566,7 @@ def run_facets(request: HttpRequest, filters: Query[RunFilters]) -> Any:
     }
     return {
         "summary": summary,
+        "statuses": statuses,
         "outcomes": outcomes,
         "models": models,
         "tasks": tasks,

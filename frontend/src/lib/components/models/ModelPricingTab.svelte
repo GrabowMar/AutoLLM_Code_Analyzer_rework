@@ -13,7 +13,8 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import { formatApiError } from '$lib/api/core';
 	import { getModelEndpoints, type LLMModelDetail, type ModelInsights, type ProviderEndpoint, type ProviderEndpoints } from '$lib/api/client';
-	import { compactNumber, fmtRate, fmtUsd, formatPrice, formatTokens, getCaps, getModelsDev } from './helpers';
+	import Server from '@lucide/svelte/icons/server';
+	import { compactNumber, fmtRate, fmtUsd, formatPrice, formatTokens, getCaps, getModelsDev, metadataView } from './helpers';
 
 	interface Props {
 		model: LLMModelDetail;
@@ -107,15 +108,56 @@
 		return unit === 'token' ? formatPrice(value * 1_000_000) : `$${value < 0.01 ? value.toFixed(4) : value.toFixed(3)}`;
 	}
 
+	// A local endpoint model is not billed per token: its runs record $0 and the list prices below are
+	// those of its OpenRouter catalog twin (an equivalent, not a charge).
+	const view = $derived(metadataView(model));
+	const hasListPrice = $derived(model.input_price_per_token > 0 || model.output_price_per_token > 0);
+
 	const UNIT_LABEL: Record<string, string> = { token: 'per 1M tokens', request: 'per request', image: 'per image', search: 'per search', second: 'per second' };
 </script>
 
 <div class="space-y-4">
+	{#if model.is_local}
+		<section class="md-sec" aria-labelledby="local-billing">
+			<div class="md-sec-head">
+				<h2 id="local-billing" class="md-sec-title inline-flex items-center gap-2"><Server class="size-4 text-muted-foreground" aria-hidden="true" />Local endpoint billing</h2>
+				<span class="md-sec-desc">
+					Served by
+					{#if model.endpoint}<a href="/endpoints/{model.endpoint.slug}" class="text-primary hover:underline">{model.endpoint.name}</a>{:else}a local endpoint{/if}
+					— not billed per token
+				</span>
+			</div>
+			<dl class="md-figs">
+				<div class="md-fig">
+					<dt class="md-label">Billed here</dt>
+					<dd class="md-val">{measured ? fmtUsd(measured.total_cost) : '—'}</dd>
+					<dd class="md-sub">runs record what the endpoint billed</dd>
+				</div>
+				<div class="md-fig" title="Your measured mean tokens per app priced at the catalog twin's list prices">
+					<dt class="md-label">List-price equivalent / app</dt>
+					<dd class="md-val {hasListPrice && measured?.mean_prompt_tokens ? '' : 'is-muted'}">{hasListPrice && measured?.mean_prompt_tokens ? fmtUsd(calc.total) : '—'}</dd>
+					<dd class="md-sub">{hasListPrice ? 'at the twin\'s OpenRouter prices' : 'no list price known'}</dd>
+				</div>
+				<div class="md-fig">
+					<dt class="md-label">Priced as</dt>
+					<dd class="truncate font-mono text-sm font-medium">
+						{#if view.inheritedSlug}<a href="/models/{view.inheritedSlug}" class="hover:text-primary">{view.inheritedFrom}</a>{:else}{view.inheritedFrom ?? '—'}{/if}
+					</dd>
+					<dd class="md-sub">catalog twin (assumed same weights)</dd>
+				</div>
+			</dl>
+			<p class="md-note">
+				Runs on endpoints that are not billed per call record a billed cost of $0: cost describes billing, not usage. Each run's page shows its list-price
+				equivalent; the calculator below uses the same list prices.
+			</p>
+		</section>
+	{/if}
+
 	<div class="grid gap-4 lg:grid-cols-2">
 		<Card.Root class="gap-0 overflow-clip py-0">
 			<Card.Header class="border-b border-border py-3">
-				<Card.Title class="text-sm font-medium">List prices</Card.Title>
-				<Card.Description class="text-xs">OpenRouter, cheapest routing; providers below may differ</Card.Description>
+				<Card.Title class="text-sm font-medium">{model.is_local ? 'List prices (catalog twin)' : 'List prices'}</Card.Title>
+				<Card.Description class="text-xs">{model.is_local ? 'What the same model costs through OpenRouter — a reference, not a charge here' : 'OpenRouter, cheapest routing; providers below may differ'}</Card.Description>
 			</Card.Header>
 			<Card.Content class="p-0">
 				<div class="overflow-x-auto">
@@ -156,7 +198,7 @@
 
 		<Card.Root>
 			<Card.Header class="pb-0">
-				<Card.Title class="text-sm font-medium">Cost calculator</Card.Title>
+				<Card.Title class="text-sm font-medium">{model.is_local ? 'List-price calculator' : 'Cost calculator'}</Card.Title>
 				<Card.Description class="text-xs">
 					{#if measured?.mean_prompt_tokens}Seeded with your measured mean per app ({compactNumber(measured.mean_prompt_tokens)} in, {compactNumber(measured.mean_completion_tokens)} out).{:else}At list price.{/if}
 				</Card.Description>

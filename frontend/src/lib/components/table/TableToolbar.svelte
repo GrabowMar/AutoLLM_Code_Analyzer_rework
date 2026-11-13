@@ -1,21 +1,17 @@
 <script lang="ts">
 	/**
 	 * Strip at the top of a table card: a summary (or, with a selection, the
-	 * bulk-action bar) on the left, extra controls + the density toggle on the right.
+	 * bulk-action bar) on the left, extra controls on the right. Row density is a
+	 * workspace preference (Settings → Workspace → Compact tables), not a per-table control.
 	 *
 	 *   <TableToolbar selectedCount={selected.size} noun="model" onClearSelection={clear}>
-	 *     {#snippet summary()}50 on this page · click a row to open{/snippet}
+	 *     {#snippet summary()}50 on this page{/snippet}
 	 *     {#snippet bulk()}<Button size="sm" onclick={compare}>Compare</Button>{/snippet}
 	 *   </TableToolbar>
 	 *
-	 * Density writes the global "Compact tables" preference, so every table follows it.
-	 */
+		 */
 	import type { Snippet } from 'svelte';
-	import { Segmented } from '$lib/components/ui/segmented';
 	import { Button } from '$lib/components/ui/button';
-	import { getPreferences } from '$lib/stores/preferences.svelte';
-	import Rows3 from '@lucide/svelte/icons/rows-3';
-	import Rows4 from '@lucide/svelte/icons/rows-4';
 	import X from '@lucide/svelte/icons/x';
 
 	interface Props {
@@ -26,16 +22,12 @@
 		summary?: Snippet;
 		bulk?: Snippet;
 		controls?: Snippet;
+		/** @deprecated Ignored: density is the workspace preference (Settings → Workspace). */
 		density?: boolean;
 	}
 
-	let { selectedCount = 0, noun = 'row', onClearSelection, summary, bulk, controls, density = true }: Props = $props();
+	let { selectedCount = 0, noun = 'row', onClearSelection, summary, bulk, controls }: Props = $props();
 
-	const prefs = getPreferences();
-	let densityValue = $state(prefs.compactTables ? 'compact' : 'comfortable');
-	$effect(() => {
-		densityValue = prefs.compactTables ? 'compact' : 'comfortable';
-	});
 </script>
 
 <div class="table-toolbar">
@@ -57,20 +49,6 @@
 	</div>
 	<div class="flex items-center gap-2">
 		{@render controls?.()}
-		{#if density}
-			<!-- Density only changes table rows; mobile card views ignore it. -->
-			<div class="hidden md:block">
-			<Segmented
-				size="sm"
-				aria-label="Row density"
-				bind:value={densityValue}
-				onValueChange={(v) => prefs.setCompactTables(v === 'compact')}
-				items={[
-					{ value: 'comfortable', label: 'Comfortable', icon: Rows3, title: 'Two-line rows with details' },
-					{ value: 'compact', label: 'Compact', icon: Rows4, title: 'One line per row' },
-				]}
-			/>
-			</div>
-		{/if}
+
 	</div>
 </div>

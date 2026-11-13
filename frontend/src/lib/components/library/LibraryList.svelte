@@ -46,8 +46,23 @@
 		if (!k || k === LIBRARY_API_KINDS[kind]) invalidations++;
 	}));
 
-	// Debounced, abortable load whenever a filter changes.
+	// Switching kind (the route reuses this component) starts from a clean slate: a tag or search from
+	// the previous kind would filter the new list to nothing, and its rows must not linger.
+	let shownKind: LibraryApiKind | null = null;
+	$effect.pre(() => {
+		if (shownKind !== null && shownKind !== kind) {
+			q = '';
+			tag = '';
+			page = 1;
+			data = null;
+		}
+		shownKind = kind;
+	});
+
+	// Debounced, abortable load whenever the kind or a filter changes. `kind` is read here, not only
+	// inside the timer, so the effect tracks it.
 	$effect(() => {
+		const k = kind;
 		const params = { q: q.trim(), tag, mine, archived, page, page_size: PAGE_SIZE };
 		void reloadKey;
 		void invalidations;
@@ -56,7 +71,7 @@
 			loading = data === null;
 			error = '';
 			try {
-				data = await listLibrary(kind, params, { signal: controller.signal });
+				data = await listLibrary(k, params, { signal: controller.signal });
 			} catch (e) {
 				if (!isAbortError(e)) error = formatApiError(e, `Could not load ${info.plural.toLowerCase()}.`);
 			} finally {

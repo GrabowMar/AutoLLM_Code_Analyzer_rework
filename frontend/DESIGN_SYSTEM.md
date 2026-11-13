@@ -102,6 +102,17 @@ Title [?] [meta] … [actions]`, then a one-line `description` (xs, muted). The 
 - Vertical rhythm: `space-y-4` between page sections, `gap-4` inside grids, `gap-3` in KPI rows.
 - Primary action is the last button in `actions`, `size="sm"`; secondary actions `variant="outline"`.
 
+### List pages and headline figures
+
+- **Header stats:** every list page puts its counts in `PageHeader` as `.header-stats` (`<span class="header-stat"><b>203</b> apps</span>`), computed for the current filters.
+- **List toolbar:** the top strip of the table card is `.tb-bar`: a `.tb-search` input first, then one `FilterMenu`
+  (`$lib/components/FilterMenu.svelte`, single or `multiple`, `hint` = count) per facet, toggles as `.fm-trigger` buttons,
+  and "Clear N" when filters are set. Filters and sort live in the URL. No hidden "Filters ▾" panels, no stacked full-width selects.
+- **Figure strip:** headline figures are one card, `.fig-strip` > `.fig-cell` > `.fig-label` / `.fig-value` / `.fig-sub`;
+  `data-tone="good|warn|bad"` tints a verdict. Not measured is "—", never 0.
+- **Rows:** long ids shortened with the full value in `title`; model ids show the last segment with the endpoint muted;
+  ratios get a thin bar beside the number; slow loads show skeleton rows, not a bare "loading …" line.
+
 ## Shared components (`src/lib/components/`)
 
 | Need                         | Use                                                                          | Not                                                    |
@@ -219,12 +230,14 @@ browser-only cache); loading uses an inline spinner or `LoadingState`, failures 
 
 | Component / module                        | Use for                                                                                                                                    |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `StudyBuilder`                            | the single-page design form (`/experiments/new`): numbered `ComposerSection`s; sticky `PlanRail` from 56rem, `StartBar` below              |
-| `ComposerSection`, `ComposerSectionNav`   | one numbered step (`done` / `meta` / `invalid` / `collapsible`); the section index above the plan on the rail                              |
+| `StudyBuilder`                            | the step-by-step experiment builder (`/experiments/new`); see “Experiment builder” below                                                   |
+| `BuilderStepper`, `StepPanel`             | the builder's non-linear progress row (state + summary per step) and the frame of the open step (heading, lead, Back / Continue)           |
+| `BlueprintRail`                           | the builder's sticky plan: cells as arithmetic, cost vs cap, to-dos and problems per step, Review & launch                                 |
+| `OptionCards`, `BuilderGroup`             | a one-of-N choice that needs a sentence per option (radiogroup of cards); a titled group in a step, optionally a folded `<details>`        |
+| `ComposerSection`, `ComposerSectionNav`   | numbered form sections with a section index (the analysis composer, `/analysis/create`)                                                    |
 | `FactorTable`, `LevelPicker`              | factors × levels; the role (crossed / fixed / fraction) follows the level count; an empty factor shows "default: …"                        |
 | `ResourcePolicyPicker`                    | tier cards (Frugal / Standard / Generous) + Custom + `ResourcePolicyEditor`; "Save as preset" pins a new immutable preset                  |
 | `EvaluationSection`                       | the evaluation level and what it measures; unmeasured parts preview as "not measured", never as 0                                          |
-| `PlanRail`                                | `RunFormula`, estimate vs cap with `CostByLevelBar`, issues with quick fixes, cell sampler → `ResolvedCellDrawer` / `CellDetailView`       |
 | `LaunchDialog`                            | the cost confirmation before Start: expected / p90 / worst case; typed p90 confirmation above the preset's threshold                       |
 | `study/StudyMasthead`                     | the study page header (replaces `PageHeader` there): accession id, hypothesis, spec strip                                                  |
 | `study/StudySection`, `study/StudyFigure` | a numbered section ("2.3 Conditions ───") with a lead; a numbered figure / table with title, controls and a caption                        |
@@ -235,15 +248,39 @@ browser-only cache); loading uses an inline spinner or `LoadingState`, failures 
 | `layout/SpendChip`                        | the top-bar spend indicator                                                                                                                |
 | `shared/*`                                | generic pickers moved from v2 `generator/`: `ModelPicker`, `LLMParamsEditor`, `HarnessOptionsEditor`, `OpenRouterKeyBanner`, `NumberField` |
 
-- **Steps**: required steps pass `done` (the number badge turns into a check) and `meta` ("3 selected"); a
-  step holding an unapplied value passes `invalid` (alert badge, red border). Optional steps are
-  `collapsible`: folded to a one-line `summary` of what applies now ("Frugal v1 · … · no overrides") unless
-  the draft already overrides something; the body stays mounted so its fields keep validating, and an
-  `invalid` step unfolds itself.
-- **Rail** (≥ 56rem container): `ComposerSectionNav` above the plan. The plan opens with `RunFormula` —
-  `2 tasks × 2 models × 1 harness × 3 repeats = 12 cells` — whose empty factors are dashed and link to their
-  step (neutral, no error before the user acts). Narrower, the plan follows the form and `StartBar` sticks
-  to the bottom.
+- **Experiment builder** (`/experiments/new`): seven steps — Setup · Models · Tasks (slot: Targets) ·
+  Treatments · Runs & budget · Measurement · Review — one open at a time in a `StepPanel`, under a
+  `BuilderStepper` and beside the `BlueprintRail` (≥ 56rem container; narrower, a sticky bottom bar). Step
+  names, required choices and the issue → step mapping live in `builder/steps.ts` (unit-tested).
+  - Non-linear: any step opens from the stepper; the open step is the URL hash (`#models`); opening one
+    focuses its heading. A fresh `?models=` link opens on Tasks, a resumed complete draft on Review.
+  - Required choices are a neutral to-do in the rail, never red errors before the user acts. "Continue"
+    past an unfinished required step first explains what is missing (a second press goes on) and the step
+    turns amber in the stepper; server errors turn it red.
+  - Launch is one action on Review: save → freeze the current plan → `LaunchDialog` (cost confirmation) →
+    attach the post-run chosen in Measurement (`launch.ts`, never twice) → launch.
+  - Before the first server save (it needs models, tasks and a stack) the design is kept in
+    `sessionStorage` and restored with a "Start over" option; after it, the draft autosaves server-side.
+    An edit that empties a required choice of a saved draft is held (`BuilderState.held`), shown as a to-do,
+    and never sent as a save the server would refuse.
+  - Accessibility (audited with axe + Playwright at 1440, 375 and 812×375): one atomic `role=status`
+    message for plan updates (never a bare number per tile); `scroll-padding` on the root while the builder
+    is mounted so focus never lands under the sticky app bar or bottom bar; the bottom bar stops being
+    sticky on short (landscape) viewports; checkboxes and switches extend their pointer target to ≥ 24px
+    with an `::after`; truncated text carries a `title`; no text under 11px; state never by color alone.
+  - Bulk clears (all models, all tasks) are undoable with a toast action instead of a confirmation.
+- **Pick lists** (`ModelPicker`, `TaskPicker`, `LibraryRefPicker`): search matches every word anywhere
+  (`$lib/utils/search`) and marks it (`Highlight`); Escape in the search clears it; "no match" offers a
+  clear-filters action. `ModelPicker` adds capability chips with live counts (reasoning, vision, open
+  weights, free, new), a sort (by vendor / cheapest / longest context / newest; routers with variable
+  prices sort last), no accordions: rows sit under light sticky vendor/endpoint labels below a sticky
+  column header (Model · Abilities · Context · Price / 1M) on one grid, so numbers align; absent abilities
+  stay as faint placeholders; selected rows carry an accent bar; rows render 80 per page ("Show more").
+  The builder's Models step puts the chosen models in a full-width tray above the catalog. Long chip rows show the 8 most common
+  plus an operable "+N more". Logos beside their own name are `ProviderIcon decorative`.
+- **Collapsible groups** (`BuilderGroup collapsible`) fold settings with good defaults (seeds, grid &
+  scheduling) to a one-line `summary` of what applies now; they open by themselves when they hold a
+  non-default value.
 - Sparse editors never emit `null`/`''`; a field holding a value that wasn't applied (out of range, bad
   JSON) sets the bindable `invalid` output — block submit on it.
 - Vocabulary: **Harness preset**, **Sampling preset**, **Budget preset** (the `ResourcePolicy` library
@@ -359,6 +396,33 @@ Used by `/analysis`, `/analysis/create`, `/analysis/[id]` and the app page's Ana
   show it as a clean "0 findings".
 - Live pages show elapsed clocks from `started_at` and the run's `phase`; a long tool is legitimately quiet, so
   the watcher keeps a slow poll even with SSE open.
+
+## Report building blocks (`src/lib/components/reports/`)
+
+Reports are set like papers, in the study record's idiom (ui-ux-pro-max query `"research report document academic
+data tables" --design-system --density 7 --variance 3 --motion 2`: Swiss minimal + serif headings, mapped onto
+this system's tokens and fonts).
+
+| Component / module  | Use for                                                                                                                                                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReportMasthead`    | report header (replaces `PageHeader`): `REPORT · TYPE · RPT-XXXXXXXX` eyebrow, serif title, status + dates, note as a pull quote, spec strip (scope · window · analysis · randomisation) from the config                                                                    |
+| `ReportKeyFigures`  | the summary as one hairline-divided panel: leader (wide), rates with a neutral meter, counts, `by_*` maps as ranked share bars                                                                                                                                              |
+| `ReportTableFigure` | one server table as "Table N" (`StudyFigure`), laid out by shape: Item/Value → definition list, Level/Finding → threats list, else a data table (shares get meters, tool levels chips, all-blank columns hidden and named in the caption, long tables folded after 12 rows) |
+| `ReportContents`    | numbered, scroll-following contents: sticky rail from `xl`, folded disclosure below                                                                                                                                                                                         |
+| `ReportChart`       | a table as horizontal bars (Table / Chart switch): one measure at a time (rates with an interval first), `chart-1` bars, 95% CI whiskers, values printed beside, per-row hover/focus tooltip; compare overlay in `chart-2` with a legend                                    |
+| `WhatIfRanking`     | study reports: TOPSIS re-ranked live from weight sliders (`ranking.ts`, a port of `mcdm.topsis_scores`; the report's weights reproduce its scores), rank moves as arrow + number                                                                                            |
+| `ReportNotebook`    | the Notebook tab: JupyterLite in a same-origin iframe; writes `reports/RPT-…/report.json` + a generated `report.ipynb` (`notebook.ts`) through `window.jupyterapp`, opens it in the app's theme                                                                             |
+| `compare.ts`        | `?compare=<id>`: tables matched by title (model ≡ condition grouping), rows by first cell, signed deltas between same-unit numbers                                                                                                                                          |
+| `catalog.ts`        | report types: label, icon, group (research / platform), purpose, what it needs, what it contains                                                                                                                                                                            |
+| `format.ts`         | pure helpers (`planTable`, `shareOf`, `specItems`, `keyFigures`, `headline`, …), unit-tested                                                                                                                                                                                |
+
+- Cells stay as the server formatted them (the Markdown/LaTeX exports' text); the page only decides layout.
+  `-` renders `—` (not measured), never 0. Meters are neutral; only a leader held by ≤ 2 rows (and not by every
+  row) turns primary.
+- Every data table has a toolbar strip: filter (> 8 rows), Columns (> 4), CSV and copy-as-Markdown of what is shown;
+  headers sort on click (numbers descending first, blanks last). Compare deltas are neutral ink ("+0.011", "−5 pp").
+- `/reports/create` is one page: type (radio cards, grouped) → scope and options → optional title/note, with a
+  sticky preview (auto title, scope, contents, what is missing) holding the Generate button.
 
 ## Color & type rules
 

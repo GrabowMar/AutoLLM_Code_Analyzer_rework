@@ -11,19 +11,21 @@
 	import Code from '@lucide/svelte/icons/code';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { ScoreCell, rowLink, tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
 	import { modelPathSegment } from '$lib/api/models';
 	import {
 		getStatisticsDashboard,
+		getStatisticsOverview,
 		getStatisticsTrends,
 		type StatisticsDashboard,
+		type StatisticsOverview,
 		type AnalysisTrends,
 	} from '$lib/api/client';
 
 	let data = $state<StatisticsDashboard | null>(null);
+	let overview = $state<StatisticsOverview | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -57,7 +59,12 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		getStatisticsOverview()
+			.then((o) => (overview = o))
+			.catch(() => {});
+		void load();
+	});
 
 	$effect(() => {
 		void trendDays;
@@ -105,6 +112,16 @@
 		return `${m}m ${s}s`;
 	}
 
+	function compact(n: number): string {
+		return n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n);
+	}
+
+	/** "Generation run (App (agentic)) — model": lead with the model, the run kind muted (as on the dashboard). */
+	function activityParts(title: string): { main: string; sub: string } {
+		const m = title.replace(/^(Generation|Analysis)\s+/i, '').match(/^run \((.*)\) — (.+)$/);
+		return m ? { main: m[2], sub: m[1] } : { main: title, sub: '' };
+	}
+
 	function fmtNumber(n: number): string {
 		return n.toLocaleString();
 	}
@@ -131,15 +148,17 @@
 </script>
 
 {#snippet headerStats()}
-	{#if data}
-		{@const o = data.overview}
+	{@const o = data?.overview ?? overview}
+	{#if !o}
+		<div class="header-stats"><span class="header-stat text-muted-foreground">loading…</span></div>
+	{:else}
 		<div class="header-stats">
 			<span class="header-stat"><b>{fmtNumber(o.total_analyses)}</b> analyses</span>
 			<span class="header-stat"><b>{fmtNumber(o.analyses_completed)}</b> completed</span>
 			<span class="header-stat" title="Analyses that completed, of those that finished (partial and failed count against). Apps: {fmtPct(o.apps_success_rate)} of finished generations completed."><b>{fmtPct(o.analyses_success_rate)}</b> success</span>
 			<span class="header-stat"><b>{fmtDuration(o.avg_analysis_duration_seconds)}</b> avg per analysis</span>
-			<span class="header-stat" title="{new Set(data.models.map((m) => m.provider)).size} providers"><b>{fmtNumber(o.models_in_use)}</b> active models</span>
-			<span class="header-stat"><b>{data.analyzer_health.online}/{data.analyzer_health.total}</b> analyzers online</span>
+			<span class="header-stat" title={data ? `${new Set(data.models.map((m) => m.provider)).size} providers` : undefined}><b>{fmtNumber(o.models_in_use)}</b> active models</span>
+			{#if data}<span class="header-stat"><b>{data.analyzer_health.online}/{data.analyzer_health.total}</b> analyzers online</span>{/if}
 		</div>
 	{/if}
 {/snippet}
@@ -148,7 +167,7 @@
 	<PageHeader
 		title="Statistics"
 		description="Platform-wide analytics and performance metrics."
-		children={data ? headerStats : undefined}
+		children={headerStats}
 	>
 		{#snippet meta()}
 			{#if data}
@@ -162,7 +181,26 @@
 	</PageHeader>
 
 	{#if loading}
-		<LoadingState label="loading statistics" />
+		<div class="space-y-4" aria-busy="true" aria-label="Loading statistics">
+			<div class="grid gap-4 lg:grid-cols-2">
+				{#each [0, 1] as i (i)}
+					<div class="rounded-md border border-border bg-card p-4">
+						<span class="skel h-4 w-40"></span>
+						<div class="mt-4 flex h-36 items-end gap-1.5">
+							{#each Array(10) as _, j (j)}<span class="skel flex-1" style:height="{20 + ((j * 37) % 70)}%"></span>{/each}
+						</div>
+					</div>
+				{/each}
+			</div>
+			<div class="rounded-md border border-border bg-card">
+				<div class="border-b border-border p-4"><span class="skel h-4 w-36"></span></div>
+				{#each Array(5) as _, i (i)}
+					<div class="flex items-center gap-4 border-b border-border/60 px-4 py-3 last:border-0">
+						<span class="skel h-3.5 w-48"></span>{#each Array(5) as __, j (j)}<span class="skel ml-auto h-3 w-12"></span>{/each}
+					</div>
+				{/each}
+			</div>
+		</div>
 	{:else if error}
 		<ErrorAlert message={error} onretry={load} />
 	{:else if data}
@@ -190,7 +228,9 @@
 				</Card.Header>
 				<Card.Content>
 					{#if trendsLoading}
-						<LoadingState label="loading trends" class="h-40 py-0" />
+						<div class="flex h-40 items-end gap-1.5" aria-busy="true">
+							{#each Array(10) as _, j (j)}<span class="skel flex-1" style:height="{20 + ((j * 37) % 70)}%"></span>{/each}
+						</div>
 					{:else}
 						{@const activeTrends = trendsData ?? data.trends}
 						<div class="flex h-40 items-end gap-1.5">
@@ -200,7 +240,7 @@
 										class="w-full rounded-t bg-chart-1 transition-all duration-300"
 										style="height: {Math.round((point.total / trendMax) * 140)}px"
 									></div>
-									<span class="text-[11px] text-muted-foreground">{dayLabel(point.date)}</span>
+									{#if activeTrends.series.length <= 14}<span class="text-[11px] text-muted-foreground">{dayLabel(point.date)}</span>{/if}
 								</div>
 							{/each}
 						</div>
@@ -280,7 +320,7 @@
 									{@const provider = modelNamePrefix(m.name) || m.provider}
 									<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
 									<tr class={href ? 'row-link' : ''} onclick={href ? rowLink(href) : undefined}>
-										<td class="max-w-0 w-[30%]">
+										<td class="max-w-0 w-[30%] min-w-[10rem]">
 											<a
 												href={href ?? '/models'}
 												class="block truncate font-medium hover:text-primary"
@@ -392,11 +432,11 @@
 					</Card.Header>
 					<Card.Content class="p-0">
 						{@const cg = data.code_generation}
-						<dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-3">
-							{#each [{ label: 'Apps generated', value: fmtNumber(cg.total_apps) }, { label: 'Success rate', value: fmtPct(cg.success_rate) }, { label: 'Avg gen time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Source lines', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Tokens', value: fmtNumber(cg.total_tokens) }, { label: 'Cost', value: fmtCost(cg.total_cost_usd) }] as stat}
-								<div>
-									<dt class="kpi-label">{stat.label}</dt>
-									<dd class="font-mono text-base font-medium tabular-nums">{stat.value}</dd>
+						<dl class="fig-strip rounded-none border-0 shadow-none sm:[grid-template-columns:repeat(3,minmax(0,1fr))]">
+							{#each [{ label: 'Apps generated', value: fmtNumber(cg.total_apps) }, { label: 'Success rate', value: fmtPct(cg.success_rate) }, { label: 'Avg gen time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Source lines', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Tokens', value: compact(cg.total_tokens) }, { label: 'Cost', value: fmtCost(cg.total_cost_usd) }] as stat (stat.label)}
+								<div class="fig-cell">
+									<dt class="fig-label">{stat.label}</dt>
+									<dd class="fig-value">{stat.value}</dd>
 								</div>
 							{/each}
 						</dl>
@@ -415,16 +455,19 @@
 					{#if data.recent_activity.length === 0}
 						<EmptyState compact title="No recent activity" />
 					{:else}
-						{#each data.recent_activity.slice(0, 8) as item}
-							<div class="flex items-center justify-between gap-2 text-xs">
-								<div class="flex min-w-0 items-center gap-2">
+						{#each data.recent_activity.slice(0, 8) as item (item.kind + item.id)}
+							{@const p = activityParts(item.title)}
+							<a
+								href={item.kind === 'analysis' ? `/analysis/${item.id}` : `/samples/${item.id}`}
+								class="-mx-1 flex items-center justify-between gap-2 rounded px-1 py-0.5 text-xs transition-colors hover:bg-surface-2"
+								title={item.title}
+							>
+								<span class="flex min-w-0 items-center gap-2">
 									<Badge variant="outline" class="text-[11px] capitalize">{item.kind}</Badge>
-									<span class="truncate">{item.title}</span>
-								</div>
-								<span class="shrink-0 text-[11px] text-muted-foreground">
-									{new Date(item.created_at).toLocaleDateString()}
+									<span class="truncate">{p.main}{#if p.sub}<span class="text-muted-foreground">{` · ${p.sub}`}</span>{/if}</span>
 								</span>
-							</div>
+								<span class="shrink-0 text-[11px] text-muted-foreground">{new Date(item.created_at).toLocaleDateString()}</span>
+							</a>
 						{/each}
 					{/if}
 				</Card.Content>
@@ -432,3 +475,22 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.skel {
+		display: block;
+		border-radius: 0.25rem;
+		background: color-mix(in oklab, var(--muted-foreground) 18%, transparent);
+		animation: skel-pulse 1.4s ease-in-out infinite;
+	}
+	@keyframes skel-pulse {
+		50% {
+			opacity: 0.45;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.skel {
+			animation: none;
+		}
+	}
+</style>

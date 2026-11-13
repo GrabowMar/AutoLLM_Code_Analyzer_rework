@@ -32,7 +32,7 @@
 	const TONES = { error: toneClasses.danger, warn: toneClasses.warning, info: toneClasses.neutral } as const;
 	const ICONS = { error: CircleAlert, warn: TriangleAlert, info: Info } as const;
 	const linkClass =
-		'cursor-pointer rounded font-medium text-primary underline underline-offset-2 hover:decoration-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
+		'inline-flex min-h-6 cursor-pointer items-center rounded font-medium text-primary underline underline-offset-2 hover:decoration-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
 </script>
 
 {#if groups.length > 0}

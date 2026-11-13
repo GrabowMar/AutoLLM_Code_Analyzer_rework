@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from ninja import Router
+from ninja import Schema
 from ninja.errors import HttpError
 
 from backend.system import services
+from backend.system.services import footprint
 
 router = Router(tags=["system"])
 
@@ -110,3 +113,67 @@ def maintenance_purge_orphan_containers(request) -> Any:
 def maintenance_clear_caches(request) -> Any:
     _assert_staff(request)
     return services.clear_caches()
+
+
+# ---------------------------------------------------------------------------
+# App footprint (preview apps on the apps daemon)
+# ---------------------------------------------------------------------------
+
+
+class FootprintSettingsIn(Schema):
+    idle_stop_enabled: bool | None = None
+    idle_stop_minutes: int | None = None
+    max_running_apps: int | None = None
+    app_mem_limit_mb: int | None = None
+    auto_prune_enabled: bool | None = None
+    auto_prune_interval_hours: int | None = None
+
+
+@router.get("/footprint", response=dict)
+def footprint_overview(request) -> Any:
+    _assert_staff(request)
+    return footprint.overview()
+
+
+@router.patch("/footprint/settings", response=dict)
+def footprint_update_settings(request, payload: FootprintSettingsIn) -> Any:
+    _assert_staff(request)
+    try:
+        return footprint.update_settings(payload.dict(exclude_unset=True), request.auth)
+    except ValidationError as exc:
+        raise HttpError(422, "; ".join(f"{k}: {' '.join(v)}" for k, v in exc.message_dict.items())) from exc
+
+
+@router.post("/footprint/stop-all", response=dict)
+def footprint_stop_all(request) -> Any:
+    _assert_staff(request)
+    return footprint.stop_all_apps(request.auth)
+
+
+@router.post("/footprint/remove", response=dict)
+def footprint_remove(request, include_running: bool = False) -> Any:
+    _assert_staff(request)
+    return footprint.remove_apps(request.auth, include_running=include_running)
+
+
+@router.post("/footprint/stop-idle", response=dict)
+def footprint_stop_idle(request, idle_minutes: int = 60) -> Any:
+    _assert_staff(request)
+    if idle_minutes < 1:
+        raise HttpError(422, "idle_minutes must be at least 1")
+    return footprint.stop_idle_apps(idle_minutes=idle_minutes)
+
+
+@router.post("/footprint/apply-mem-limit", response=dict)
+def footprint_apply_mem_limit(request) -> Any:
+    _assert_staff(request)
+    return footprint.apply_mem_limit()
+
+
+@router.post("/footprint/prune", response=dict)
+def footprint_prune(request, aggressive: bool = False) -> Any:
+    _assert_staff(request)
+    result = footprint.prune_apps_daemon(aggressive=aggressive)
+    if result.get("busy"):
+        raise HttpError(409, "A prune is already running")
+    return result

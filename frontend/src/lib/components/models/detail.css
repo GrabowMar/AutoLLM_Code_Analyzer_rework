@@ -1,0 +1,203 @@
+/*
+ * Model detail page — shared section vocabulary for the tabs (imported once by the route).
+ * Swiss / data-dense: hairline sections, mono uppercase labels, big mono figures, neutral bars.
+ *   .md-sec            a section card; .md-sec-head (title + aside) on top
+ *   .md-figs / .md-fig a row of figures (label / value / sub), hairline-separated
+ *   .md-rate           a 0–100% bar with a Wilson-interval whisker
+ *   .md-more           the "Show all N" footer button of a truncated list
+ */
+.md-sec {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+.md-sec-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  padding: 0.875rem 1.25rem 0.625rem;
+  border-bottom: 1px solid var(--border);
+}
+.md-sec-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.md-sec-desc {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.md-sec-aside {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.md-sec-body {
+  padding: 1rem 1.25rem;
+}
+.md-note {
+  padding: 0.625rem 1.25rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.md-figs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+.md-fig {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.875rem 1.25rem 1rem;
+  border-right: 1px solid var(--border);
+}
+.md-fig:last-child {
+  border-right: 0;
+}
+.md-label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+.md-val {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.md-val.is-muted {
+  color: var(--muted-foreground);
+}
+.md-sub {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Rate bar: fill = point estimate, whisker = Wilson 95% interval. */
+.md-rate {
+  position: relative;
+  display: block;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+.md-rate-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--primary) 75%, var(--muted-foreground));
+}
+.md-rate-ci {
+  position: absolute;
+  top: 50%;
+  height: 0.875rem;
+  transform: translateY(-50%);
+  border-inline: 1.5px solid var(--foreground);
+  opacity: 0.55;
+}
+.md-rate-ci::after {
+  content: "";
+  position: absolute;
+  inset: 50% 0 auto 0;
+  height: 1.5px;
+  background: var(--foreground);
+}
+
+/* Neutral magnitude bar (counts, shares). */
+.md-bar {
+  display: block;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.md-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+}
+
+.md-more {
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition:
+    color 150ms,
+    background-color 150ms;
+}
+.md-more:hover {
+  color: var(--foreground);
+  background: var(--surface-2, var(--muted));
+}
+.md-more:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.md-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  padding: 0 0.5rem;
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.md-skel {
+  display: block;
+  border-radius: 0.25rem;
+  background: color-mix(in oklab, var(--muted-foreground) 18%, transparent);
+  animation: md-skel-pulse 1.4s ease-in-out infinite;
+}
+@keyframes md-skel-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .md-skel {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .md-sec-head,
+  .md-sec-body,
+  .md-note {
+    padding-inline: 1rem;
+  }
+  .md-fig {
+    padding-inline: 1rem;
+  }
+  .md-figs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

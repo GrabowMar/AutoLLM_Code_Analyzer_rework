@@ -62,6 +62,12 @@
 	});
 
 	function setTab(next: string) {
+		// From far down the page, bring the new tab's top up under the sticky tab bar.
+		const header = document.querySelector<HTMLElement>('header.rh');
+		if (header) {
+			const target = header.getBoundingClientRect().bottom + window.scrollY - 48;
+			if (window.scrollY > target) window.scrollTo({ top: target, behavior: 'instant' });
+		}
 		const url = new URL(page.url);
 		if (next === DEFAULT_TAB) url.searchParams.delete('tab');
 		else url.searchParams.set('tab', next);

@@ -20,6 +20,7 @@ import type {
   RunFileOut,
   RunListOut,
   RunListQuery,
+  RunFacetsOut,
   RunManifestOut,
   RunOut,
   RunTrajectoryOut,
@@ -72,6 +73,13 @@ export function listSamples(
   options?: RequestOptions,
 ): Promise<Page<RunListOut>> {
   return getJson(`/runs/${buildQuery({ ...query })}`, options);
+}
+
+export function getSampleFacets(
+  query: RunListQuery = {},
+  options?: RequestOptions,
+): Promise<RunFacetsOut> {
+  return getJson(`/runs/facets/${buildQuery({ ...query })}`, options);
 }
 
 export function getSample(

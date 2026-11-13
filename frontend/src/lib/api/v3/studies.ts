@@ -1,7 +1,7 @@
 /**
  * Studies client (spec 9.4), mounted at `/api/generation/`.
  *
- * Every helper takes an optional `{signal}` so a superseded request (the PlanRail's debounced resolve, a
+ * Every helper takes an optional `{signal}` so a superseded request (the builder's debounced resolve, a
  * results refetch) can be aborted. Errors are the `apiFetch` throw: the `ErrorOut` body
  * (`{detail, code, issues?}`), readable with `formatApiError` / `apiErrorStatus` from `$lib/api/core`.
  * Operation ids (backend `study/api.py`) are noted per helper.
@@ -16,6 +16,8 @@ import type {
   CloneIn,
   ConditionPauseOut,
   CronPreviewOut,
+  DryRunIn,
+  DryRunOut,
   ExpandOut,
   LaunchIn,
   LaunchOut,
@@ -105,6 +107,14 @@ export function createAdhocStudy(
   options?: RequestOptions,
 ): Promise<AdhocOut> {
   return send("POST", "/studies/adhoc/", body, options);
+}
+
+/** `generation_studies_dry_run`: everything a generation would receive, without generating. */
+export function dryRunDesign(
+  body: DryRunIn,
+  options?: RequestOptions,
+): Promise<DryRunOut> {
+  return send("POST", "/studies/dry-run/", body, options);
 }
 
 /** `generation_studies_cron_preview`. */

@@ -1,13 +1,15 @@
 <script lang="ts">
 	/**
 	 * /library — the Library home: every kind as a card (what it holds, how many there are), grouped by
-	 * the question it answers about a run, plus packages (import/export) and the prompt playground.
+	 * the question it answers about a run, plus packages (import/export), the prompt playground and the
+	 * generation dry run.
 	 */
 	import { Button } from '$lib/components/ui/button';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import SectionHeading from '$lib/components/SectionHeading.svelte';
 	import Package from '@lucide/svelte/icons/package';
 	import Play from '@lucide/svelte/icons/play';
+	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import { KIND_GROUPS, KIND_INFO, PackagesDialog, libraryStore } from '$lib/components/library';
 
 	const counts = $derived(libraryStore.counts());
@@ -25,9 +27,18 @@
 				hides a slug from pickers but keeps every version for the experiments that pin it. System entities are seeded; fork one to make your own.
 			</p>
 		{/snippet}
+		{@const total = Object.values(counts).reduce((x: number, n) => x + (typeof n === 'number' ? n : 0), 0)}
+		<div class="header-stats">
+			<span class="header-stat"><b>{total || '—'}</b> entities</span>
+			<span class="header-stat"><b>{counts.task ?? '—'}</b> tasks</span>
+			<span class="header-stat"><b>{counts.stack ?? '—'}</b> stacks</span>
+			<span class="header-stat"><b>{counts.prompt ?? '—'}</b> prompt templates</span>
+			<span class="header-stat"><b>{KIND_GROUPS.length}</b> groups</span>
+		</div>
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={() => (packagesOpen = true)}><Package />Packages</Button>
-			<Button size="sm" href="/library/prompts/playground"><Play />Prompt playground</Button>
+			<Button variant="outline" size="sm" href="/library/prompts/playground"><Play />Prompt playground</Button>
+			<Button size="sm" href="/library/dry-run"><FlaskConical />Generation dry run</Button>
 		{/snippet}
 	</PageHeader>
 

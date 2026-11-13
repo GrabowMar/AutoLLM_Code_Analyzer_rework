@@ -45,7 +45,7 @@
 	<title>{study.name} · LLM Lab</title>
 </svelte:head>
 
-<header class="overflow-clip rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+<header class="overflow-clip rounded-md border border-border bg-card shadow-[var(--shadow-card)] {nav ? 'sm-has-nav' : ''}">
 	<div class="flex flex-wrap items-start gap-x-4 gap-y-3 px-4 pb-3 pt-3.5 sm:px-5">
 		<a href="/experiments" class="page-header-back mt-0.5" aria-label="Back to Experiments" title="Back to Experiments">
 			<ArrowLeft class="size-4" aria-hidden="true" />
@@ -65,7 +65,7 @@
 			<p class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
 				<StatusBadge status={study.status} tone={STUDY_STATUS_TONES[study.status]} />
 				{#if study.status === 'paused' && study.pause_reason}<span class="text-warning-fg">{pauseLabel(study.pause_reason)}</span>{/if}
-				{#if study.stop_reason}<span class="text-warning-fg">stopped: {study.stop_reason.code.replace(/_/g, ' ')}{study.stop_reason.detail ? ` (${study.stop_reason.detail})` : ''}</span>{/if}
+				{#if study.stop_reason}<span class="text-warning-fg">stopped: {study.stop_reason.code.replace(/_/g, ' ')}{study.stop_reason.detail ? ` (${study.stop_reason.detail.replace(/(\d+\.\d{2})\d+/g, '$1')})` : ''}</span>{/if}
 				{#if study.created_at}<span>Registered {dateFmt.format(new Date(study.created_at))}</span>{/if}
 				{#if study.launched_at}<span aria-hidden="true">·</span><span>launched {dateFmt.format(new Date(study.launched_at))}</span>{/if}
 				{#if study.completed_at}<span aria-hidden="true">·</span><span>finished {dateFmt.format(new Date(study.completed_at))}</span>{/if}
@@ -116,5 +116,70 @@
 		</div>
 	</dl>
 	{#if progress}<div class="border-t border-border/60 px-4 py-2.5 sm:px-5">{@render progress()}</div>{/if}
-	{#if nav}<div class="page-header-nav">{@render nav()}</div>{/if}
 </header>
+{#if nav}
+	<!-- Sticky under the app top bar, so the sections stay one click away on long pages. -->
+	<div class="sm-sticky">
+		<span class="sm-mini" title={study.name}>{study.name}</span>
+		<div class="min-w-0 flex-1 overflow-x-auto">{@render nav()}</div>
+	</div>
+{/if}
+
+<style>
+	.sm-has-nav {
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
+		margin-bottom: 0 !important;
+	}
+	.sm-sticky {
+		position: sticky;
+		top: 3rem;
+		z-index: 20;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-top: 0 !important;
+		border: 1px solid var(--border);
+		border-top-color: color-mix(in oklab, var(--border) 60%, transparent);
+		border-radius: 0 0 var(--radius) var(--radius);
+		background: color-mix(in oklab, var(--card) 92%, transparent);
+		backdrop-filter: blur(8px);
+		padding-inline: 0.5rem;
+	}
+	.sm-sticky :global([role='tablist']) {
+		border-bottom: 0;
+	}
+	/* The name shows only once the masthead has scrolled away (pure CSS: scroll-driven where supported). */
+	.sm-mini {
+		display: none;
+		max-width: 20rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		padding-left: 0.5rem;
+		font-family: var(--font-display);
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+	@supports (animation-timeline: scroll()) {
+		@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+			.sm-mini {
+				display: block;
+				animation: sm-reveal linear both;
+				animation-timeline: scroll(root);
+				animation-range: 260px 300px;
+			}
+		}
+	}
+	@keyframes sm-reveal {
+		from {
+			opacity: 0;
+			max-width: 0;
+			padding-left: 0;
+		}
+		to {
+			opacity: 1;
+			max-width: 20rem;
+		}
+	}
+</style>

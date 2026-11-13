@@ -8,7 +8,8 @@
 	 * Used by `ResolvedCellDrawer` (builder) and `/experiments/[id]/cells/[cell]`.
 	 *
 	 * Props: `studyId`, `planHash`, `cellKey`, `compareKeys` (cell keys offered for the diff),
-	 * `onedit(span, role)` (omit for read-only).
+	 * `onedit(span, role)` (omit for read-only), `preloaded` (a detail already in hand, e.g. from
+	 * `POST /studies/dry-run/`: nothing is fetched and the diff is hidden, since that plan is not kept).
 	 */
 	import { untrack } from 'svelte';
 	import { diffPlanCells, getPlanCell } from '$lib/api/v3/studies';
@@ -31,9 +32,10 @@
 		cellKey: string;
 		compareKeys?: string[];
 		onedit?: (span: SourceSpanOut, role: string) => void;
+		preloaded?: ResolvedCellDetailOut | null;
 	}
 
-	let { studyId, planHash, cellKey, compareKeys = [], onedit }: Props = $props();
+	let { studyId, planHash, cellKey, compareKeys = [], onedit, preloaded = null }: Props = $props();
 
 	let detail = $state<ResolvedCellDetailOut | null>(null);
 	let error = $state('');
@@ -66,6 +68,16 @@
 		void studyId;
 		void planHash;
 		void cellKey;
+		const given = preloaded;
+		if (given) {
+			untrack(() => {
+				detail = given;
+				error = '';
+				if (!given.stimuli.some((s) => s.role === role))
+					role = given.stimuli.find((s) => s.role === 'user')?.role ?? given.stimuli[0]?.role ?? '';
+			});
+			return;
+		}
 		untrack(() => {
 			against = '';
 			diff = null;
@@ -249,7 +261,7 @@
 			</div>
 		</section>
 
-		{#if compareKeys.filter((k) => k !== cellKey).length > 0}
+		{#if !preloaded && compareKeys.filter((k) => k !== cellKey).length > 0}
 			<section class="space-y-2">
 				<Label for="cell-diff">Diff against</Label>
 				<Select.Simple

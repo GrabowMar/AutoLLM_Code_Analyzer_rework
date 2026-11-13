@@ -13,6 +13,14 @@
 	}
 
 	let { samples }: Props = $props();
+
+	// v3 model ids are "<endpoint>/<model>" slugs: lead with the model, endpoint muted after it.
+	function splitModel(m: string): { name: string; via: string } {
+		const short = shortModelName(m);
+		const i = short.lastIndexOf('/');
+		if (i > 0) return { name: short.slice(i + 1), via: short.slice(0, i) };
+		return { name: short, via: modelNamePrefix(m) };
+	}
 </script>
 
 <Card.Root class="gap-0 overflow-clip py-0">
@@ -48,12 +56,12 @@
 						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
 						<tr class="row-link" onclick={rowLink(href)}>
 							<td data-label="Sample">
-								<a {href} class="block max-w-[26rem] truncate font-medium transition-colors hover:text-primary" title={app.name}>{app.name}</a>
+								<a {href} class="block max-w-[12rem] truncate font-medium xl:max-w-[26rem] transition-colors hover:text-primary" title={app.name}>{app.name}</a>
 							</td>
 							<td class="hide-mobile" data-label="Model">
 								{#if app.model}
-									{@const provider = modelNamePrefix(app.model)}
-									<span class="block max-w-[18rem] truncate" title={app.model}>{shortModelName(app.model)}{#if provider}<span class="text-muted-foreground">{` · ${provider}`}</span>{/if}</span>
+									{@const mp = splitModel(app.model)}
+									<span class="block max-w-[11rem] truncate xl:max-w-[20rem]" title={app.model}>{mp.name}{#if mp.via}<span class="text-muted-foreground">{` · ${mp.via}`}</span>{/if}</span>
 								{:else}
 									<span class="text-muted-foreground">—</span>
 								{/if}

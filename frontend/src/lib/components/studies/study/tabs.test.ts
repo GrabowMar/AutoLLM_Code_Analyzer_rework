@@ -4,10 +4,10 @@ import { resolveStudyTab, tabsFor } from "./tabs";
 describe("study tabs", () => {
   it("numbers the shown tabs without gaps", () => {
     expect(tabsFor("app").map((t) => `${t.number} ${t.label}`)).toEqual([
-      "1 Abstract",
-      "2 Method",
+      "1 Overview",
+      "2 Design",
       "3 Results",
-      "4 Data",
+      "4 Runs",
       "5 Operations",
     ]);
     expect(tabsFor("slot").map((t) => t.value)).toContain("patterns");

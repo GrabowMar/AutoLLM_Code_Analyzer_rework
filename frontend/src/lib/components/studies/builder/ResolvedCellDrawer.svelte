@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * ResolvedCellDrawer — the PlanRail's cell sampler (spec 10.2): one cell of the (possibly ephemeral)
+	 * ResolvedCellDrawer — the builder's cell inspector (Review step) (spec 10.2): one cell of the (possibly ephemeral)
 	 * plan in a side sheet, via `CellDetailView`. Works for unsaved plans through the server's resolve
 	 * cache.
 	 *

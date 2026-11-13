@@ -46,7 +46,7 @@ export function getGenerationConfig(
 }
 
 /**
- * Registry summaries by issue code (`SummaryIssues`/`PlanRail` `summaries` prop). Empty without a config,
+ * Registry summaries by issue code (`SummaryIssues` `summaries` prop). Empty without a config,
  * so callers fall back to their built-in titles.
  */
 export function issueSummaries(

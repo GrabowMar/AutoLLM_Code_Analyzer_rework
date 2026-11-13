@@ -2,17 +2,18 @@
 	/**
 	 * LibraryNav — the Library's kinds grouped by the question they answer about a run (what to build,
 	 * where it runs, what else it is told, prompts, how agents run, how it is measured), plus the prompt
-	 * playground. A rail from `lg`, a horizontally scrolling chip row below it. Items are links
+	 * playground and the generation dry run. A rail from `lg`, a horizontally scrolling chip row below it. Items are links
 	 * (`/library/{kind}`), so every list is bookmarkable.
 	 *
-	 * Props: `active` (the kind's API name, `'playground'`, or null on the home page), `counts` (per kind,
+	 * Props: `active` (the kind's API name, `'playground'`, `'dry-run'`, or null on the home page), `counts` (per kind,
 	 * null while loading).
 	 */
 	import type { LibraryApiKind, LibraryKind } from '$lib/api/v3/types';
+	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import { KIND_GROUPS, KIND_INFO, PlaygroundIcon } from './kinds';
 
 	interface Props {
-		active: LibraryApiKind | 'playground' | null;
+		active: LibraryApiKind | 'playground' | 'dry-run' | null;
 		counts?: Partial<Record<LibraryKind, number | null>>;
 	}
 
@@ -40,7 +41,10 @@
 					}),
 				),
 				...(g.id === 'prompts'
-					? [{ id: 'playground', href: '/library/prompts/playground', label: 'Playground', icon: PlaygroundIcon, count: null } as Item]
+					? [
+							{ id: 'playground', href: '/library/prompts/playground', label: 'Playground', icon: PlaygroundIcon, count: null } as Item,
+							{ id: 'dry-run', href: '/library/dry-run', label: 'Generation dry run', icon: FlaskConical as Item['icon'], count: null } as Item,
+						]
 					: []),
 			],
 		})),

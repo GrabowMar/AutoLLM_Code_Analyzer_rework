@@ -20,6 +20,11 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import { tableFrame } from '$lib/components/table';
+	import FilterMenu from '$lib/components/FilterMenu.svelte';
+	import ListChecks from '@lucide/svelte/icons/list-checks';
+	import Layers from '@lucide/svelte/icons/layers';
+	import Cpu from '@lucide/svelte/icons/cpu';
+	import Bot from '@lucide/svelte/icons/bot';
 	import Dices from '@lucide/svelte/icons/dices';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import Users from '@lucide/svelte/icons/users';
@@ -143,6 +148,10 @@
 	);
 	const pages = $derived(data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1);
 
+	const shortModel = (m: string) => m.split('/').pop() ?? m;
+	const modelVia = (m: string) => (m.includes('/') ? m.split('/').slice(0, -1).join('/') : '');
+	const modelMenu = $derived(modelItems.map((m) => ({ value: m.value, label: shortModel(m.value), hint: modelVia(m.value) })));
+
 	function togglePick(id: string, on: boolean) {
 		const next = new Set(picked);
 		if (on) next.add(id);
@@ -194,19 +203,22 @@
 				written by ≥ 2 models, drawn at random.
 			</Card.Description>
 		</Card.Header>
-		<div class="table-toolbar flex-wrap gap-2">
-			<div class="flex flex-wrap items-center gap-2">
-				<Select.Simple
-					size="sm"
-					aria-label="Task"
-					bind:value={taskRef}
-					placeholder="Task (required to draw)"
-					clearLabel="Any task"
-					items={taskItems}
+		<!-- Same toolbar as the other lists: one row of filter menus. The task is required to draw. -->
+		<div class="tb-bar" role="group" aria-label="Filter the parent pool">
+			<div class="tb-menus">
+				<FilterMenu
+					label={taskRef ? 'Task' : 'Task · required to draw'}
+					icon={ListChecks}
+					value={taskRef}
+					options={taskItems}
+					onChange={(v) => (taskRef = v)}
+					searchable
+					anyLabel="Any task"
+					class={taskRef ? '' : 'pp-required'}
 				/>
-				<Select.Simple size="sm" aria-label="Stack" bind:value={stack} placeholder="Any stack" clearLabel="Any stack" items={stackItems} />
-				<Select.Simple size="sm" aria-label="Model" bind:value={model} placeholder="Any model" clearLabel="Any model" items={modelItems} />
-				<Select.Simple size="sm" aria-label="Harness" bind:value={harness} placeholder="Any harness" clearLabel="Any harness" items={harnessItems} />
+				<FilterMenu label="Stack" icon={Layers} value={stack} options={stackItems} onChange={(v) => (stack = v)} searchable anyLabel="Any stack" />
+				<FilterMenu label="Model" icon={Cpu} value={model} options={modelMenu} onChange={(v) => (model = v)} anyLabel="Any model" />
+				<FilterMenu label="Harness" icon={Bot} value={harness} options={harnessItems} onChange={(v) => (harness = v)} anyLabel="Any harness" />
 				<Segmented
 					size="sm"
 					aria-label="Outcome"
@@ -219,7 +231,7 @@
 					]}
 				/>
 			</div>
-			<Button variant="outline" size="sm" onclick={() => (generateOpen = true)}>
+			<Button variant="outline" size="sm" class="ml-auto" onclick={() => (generateOpen = true)}>
 				<Sparkles class="mr-1.5 h-3.5 w-3.5" />Generate a parent app
 			</Button>
 		</div>
@@ -253,7 +265,7 @@
 							<th>Model</th>
 							<th>Harness</th>
 							<th class="num" title="Agent checks only">Pass rate</th>
-							<th class="num">Probes exploited</th>
+							<th class="num" title="Security probes exploited">Probes</th>
 							<th class="num">Cost</th>
 							<th>Frozen</th>
 						</tr>
@@ -272,10 +284,15 @@
 									<a class="font-mono text-xs text-primary hover:underline" href={`/samples/${row.run_id}`} target="_blank" rel="noopener">{shortSha(row.run_id, 8)}</a>
 									{#if drawnSet.has(row.run_id)}<Badge variant="default" class="ml-1">drawn</Badge>{/if}
 								</td>
-								<td class="font-mono text-xs">{row.task ?? '—'}</td>
-								<td class="font-mono text-xs">{row.stack ?? '—'}</td>
-								<td class="font-mono text-xs">{row.model ?? '—'}</td>
-								<td class="font-mono text-xs">{row.harness ?? '—'}</td>
+								<td class="whitespace-nowrap font-mono text-xs">{row.task ?? '—'}</td>
+								<td class="whitespace-nowrap">{#if row.stack}<span class="pp-chip">{row.stack}</span>{:else}<span class="text-muted-foreground">—</span>{/if}</td>
+								<td class="max-w-[14rem]">
+									{#if row.model}
+										<span class="block truncate" title={row.model}>{shortModel(row.model)}</span>
+										{#if modelVia(row.model)}<span class="block truncate text-[11px] text-muted-foreground">{modelVia(row.model)}</span>{/if}
+									{:else}<span class="text-muted-foreground">—</span>{/if}
+								</td>
+								<td class="whitespace-nowrap">{#if row.harness}<span class="pp-chip">{row.harness}</span>{:else}<span class="text-muted-foreground">—</span>{/if}</td>
 								<td class="num">{fmtRate(row.agent_pass_rate)}</td>
 								<td class="num">{row.probes_exploited ?? '—'}</td>
 								<td class="num">{fmtUsd(row.cost_usd)}</td>
@@ -344,3 +361,17 @@
 </div>
 
 <GenerateParentForm bind:open={generateOpen} task={taskRef} />
+
+<style>
+	.pp-chip {
+		border-radius: 0.25rem;
+		border: 1px solid var(--border);
+		padding: 0 0.375rem;
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		line-height: 1.125rem;
+	}
+	:global(.fm-trigger.pp-required) {
+		border-color: color-mix(in oklab, var(--warning) 45%, var(--border));
+	}
+</style>

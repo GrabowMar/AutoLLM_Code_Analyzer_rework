@@ -20,13 +20,18 @@
 		number: number | string;
 		title: string;
 		flush?: boolean;
+		/** Fold the body behind a "Show" toggle (long tables); `summary` says what is inside. */
+		collapsible?: boolean;
+		summary?: string;
 		class?: string;
 		controls?: Snippet;
 		caption?: Snippet;
 		children: Snippet;
 	}
 
-	let { id, kind = 'figure', number, title, flush = false, class: className, controls, caption, children }: Props = $props();
+	let { id, kind = 'figure', number, title, flush = false, collapsible = false, summary, class: className, controls, caption, children }: Props = $props();
+	let open = $state(false);
+	const shown = $derived(!collapsible || open);
 </script>
 
 <figure
@@ -39,12 +44,26 @@
 			<p class="section-label">{kind === 'table' ? 'Table' : 'Figure'} {number}</p>
 			<h3 id="{id}-title" class="font-display text-[17px] font-semibold leading-snug tracking-tight">{title}</h3>
 		</div>
-		{#if controls}<div class="flex flex-wrap items-center gap-x-4 gap-y-2">{@render controls()}</div>{/if}
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+			{#if controls && shown}{@render controls()}{/if}
+			{#if collapsible}
+				{#if summary && !open}<span class="text-xs text-muted-foreground">{summary}</span>{/if}
+				<button
+					type="button"
+					class="inline-flex h-7 cursor-pointer items-center rounded-md border border-border px-2.5 text-xs font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+					aria-expanded={open}
+					aria-controls="{id}-body"
+					onclick={() => (open = !open)}>{open ? 'Hide' : 'Show'}</button
+				>
+			{/if}
+		</div>
 	</div>
-	<div class={cn('min-w-0', !flush && 'p-4')}>
-		{@render children()}
-	</div>
-	{#if caption}
+	{#if shown}
+		<div id="{id}-body" class={cn('min-w-0', !flush && 'p-4')}>
+			{@render children()}
+		</div>
+	{/if}
+	{#if caption && shown}
 		<figcaption class="border-t border-border/60 px-4 py-2.5 text-xs leading-relaxed text-muted-foreground">
 			{@render caption()}
 		</figcaption>

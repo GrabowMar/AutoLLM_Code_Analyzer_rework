@@ -152,6 +152,11 @@ class AdhocIn(Schema):
     quick: bool = False
 
 
+class DryRunIn(Schema):
+    design: dict[str, Any]
+    max_cells: int = Field(default=svc.DRY_RUN_MAX_CELLS, ge=1, le=svc.DRY_RUN_MAX_CELLS)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -266,6 +271,16 @@ def adhoc(request, payload: AdhocIn):
             confirm_usd=payload.confirm_usd,
             quick=payload.quick,
         )
+    except (StudyError, DesignError, PlanError) as exc:
+        return _error(exc)
+    return Status(200, result)
+
+
+@router.post("/studies/dry-run/", response=_RESPONSES, operation_id="generation_studies_dry_run")
+def dry_run(request, payload: DryRunIn):
+    """``{plan, cells, truncated}``: the resolved plan and full detail of its first cells; nothing is kept."""
+    try:
+        result = svc.dry_run(payload.design, user=request.auth, max_cells=payload.max_cells)
     except (StudyError, DesignError, PlanError) as exc:
         return _error(exc)
     return Status(200, result)

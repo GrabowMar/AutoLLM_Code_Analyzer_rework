@@ -24,13 +24,18 @@
 		return 'text-muted-foreground';
 	}
 
-	// Titles already start with the kind ("Generation agent job — …"); the status is the dot.
-	function label(event: RecentActivityItem): string {
-		return event.title.replace(/^(Generation|Analysis)\s+/i, '');
+	// Generation titles are "Generation run (App (agentic)) — <model>": lead with the model (the part
+	// that differs row to row) and demote the run kind; analysis titles are the run's own name.
+	function parts(event: RecentActivityItem): { main: string; sub: string } {
+		const t = event.title.replace(/^(Generation|Analysis)\s+/i, '');
+		const m = t.match(/^run \((.*)\) — (.+)$/);
+		if (m) return { main: m[2], sub: m[1] };
+		return { main: t, sub: event.kind === 'analysis' ? 'analysis' : '' };
 	}
+	const hrefFor = (e: RecentActivityItem) => (e.kind === 'analysis' ? `/analysis/${e.id}` : `/samples/${e.id}`);
 </script>
 
-<Card.Root>
+<Card.Root class="h-full">
 	<Card.Header>
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
@@ -54,15 +59,24 @@
 			<ul class="-mx-1 text-xs">
 				{#each items as event (event.kind + event.id)}
 					{@const EvtIcon = event.kind === 'analysis' ? Activity : AppWindow}
-					<li class="flex items-center gap-2 rounded px-1 py-1" title="{event.title} ({event.status})">
+					{@const p = parts(event)}
+					<li>
+					<a
+						href={hrefFor(event)}
+						class="flex min-h-7 items-center gap-2 rounded px-1 py-1 transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-ring"
+						title="{event.title} ({event.status})"
+					>
 						<span
 							class="status-dot h-1.5 w-1.5 {dotColor(event.status)} {event.status === 'running' ? 'status-dot-live' : ''}"
 							role="img"
 							aria-label={event.status}
 						></span>
 						<EvtIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={event.kind} />
-						<span class="min-w-0 flex-1 truncate">{label(event)}</span>
+						<span class="min-w-0 flex-1 truncate"
+							><span class="text-foreground">{p.main}</span>{#if p.sub}<span class="text-muted-foreground">{` · ${p.sub}`}</span>{/if}</span
+						>
 						<span class="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{timeAgo(event.created_at)}</span>
+					</a>
 					</li>
 				{/each}
 			</ul>

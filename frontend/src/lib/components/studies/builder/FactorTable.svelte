@@ -5,15 +5,20 @@
 	 * mode default, shown as "default: …". In slot mode the parent-fixed factors (stack, starter, auth,
 	 * prose) are read-only rows with the parents' values.
 	 *
+	 * Progressive disclosure: each row shows its chosen levels as chips (or the default) and opens its
+	 * picker on "Edit". Pickers that are already compact (models, the enum checkboxes) stay inline, and a
+	 * required factor with no level yet opens by itself. Rows are grouped: Core, Brief & prompts, Run settings.
+	 *
 	 * Props (contract 10.8): `mode`, `factors`, `fixedByParent`, `onchange(factors)`; plus `costByLevel`
-	 * (`Estimate.by_level`), `oneditprompt(level)` and `disabled`.
+	 * (`Estimate.by_level`), `oneditprompt(level)`, `disabled` and `omit` (factor keys not shown).
 	 */
 	import type { FactorKey, FactorRole, FactorSpec, StudyMode } from '$lib/api/v3/types';
 	import * as Select from '$lib/components/ui/select';
-	import { cn } from '$lib/utils';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import { refLabel } from '../format';
 	import LevelPicker from './LevelPicker.svelte';
-	import { FACTOR_BY_KEY, MODE_DEFAULTS, PARENT_FIXED, factorsForMode, factorsWithLevels, factorsWithRole } from './design';
+	import { FACTOR_BY_KEY, MODE_DEFAULTS, PARENT_FIXED, factorsForMode, factorsWithLevels, factorsWithRole, type FactorDef } from './design';
 
 	interface Props {
 		mode: StudyMode;
@@ -23,13 +28,26 @@
 		costByLevel?: Record<string, Record<string, number>> | null;
 		oneditprompt?: (level: string) => void;
 		disabled?: boolean;
+		/** Factors edited elsewhere (the builder's Models step owns `model`). */
+		omit?: FactorKey[];
 	}
 
-	let { mode, factors, fixedByParent = {}, onchange, costByLevel = null, oneditprompt, disabled = false }: Props = $props();
+	let { mode, factors, fixedByParent = {}, onchange, costByLevel = null, oneditprompt, disabled = false, omit = [] }: Props = $props();
 
-	const rows = $derived(factorsForMode(mode));
+	const rows = $derived(factorsForMode(mode).filter((d) => !omit.includes(d.key)));
 	const parentRows = $derived(mode === 'slot' ? PARENT_FIXED.filter((k) => fixedByParent[k]) : []);
 	const byKey = $derived(new Map(factors.map((f) => [f.key, f])));
+
+	const GROUPS: { title: string; keys: FactorKey[] }[] = [
+		{ title: 'Core', keys: ['model', 'harness_preset', 'stack_profile', 'slot_executor'] },
+		{ title: 'Brief & prompts', keys: ['starter_level', 'style', 'auth_mode', 'guidance', 'prompt_set', 'prose_variant', 'hole_mode', 'keep_docstring', 'context_policy'] },
+		{ title: 'Run settings', keys: ['sampling_preset', 'resource_policy', 'network_policy'] },
+	];
+	const grouped = $derived(
+		GROUPS.map((g) => ({ title: g.title, defs: rows.filter((d) => g.keys.includes(d.key)) }))
+			.concat([{ title: 'Other', defs: rows.filter((d) => !GROUPS.some((g) => g.keys.includes(d.key))) }])
+			.filter((g) => g.defs.length > 0),
+	);
 
 	const ROLE_ITEMS: { value: FactorRole; label: string; description: string }[] = [
 		{ value: 'crossed', label: 'Crossed', description: 'Every level with every other factor' },
@@ -43,82 +61,264 @@
 			({ value, label, description }) => ({ value, label, description }),
 		);
 	}
+
+	// Which rows are open: compact pickers stay inline; the rest open on "Edit".
+	let opened = $state(new Set<FactorKey>());
+	const inline = (def: FactorDef) => def.source.type === 'model' || def.source.type === 'enum';
+	const required = (key: FactorKey) => key === 'model' || key === 'stack_profile';
+	function isOpen(def: FactorDef, levels: string[]): boolean {
+		return inline(def) || opened.has(def.key) || (required(def.key) && levels.length === 0);
+	}
+	function toggle(key: FactorKey) {
+		const next = new Set(opened);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		opened = next;
+	}
+
+	const SHOWN_CHIPS = 4;
 </script>
 
-<div class="overflow-x-auto rounded-md border border-border">
-	<table class="w-full">
-		<thead>
-			<tr>
-				<th class="w-40">Factor</th>
-				<th class="w-32">Role</th>
-				<th>Levels</th>
-				<th class="num w-16">Count</th>
-			</tr>
-		</thead>
-		<tbody>
+<div class="ft">
+	{#if parentRows.length}
+		<div class="ft-group">
+			<h3 class="ft-group-title">Fixed by the parents</h3>
 			{#each parentRows as key (key)}
-				<tr class="bg-muted/30">
-					<td>
-						<p class="text-sm font-medium">{FACTOR_BY_KEY[key].label}</p>
-						<p class="cell-sub text-xs text-muted-foreground">Fixed by the parents</p>
-					</td>
-					<td class="text-xs text-muted-foreground">Parent</td>
-					<td class="font-mono text-xs">{refLabel(fixedByParent[key])}</td>
-					<td class="num">1</td>
-				</tr>
+				<div class="ft-row ft-row-parent">
+					<div class="ft-name">
+						<span class="ft-label">{FACTOR_BY_KEY[key].label}</span>
+						<span class="ft-help">From the parent apps</span>
+					</div>
+					<div class="ft-levels"><span class="ft-chip">{refLabel(fixedByParent[key])}</span></div>
+					<span class="ft-count">1</span>
+				</div>
 			{/each}
-			{#each rows as def (def.key)}
+		</div>
+	{/if}
+
+	{#each grouped as group (group.title)}
+		<div class="ft-group">
+			<h3 class="ft-group-title">{group.title}</h3>
+			{#each group.defs as def (def.key)}
 				{@const spec = byKey.get(def.key)}
 				{@const levels = spec?.levels ?? []}
 				{@const fallback = MODE_DEFAULTS[mode][def.key]}
-				<tr class={cn(levels.length > 1 && 'bg-primary/[0.03]')}>
-					<td class="align-top">
-						<p class="text-sm font-medium">{def.label}</p>
-						<p class="cell-sub text-xs text-muted-foreground">{def.help}</p>
-					</td>
-					<td class="align-top">
+				{@const open = isOpen(def, levels)}
+				<div class="ft-row" data-varied={levels.length > 1} data-open={open}>
+					<div class="ft-name">
+						<span class="ft-label">{def.label}{#if required(def.key) && levels.length === 0}<span class="ft-req">required</span>{/if}</span>
+						<span class="ft-help" title={def.help}>{def.help}</span>
+					</div>
+
+					<div class="ft-levels">
+						{#if levels.length}
+							{#each levels.slice(0, SHOWN_CHIPS) as l (l)}<span class="ft-chip" title={l}>{refLabel(l)}</span>{/each}
+							{#if levels.length > SHOWN_CHIPS}<span class="ft-more">+{levels.length - SHOWN_CHIPS} more</span>{/if}
+						{:else if def.key === 'resource_policy'}
+							<span class="ft-default">default: the experiment’s Budget preset (Runs & budget)</span>
+						{:else if fallback}
+							<span class="ft-default">default: <span class="font-mono">{fallback}</span></span>
+						{:else if !required(def.key)}
+							<span class="ft-default">not set</span>
+						{/if}
+					</div>
+
+					<div class="ft-role">
 						{#if spec && levels.length > 1}
 							<Select.Simple
 								id="factor-role-{def.key}"
 								size="sm"
 								value={spec.role}
 								items={roleItems(spec)}
-								disabled={disabled}
+								{disabled}
 								onValueChange={(v: string) => onchange(factorsWithRole(factors, def.key, v as FactorRole))}
 							/>
-						{:else if spec}
-							<span class="text-xs text-muted-foreground">Fixed</span>
 						{:else}
-							<span class="text-xs text-muted-foreground">Default</span>
+							<span class="ft-role-text">{spec ? 'Fixed' : 'Default'}</span>
 						{/if}
-					</td>
-					<td class="align-top">
-						<LevelPicker
-							factor={def.key}
-							value={levels}
-							{mode}
-							{disabled}
-							costByLevel={costByLevel?.[def.key] ?? null}
-							oneditprompt={def.key === 'prompt_set' ? oneditprompt : undefined}
-							onchange={(next) => onchange(factorsWithLevels(factors, def.key, next))}
-						/>
-						{#if levels.length === 0}
-							<p class="mt-1 text-xs text-muted-foreground">
-								{#if def.key === 'resource_policy'}
-									default: the experiment's Budget preset (step 5)
-								{:else if fallback}
-									default: <span class="font-mono">{fallback}</span>
-								{:else if def.key === 'model' || def.key === 'stack_profile'}
-									<span class="text-warning-fg">required</span>
-								{:else}
-									not set
-								{/if}
-							</p>
+					</div>
+					<span class="ft-count" title="Levels">{levels.length || '—'}</span>
+
+					<div class="ft-action">
+						{#if !inline(def)}
+							<button type="button" class="ft-edit" aria-expanded={open} onclick={() => toggle(def.key)} {disabled}>
+								{#if open}Done<ChevronDown class="size-3.5 rotate-180" />{:else}<Pencil class="size-3" />Edit{/if}
+							</button>
 						{/if}
-					</td>
-					<td class="num align-top">{levels.length || '—'}</td>
-				</tr>
+					</div>
+
+					{#if open}
+						<div class="ft-picker">
+							<LevelPicker
+								factor={def.key}
+								value={levels}
+								{mode}
+								{disabled}
+								costByLevel={costByLevel?.[def.key] ?? null}
+								oneditprompt={def.key === 'prompt_set' ? oneditprompt : undefined}
+								onchange={(next) => onchange(factorsWithLevels(factors, def.key, next))}
+							/>
+						</div>
+					{/if}
+				</div>
 			{/each}
-		</tbody>
-	</table>
+		</div>
+	{/each}
 </div>
+
+<style>
+	.ft {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.ft-group {
+		overflow: hidden;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+	}
+	.ft-group-title {
+		padding: 0.375rem 0.875rem;
+		border-bottom: 1px solid var(--border);
+		background: color-mix(in oklab, var(--muted) 55%, var(--card));
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--muted-foreground);
+	}
+	.ft-row {
+		display: grid;
+		grid-template-columns: minmax(8rem, 1fr) minmax(0, 1.35fr) 6.5rem 1.5rem 4.25rem;
+		align-items: center;
+		gap: 0.5rem 0.875rem;
+		padding: 0.625rem 0.875rem;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+	}
+	.ft-row:last-child {
+		border-bottom: 0;
+	}
+	.ft-row[data-varied='true'] {
+		box-shadow: inset 2px 0 0 var(--primary);
+		background: color-mix(in oklab, var(--primary) 4%, transparent);
+	}
+	.ft-row-parent {
+		grid-template-columns: minmax(8rem, 1fr) minmax(0, 1.35fr) 1.5rem;
+		background: color-mix(in oklab, var(--muted) 30%, transparent);
+	}
+	.ft-name {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+	.ft-label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+	}
+	.ft-req {
+		border-radius: 9999px;
+		background: color-mix(in oklab, var(--warning) 14%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 45%, transparent);
+		padding: 0 0.375rem;
+		font-size: 0.6875rem;
+		font-weight: 500;
+		line-height: 1rem;
+		color: var(--foreground);
+	}
+	.ft-help {
+		display: -webkit-box;
+		overflow: hidden;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		font-size: 0.6875rem;
+		color: var(--muted-foreground);
+	}
+	.ft-levels {
+		display: flex;
+		min-width: 0;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.ft-chip {
+		max-width: 14rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		border-radius: 0.25rem;
+		border: 1px solid color-mix(in oklab, var(--primary) 35%, var(--border));
+		background: color-mix(in oklab, var(--primary) 8%, transparent);
+		padding: 0 0.375rem;
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		line-height: 1.25rem;
+	}
+	.ft-more,
+	.ft-default {
+		font-size: 0.75rem;
+		color: var(--muted-foreground);
+	}
+	.ft-role-text {
+		font-size: 0.75rem;
+		color: var(--muted-foreground);
+	}
+	.ft-count {
+		text-align: right;
+		font-family: var(--font-mono);
+		font-size: 0.8125rem;
+		font-variant-numeric: tabular-nums;
+	}
+	.ft-action {
+		display: flex;
+		justify-content: flex-end;
+	}
+	.ft-edit {
+		display: inline-flex;
+		height: 1.75rem;
+		cursor: pointer;
+		align-items: center;
+		gap: 0.3rem;
+		border-radius: calc(var(--radius) + 0.125rem);
+		border: 1px solid var(--border);
+		padding-inline: 0.5rem;
+		font-size: 0.75rem;
+		font-weight: 500;
+		transition: border-color 150ms, background-color 150ms;
+	}
+	.ft-edit:hover:not(:disabled) {
+		border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+	}
+	.ft-edit[aria-expanded='true'] {
+		background: var(--muted);
+	}
+	.ft-edit:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 1px;
+	}
+	.ft-picker {
+		grid-column: 2 / -1;
+		min-width: 0;
+	}
+	.ft-default {
+		overflow-wrap: anywhere;
+	}
+	@container (max-width: 34rem) {
+		.ft-row {
+			grid-template-columns: minmax(0, 1fr) auto auto;
+		}
+		.ft-name {
+			grid-column: 1 / -1;
+		}
+		.ft-levels {
+			grid-column: 1 / -1;
+		}
+		.ft-picker {
+			grid-column: 1 / -1;
+		}
+	}
+</style>

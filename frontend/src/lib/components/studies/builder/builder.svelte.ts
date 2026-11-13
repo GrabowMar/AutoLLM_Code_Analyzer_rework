@@ -5,10 +5,10 @@
  *   the server can accept creates it (`POST /studies/`), later saves `PATCH` it. Design edits are saved
  *   500 ms after the last change (the plan needs the saved design: `resolve` reads it), text edits
  *   (name, description, hypothesis) 2 s after the last keystroke.
- * - After every saved design change the PlanRail's plan is re-resolved with `persist=false`; a newer
+ * - After every saved design change the plan rail's plan is re-resolved with `persist=false`; a newer
  *   change aborts the request in flight and stale answers are dropped, so the rail never shows a plan
  *   of an older design.
- * - "Freeze plan" persists the plan; Start is enabled only while the frozen plan is the plan of the
+ * - Freezing (the first half of "Launch experiment" on Review) persists the plan; launch is allowed only while the frozen plan is the plan of the
  *   saved design (`plan_hash` and `design_hash` match) and it has no error.
  *
  * Every API call is injectable (`BuilderDeps`) so debounce, abort and autosave are unit-tested with fake
@@ -97,6 +97,12 @@ export class BuilderState {
 
   /** Edits not yet saved (or saving). */
   pending = $state(false);
+  /**
+   * A saved draft whose latest edit removed a required choice (no model, task, stack…): the server would
+   * refuse it, so the edit is held locally (shown as a to-do, never as a failed save) until the design can
+   * be saved again.
+   */
+  held = $state(false);
 
   private deps: BuilderDeps;
   private options: BuilderOptions;
@@ -143,7 +149,7 @@ export class BuilderState {
   /** Client checks while nothing is saved yet, else the server's plan issues (plus a refused save's). */
   get issues(): SummaryIssue[] {
     const local = localChecks(this.design).map((c) => ({ ...c }));
-    if (!this.studyId) return local;
+    if (!this.studyId || this.held) return local;
     if (this.saveIssues.length > 0) return this.saveIssues;
     const fromPlan = fromIssues(this.plan?.issues);
     return fromPlan.length > 0 ? fromPlan : this.plan ? [] : local;
@@ -316,6 +322,9 @@ export class BuilderState {
     const metaJson = JSON.stringify(meta);
     const changed =
       designJson !== this.savedDesign || metaJson !== this.savedMeta;
+    // Back to a saveable design (e.g. Undo restored the tasks): nothing is held any more.
+    if (this.held && (designJson === this.savedDesign || canCreate(design)))
+      this.held = false;
     let id = this.studyId;
     if (!id) {
       if (!canCreate(design)) return; // client checks are shown; nothing to save yet
@@ -338,6 +347,11 @@ export class BuilderState {
         this.saving = false;
       }
     } else if (changed) {
+      if (!canCreate(design)) {
+        this.held = true; // the client checks say what is missing; nothing is sent
+        return;
+      }
+      this.held = false;
       this.saving = true;
       try {
         const patch: StudyPatchIn = {};

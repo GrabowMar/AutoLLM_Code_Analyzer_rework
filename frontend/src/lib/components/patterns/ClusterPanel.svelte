@@ -69,6 +69,18 @@
 		return () => controller.abort();
 	});
 
+	// Clusters of several variants, the original's and labelled ones lead; one-variant clusters (distinct
+	// implementations nobody else converged on) are counted and opened on demand.
+	const CLUSTER_PREVIEW = 8;
+	let showAllClusters = $state(false);
+	const notable = (c: ClusterRow) => c.size > 1 || c.includes_original || c.labels.length > 0;
+	const leadClusters = $derived.by(() => {
+		const all = data?.clusters ?? [];
+		const head = all.filter(notable);
+		return head.length ? head : all.slice(0, CLUSTER_PREVIEW);
+	});
+	const shownClusters = $derived(showAllClusters ? (data?.clusters ?? []) : leadClusters);
+	const hiddenClusters = $derived((data?.clusters.length ?? 0) - leadClusters.length);
 	const statsRows = $derived<ClusterStats[]>(data ? (Array.isArray(data.stats) ? data.stats : [data.stats]) : []);
 	const targetInfo = $derived(target ? summary.targets?.[target] : undefined);
 
@@ -181,7 +193,7 @@
 			<EmptyState compact title="No clusters" description="No variant of this target produced normalisable output." />
 		{:else}
 			<ul class="divide-y divide-border">
-				{#each data.clusters as cluster (cluster.cluster_id)}
+				{#each shownClusters as cluster (cluster.cluster_id)}
 					<li class="px-4 py-2.5">
 						<button type="button" class="flex w-full cursor-pointer flex-wrap items-center gap-3 text-left text-sm" aria-expanded={expanded === cluster.cluster_id} onclick={() => openCluster(cluster)}>
 							{#if expanded === cluster.cluster_id}<ChevronDown class="h-4 w-4" />{:else}<ChevronRight class="h-4 w-4" />{/if}
@@ -274,6 +286,11 @@
 					</li>
 				{/each}
 			</ul>
+			{#if hiddenClusters > 0}
+				<button type="button" class="w-full border-t border-border py-2 text-xs font-medium text-muted-foreground hover:bg-surface-2 hover:text-foreground" aria-expanded={showAllClusters} onclick={() => (showAllClusters = !showAllClusters)}>
+					{showAllClusters ? 'Show fewer clusters' : `Show ${hiddenClusters} more clusters (one variant each)`}
+				</button>
+			{/if}
 		{/if}
 	{/if}
 </Card.Root>

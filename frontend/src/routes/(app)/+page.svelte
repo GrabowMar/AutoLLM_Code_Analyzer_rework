@@ -73,7 +73,7 @@
 				listRuns({ status: 'completed', per_page: 1 }),
 				listRuns({ status: 'running', per_page: 1 }),
 				getStatisticsOverview(),
-				getStatisticsRecentActivity(8),
+				getStatisticsRecentActivity(16),
 				getStatisticsAnalyzerHealth(),
 				getStatisticsSeverity(),
 				getStatisticsTrends(30),
@@ -175,29 +175,7 @@
 		}
 	}
 
-	const analysesSubtitle = $derived(
-		completedAnalyses !== null ? `${completedAnalyses} completed` : ''
-	);
-	const analysesChange = $derived(runningAnalyses !== null ? `${runningAnalyses} running` : '');
 </script>
-
-<!-- Headline counts: the header's footer strip; each links to its page. -->
-{#snippet headerStats()}
-	<div class="header-stats">
-		<a href="/models" class="header-stat hover:text-foreground" title={overview ? `${overview.total_apps} total apps` : undefined}>
-			<b>{overview ? overview.models_in_use.toLocaleString() : '—'}</b> models in use
-		</a>
-		<a href="/applications" class="header-stat hover:text-foreground" title={overview ? (overview.apps_success_rate == null ? 'No generation finished yet' : `${overview.apps_success_rate}% of finished generations completed`) : undefined}>
-			<b>{overview ? overview.total_apps.toLocaleString() : '—'}</b> apps{#if overview}<span>· {overview.apps_completed} completed</span>{/if}
-		</a>
-		<a href="/analysis" class="header-stat hover:text-foreground">
-			<b>{totalAnalyses ?? '—'}</b> analyses{#if analysesSubtitle}<span>· {analysesSubtitle}</span>{/if}{#if analysesChange}<span>· {analysesChange}</span>{/if}
-		</a>
-		<a href="/statistics" class="header-stat hover:text-foreground" title={overview ? `Every tool's findings over all analysis runs (dependency advisories included); ${overview.analyses_completed} analyses completed` : undefined}>
-			<b>{overview ? overview.total_findings.toLocaleString() : '—'}</b> findings{#if overview}<span>· {overview.total_apps ? (overview.total_findings / overview.total_apps).toFixed(1) : '—'}/app avg</span>{/if}
-		</a>
-	</div>
-{/snippet}
 
 <div class="bento gap-4">
 	<div class="b-12 rise-in" style="--stagger-i: 0">
@@ -209,7 +187,12 @@
 			onSyncModels={handleSyncModels}
 			onClearCaches={handleClearCaches}
 			onClearStuck={handleClearStuck}
-			stats={headerStats}
+			{overview}
+			{totalAnalyses}
+			{completedAnalyses}
+			{runningAnalyses}
+			{trends}
+			health={analyzerHealth}
 		/>
 	</div>
 
@@ -231,7 +214,7 @@
 		<RecentRunsTable analyses={recentAnalyses} />
 		<RecentSamplesTable samples={recentApps} />
 	</div>
-	<div class="b-4 rise-in space-y-4" style="--stagger-i: 6">
+	<div class="b-4 rise-in" style="--stagger-i: 6">
 		<ActivityFeed items={liveActivity} {isRefreshing} onRefresh={handleRefresh} />
 	</div>
 </div>

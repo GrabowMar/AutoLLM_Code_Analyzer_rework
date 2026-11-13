@@ -72,7 +72,7 @@
 	{/if}
 	<button
 		type="button"
-		class="cursor-pointer text-primary underline underline-offset-2"
+		class="inline-flex min-h-6 cursor-pointer items-center text-primary underline underline-offset-2"
 		aria-expanded={showAssumptions}
 		onclick={() => (showAssumptions = !showAssumptions)}
 	>

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { page } from '$app/state';
+	import SignupShell from '$lib/components/auth/SignupShell.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import BrandMark from '$lib/components/BrandMark.svelte';
@@ -12,6 +14,9 @@
 	];
 </script>
 
+{#if page.url.pathname.replace(/\/$/, '') === '/auth/signup'}
+	<SignupShell>{@render children()}</SignupShell>
+{:else}
 <div class="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
 	<!-- Editorial panel (desktop only) -->
 	<aside class="relative hidden overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex lg:flex-col lg:justify-between lg:p-12">
@@ -60,3 +65,5 @@
 		</div>
 	</div>
 </div>
+
+{/if}

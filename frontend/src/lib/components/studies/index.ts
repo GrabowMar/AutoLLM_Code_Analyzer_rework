@@ -12,7 +12,6 @@ export { default as ResourcePolicyPicker } from "./builder/ResourcePolicyPicker.
 export { default as EvaluationSection } from "./builder/EvaluationSection.svelte";
 export { default as AnalysisPlanSection } from "./builder/AnalysisPlanSection.svelte";
 export { default as PromptOverrideDialog } from "./builder/PromptOverrideDialog.svelte";
-export { default as PlanRail } from "./builder/PlanRail.svelte";
 export { default as CostByLevelBar } from "./builder/CostByLevelBar.svelte";
 export { default as ResolvedCellDrawer } from "./builder/ResolvedCellDrawer.svelte";
 export { default as CellDetailView } from "./builder/CellDetailView.svelte";
@@ -20,6 +19,10 @@ export { default as LaunchDialog } from "./builder/LaunchDialog.svelte";
 export { default as ComposerSection } from "./builder/ComposerSection.svelte";
 export { default as ComposerSectionNav } from "./builder/ComposerSectionNav.svelte";
 export { default as RunFormula } from "./builder/RunFormula.svelte";
+export { default as BuilderStepper } from "./builder/BuilderStepper.svelte";
+export { default as BlueprintRail } from "./builder/BlueprintRail.svelte";
+export { default as StepPanel } from "./builder/StepPanel.svelte";
+export { default as OptionCards } from "./builder/OptionCards.svelte";
 export { default as StartBar } from "./builder/StartBar.svelte";
 export { default as SummaryIssues } from "./builder/SummaryIssues.svelte";
 export { default as StudyMasthead } from "./study/StudyMasthead.svelte";
@@ -51,6 +54,8 @@ export {
   ExpansionError,
 } from "./builder/expansion";
 export * from "./builder/power";
+export * from "./builder/steps";
+export { postRunKey, shouldAttachPostRun } from "./builder/launch";
 export {
   fromIssues,
   groupIssues,

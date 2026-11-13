@@ -1,61 +1,69 @@
 <script lang="ts">
 	/**
-	 * StudyBuilder — `/experiments/new` (spec 10.2): numbered steps on the left, the live PlanRail on the right
-	 * (sticky from 56rem; below that the rail follows the form and the StartBar sticks to the bottom).
+	 * StudyBuilder — `/experiments/new` (spec 10.2) as a step-by-step workspace instead of one long form:
 	 *
-	 *   1 Mode & kind · 2 Units · 3 Factors · 4 Replicates & seeds · 5 Budget preset · 6 Evaluation ·
-	 *   7 Analysis plan (confirmatory) · 8 After the runs
+	 *   [ stepper: Setup · Models · Tasks · Treatments · Runs & budget · Measurement · Review ]
+	 *   [ the open step (StepPanel)                        ] [ Plan rail (sticky, ≥ 56rem) ]
 	 *
-	 * The draft is saved server-side (`BuilderState`), so leaving and coming back (`?draft=<id>`) resumes
-	 * it. Prompt edits, cell inspection and launch need the saved draft.
+	 * - One step is open at a time; the stepper is non-linear (any step opens), shows what each step holds
+	 *   and marks complete / required / problem steps. The open step is in the URL hash (`#models`), so a
+	 *   reload or a shared link returns to it. Opening a step moves focus to its heading.
+	 * - Required choices are never shown as red errors before the user acts: the rail lists them as a
+	 *   neutral to-do, and a step only turns amber after the user continued past it unfinished.
+	 * - Launch is one action on Review: it saves, freezes the current plan (if needed) and opens the cost
+	 *   confirmation. The post-run analysis chosen in Measurement is attached at launch.
+	 * - Below 56rem the rail gives way to a sticky bottom bar (step, cells, cost, next).
+	 *
+	 * The draft lifecycle (server-side autosave, debounced plan resolve, freeze, launch) is `BuilderState`.
 	 *
 	 * Props: `builder` (`BuilderState`), `onlaunched(studyId)`.
 	 */
-	import type { Design, FactorSpec, IssueFix, LibraryItemOut, ResourcePolicyContent, SourceSpanOut, StudyPromptOverrideOut } from '$lib/api/v3/types';
-	import { getStudy } from '$lib/api/v3/studies';
-	import { createPostRun } from '$lib/api/v3/studies';
+	import { onMount, tick, untrack } from 'svelte';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
+	import type { IssueFix, LibraryItemOut, PostRunOut, ResourcePolicyContent, SourceSpanOut, StudyPromptOverrideOut } from '$lib/api/v3/types';
+	import { createPostRun, getStudy, listPostRuns } from '$lib/api/v3/studies';
 	import { formatApiError } from '$lib/api/core';
-	import { Segmented } from '$lib/components/ui/segmented';
-	import { Input } from '$lib/components/ui/input';
-	import { Textarea } from '$lib/components/ui/textarea';
-	import { Label } from '$lib/components/ui/label';
+	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button';
-	import { Checkbox } from '$lib/components/ui/checkbox';
-	import * as Select from '$lib/components/ui/select';
 	import { libraryStore } from '$lib/components/library';
-	import NumberField from '../shared/NumberField.svelte';
-	import PostRunEditor, { defaultAnalysisConfig, type AnalysisPostRunConfig } from '../automation/PostRunEditor.svelte';
-	import { MODE_LABELS, formatUsd } from '../format';
+	import { defaultAnalysisConfig, type AnalysisPostRunConfig } from '../automation/PostRunEditor.svelte';
+	import { MODE_LABELS, formatUsd, plural, refLabel } from '../format';
 	import type { BuilderState } from './builder.svelte';
-	import ComposerSection from './ComposerSection.svelte';
-	import ComposerSectionNav, { type ComposerNavSection } from './ComposerSectionNav.svelte';
-	import StartBar from './StartBar.svelte';
-	import PlanRail from './PlanRail.svelte';
-	import FactorTable from './FactorTable.svelte';
-	import TaskPicker from './TaskPicker.svelte';
-	import SlotTargetPicker from './SlotTargetPicker.svelte';
-	import PowerHelper from './PowerHelper.svelte';
-	import ResourcePolicyPicker from './ResourcePolicyPicker.svelte';
-	import EvaluationSection from './EvaluationSection.svelte';
-	import AnalysisPlanSection from './AnalysisPlanSection.svelte';
+	import BuilderStepper, { type StepperItem, type StepState } from './BuilderStepper.svelte';
+	import BlueprintRail from './BlueprintRail.svelte';
+	import StepPanel from './StepPanel.svelte';
 	import PromptOverrideDialog, { type OverrideTarget } from './PromptOverrideDialog.svelte';
 	import ResolvedCellDrawer from './ResolvedCellDrawer.svelte';
 	import LaunchDialog from './LaunchDialog.svelte';
-	import {
-		REPEAT_LIMITS,
-		clampRepeats,
-		defaultAnalysisPlan,
-		getLevels,
-		moveProseVariants,
-		randomSeed,
-		setKind,
-		switchMode,
-		withFactors,
-	} from './design';
+	import SetupStep from './steps/SetupStep.svelte';
+	import ModelsStep from './steps/ModelsStep.svelte';
+	import TreatmentsStep from './steps/TreatmentsStep.svelte';
+	import ReplicationStep from './steps/ReplicationStep.svelte';
+	import MeasurementStep from './steps/MeasurementStep.svelte';
+	import ReviewStep from './steps/ReviewStep.svelte';
+	import TaskPicker from './TaskPicker.svelte';
+	import SlotTargetPicker from './SlotTargetPicker.svelte';
+	import { clampRepeats, getLevels, moveProseVariants, setLevels } from './design';
 	import { parseFix, type SummaryIssue } from './issues';
+	import { shouldAttachPostRun } from './launch';
 	import { estimateBasisTotals, patchPolicy, savePolicy, withStudyCap } from './policy';
 	import { PinnedPolicy, rememberPolicy } from './pinned.svelte';
-	import Dices from '@lucide/svelte/icons/dices';
+	import {
+		STEP_IDS,
+		TODO_CODES,
+		isStepId,
+		issuesByStep,
+		missingChoices,
+		nextStep,
+		prevStep,
+		requiredSteps,
+		stepsFor,
+		type StepId,
+	} from './steps';
+	import ArrowRight from '@lucide/svelte/icons/arrow-right';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Rocket from '@lucide/svelte/icons/rocket';
 
 	interface Props {
 		builder: BuilderState;
@@ -67,29 +75,101 @@
 	const design = $derived(b.design);
 	const isSlot = $derived(design.mode === 'slot');
 	const locked = $derived(!!b.study?.locked);
-	// The preset version the design PINS (not the slug's latest): the launch threshold, cap and pilot, and
-	// the base of the cap/knob quick fixes, must be the knobs the run will use.
+	const steps = $derived(stepsFor(design.mode));
+	const models = $derived(getLevels(design, 'model'));
+	const units = $derived(isSlot ? design.units.slot_targets.length : design.units.tasks.length);
+	const missing = $derived(missingChoices(design));
+	const required = $derived(requiredSteps(design));
+	const serverIssues = $derived(b.issues.filter((i) => !TODO_CODES.has(i.code)));
+	const stepIssues = $derived(issuesByStep(serverIssues));
+	const errorCount = $derived(serverIssues.filter((i) => i.severity === 'error').length);
+
+	// The version of the Budget preset the design PINS: the launch dialog and the cap/knob quick fixes use it.
 	const pinnedPolicy = new PinnedPolicy(() => design.resource_policy);
 	const policyItem = $derived(pinnedPolicy.item);
 	const policyContent = $derived((policyItem?.content as ResourcePolicyContent | undefined) ?? null);
-	const units = $derived(isSlot ? design.units.slot_targets.length : design.units.tasks.length);
 
-	let budgetSummary = $state('');
-	let budgetOpen = $state(false);
-	let evalOpen = $state(false);
-	let fixError = $state('');
+	// ── which step is open ──
+	function fromHash(hash: string): StepId | null {
+		const id = hash.replace(/^#/, '');
+		return isStepId(id) ? id : null;
+	}
+	let current = $state<StepId>(untrack(() => fromHash(page.url.hash) ?? 'setup'));
+	// Steps the user has left: an open required choice only turns amber after that. A resumed draft has
+	// been walked through already.
+	let left = $state(new Set<StepId>(untrack(() => (b.studyId ? STEP_IDS.filter((s) => s !== 'review') : []))));
+	let panelEl = $state<HTMLElement | null>(null);
 
-	function update(next: Design) {
-		b.setDesign(next);
+	async function go(step: StepId, opts: { focus?: boolean } = {}) {
+		if (step === current) return;
+		if (current !== 'review') left = new Set([...left, current]);
+		current = step;
+		const url = new URL(page.url);
+		url.hash = step;
+		try {
+			replaceState(url, page.state);
+		} catch {
+			/* the router is not ready during the first render */
+		}
+		await tick();
+		const top = panelEl?.getBoundingClientRect().top ?? 0;
+		if (top < 56 || top > window.innerHeight * 0.6) panelEl?.scrollIntoView({ block: 'start' });
+		if (opts.focus !== false) document.getElementById(`step-${step}-title`)?.focus({ preventScroll: true });
+	}
+
+	function stepState(id: StepId): StepState {
+		if (id === 'review') return 'idle';
+		if (stepIssues[id].errors > 0) return 'error';
+		const open = missing.some((m) => m.step === id);
+		if (open) return left.has(id) ? 'attention' : required.has(id) ? 'todo' : 'idle';
+		if (required.has(id) || left.has(id)) return 'done';
+		return 'idle';
+	}
+
+	const summaries = $derived.by((): Record<StepId, string> => {
+		const varied = design.factors.filter((f) => f.key !== 'model' && f.levels.length > 1).length;
+		const stack = getLevels(design, 'stack_profile');
+		const plan = b.planFresh ? b.plan : null;
+		const totals = plan?.estimate ? estimateBasisTotals(plan.estimate) : null;
+		const stackText = stack.length ? (stack.length === 1 ? refLabel(stack[0]) : plural(stack.length, 'stack')) : 'no stack yet';
+		return {
+			setup: `${MODE_LABELS[design.mode]} · ${design.kind}`,
+			models: models.length ? plural(models.length, 'model') : 'none yet',
+			units: units ? plural(units, isSlot ? 'target' : 'task') : 'none yet',
+			treatments: isSlot ? (varied ? `${plural(varied, 'factor')} varied` : 'defaults') : [stackText, varied ? `${varied} varied` : ''].filter(Boolean).join(' · '),
+			replication: `${plural(design.repeats, 'repeat')} · ${refLabel(design.resource_policy)}`,
+			measurement: `${design.evaluation.eval_level}${design.kind === 'confirmatory' ? ' · pre-registered' : ''}`,
+			review: plan ? `${plural(plan.n_cells_by_stage.main ?? plan.n_cells, 'cell')}${totals ? ` · ≈ ${formatUsd(totals.expected)}` : ''}` : '',
+		};
+	});
+	const stepperItems = $derived<StepperItem[]>(
+		steps.map((s) => ({ id: s.id, label: s.label, summary: summaries[s.id], state: stepState(s.id), required: required.has(s.id) })),
+	);
+	const index = $derived(STEP_IDS.indexOf(current));
+	const def = $derived(steps[index]);
+	const next = $derived(nextStep(current));
+	const prev = $derived(prevStep(current));
+	const labelOf = (id: StepId | null) => (id ? (steps.find((s) => s.id === id)?.label ?? '') : '');
+	const blockersHere = $derived(missing.filter((m) => m.step === current).map((m) => m.label.charAt(0).toLowerCase() + m.label.slice(1)));
+	let warned = $state(new Set<StepId>());
+
+	function continueOn() {
+		if (blockersHere.length > 0 && !warned.has(current)) {
+			// First press says what is still missing here; a second press goes on anyway.
+			warned = new Set([...warned, current]);
+			return;
+		}
+		if (next) void go(next);
 	}
 
 	// ── quick fixes from the plan's issues ──
+	let fixError = $state('');
 	async function applyFix(_issue: SummaryIssue, fix: IssueFix) {
 		fixError = '';
 		const action = parseFix(fix);
 		try {
-			if (action.kind === 'set_repeats') update({ ...design, repeats: clampRepeats(design.mode, action.repeats) });
-			else if (action.kind === 'move_prose_variant') update(moveProseVariants(design));
+			if (action.kind === 'set_repeats') b.setDesign({ ...design, repeats: clampRepeats(design.mode, action.repeats) });
+			else if (action.kind === 'move_prose_variant') b.setDesign(moveProseVariants(design));
 			else if ((action.kind === 'set_study_cap' || action.kind === 'set_knob') && policyContent) {
 				const content = action.kind === 'set_study_cap' ? withStudyCap(policyContent, action.cap) : patchPolicy(policyContent, action.values);
 				const saved = await savePolicy(policyItem as LibraryItemOut<'resource_policy'>, content, {
@@ -97,7 +177,7 @@
 					latestVersion: pinnedPolicy.latest?.version ?? null,
 				});
 				rememberPolicy(saved);
-				update({ ...design, resource_policy: saved.pinned_ref });
+				b.setDesign({ ...design, resource_policy: saved.pinned_ref });
 			} else if (action.kind === 'unknown') fixError = `This fix (${action.action}) has to be applied by hand.`;
 		} catch (e) {
 			fixError = formatApiError(e, 'Could not apply the fix.');
@@ -109,10 +189,6 @@
 	let overrideTarget = $state<OverrideTarget | null>(null);
 	const compareKeys = $derived(b.plan?.cells_sample.map((c) => c.cell_key) ?? []);
 
-	function openCell(key: string) {
-		drawerCell = key;
-	}
-
 	function editSpan(span: SourceSpanOut, role: string) {
 		overrideTarget = { kind: 'span', span, role };
 	}
@@ -123,279 +199,228 @@
 		b.attach(await getStudy(b.studyId));
 	}
 
-	// ── launch ──
+	// ── post-run (attached at launch) ──
+	let postRun = $state<AnalysisPostRunConfig>(defaultAnalysisConfig());
+	let attachedPostRuns = $state<PostRunOut[]>([]);
+	let postRunsFor = '';
+	$effect(() => {
+		const id = b.studyId;
+		if (!id || id === postRunsFor) return;
+		postRunsFor = id;
+		listPostRuns(id)
+			.then((list) => (attachedPostRuns = list))
+			.catch(() => {});
+	});
+
+	// ── launch: save → freeze → confirm the cost → attach the post-run → launch ──
 	let launchOpen = $state(false);
 	let launchError = $state('');
+	let preparing = $state(false);
+	let prepareError = $state('');
+	let blockersEl = $state<HTMLElement | null>(null);
 
-	async function freeze() {
-		await b.freeze();
+	async function requestLaunch() {
+		prepareError = '';
+		if (current !== 'review') {
+			await go('review');
+			return;
+		}
+		if (missing.length > 0 || errorCount > 0) {
+			blockersEl?.focus();
+			return;
+		}
+		preparing = true;
+		try {
+			if (!b.canStart) await b.freeze();
+			if (b.canStart) launchOpen = true;
+			else prepareError = b.planError || b.saveError || 'The plan could not be frozen: resolve the issues above first.';
+		} finally {
+			preparing = false;
+		}
 	}
 
 	async function launch(body: Parameters<BuilderState['launch']>[0]) {
 		launchError = '';
 		try {
+			if (b.studyId && !locked && shouldAttachPostRun(postRun, attachedPostRuns)) {
+				const created = await createPostRun(b.studyId, { kind: 'analysis', trigger: 'completed', config: { ...postRun } });
+				attachedPostRuns = [...attachedPostRuns, created];
+			}
 			await b.launch(body);
 			launchOpen = false;
+			toast.success(`Launched “${b.meta.name.trim() || 'Untitled experiment'}”`, { description: 'The pilot runs first; follow it on Operations.' });
 			if (b.studyId) onlaunched(b.studyId);
 		} catch (e) {
 			launchError = formatApiError(e, 'Could not start the experiment.');
 		}
 	}
 
-	// ── post-run ──
-	let postRun = $state<AnalysisPostRunConfig>(defaultAnalysisConfig());
-	let postRunNote = $state('');
-	async function attachPostRun() {
-		if (!b.studyId) return;
-		postRunNote = '';
-		try {
-			await createPostRun(b.studyId, { kind: 'analysis', trigger: 'completed', config: { ...postRun } });
-			postRunNote = 'Attached: it runs when the experiment completes or stops.';
-		} catch (e) {
-			postRunNote = formatApiError(e, 'Could not attach the post-run.');
-		}
-	}
+	const barStatus = $derived.by(() => {
+		if (missing.length > 0) return `${plural(missing.length, 'required choice')} left`;
+		const plan = b.plan;
+		if (!plan) return 'Resolving the plan…';
+		const cells = plural(plan.n_cells_by_stage.main ?? plan.n_cells, 'cell');
+		return plan.estimate ? `${cells} · ≈ ${formatUsd(estimateBasisTotals(plan.estimate).expected)}` : cells;
+	});
+	const primaryLabel = $derived(current === 'review' ? (preparing ? 'Freezing the plan…' : 'Launch experiment…') : 'Review & launch');
 
-	const sections = $derived<ComposerNavSection[]>([
-		{ id: 'step-mode', step: 1, label: 'Mode & kind', done: true },
-		{ id: 'step-units', step: 2, label: isSlot ? 'Targets' : 'Tasks', done: units > 0 },
-		{ id: 'step-factors', step: 3, label: 'Factors', done: getLevels(design, 'model').length > 0 && (isSlot || getLevels(design, 'stack_profile').length > 0) },
-		{ id: 'step-repeats', step: 4, label: 'Replicates & seeds', done: design.repeats > 0 },
-		{ id: 'step-budget', step: 5, label: 'Budget preset' },
-		{ id: 'step-eval', step: 6, label: 'Evaluation' },
-		...(design.kind === 'confirmatory' ? [{ id: 'step-analysis', step: 7, label: 'Analysis plan', done: !!design.analysis_plan }] : []),
-		{ id: 'step-after', step: design.kind === 'confirmatory' ? 8 : 7, label: 'After the runs' },
-	]);
-	const errorCount = $derived(b.issues.filter((i) => i.severity === 'error').length);
+	// Keyboard focus and in-page jumps must never land under the sticky app bar or the sticky bottom bar
+	// (WCAG 2.2 focus not obscured): the browser honours scroll-padding when it scrolls a focused control in.
+	onMount(() => {
+		const root = document.documentElement;
+		const before = { top: root.style.scrollPaddingTop, bottom: root.style.scrollPaddingBottom };
+		root.style.scrollPaddingTop = '4.5rem';
+		root.style.scrollPaddingBottom = '5rem';
+		return () => {
+			root.style.scrollPaddingTop = before.top;
+			root.style.scrollPaddingBottom = before.bottom;
+		};
+	});
+
+	// Where to land without a `#step`: a resumed complete draft on Review, a `?models=` link on Tasks.
+	onMount(() => {
+		if (fromHash(page.url.hash)) return;
+		if (b.studyId && missing.length === 0) void go('review', { focus: false });
+		else if (models.length > 0 && !b.studyId) void go('units', { focus: false });
+	});
 </script>
 
-<div class="@container/composer">
-	<div class="grid gap-4 @4xl/composer:grid-cols-[minmax(0,1fr)_22rem]">
-		<div class="min-w-0 space-y-4">
-			<ComposerSection step={1} id="step-mode" title="Mode & kind" description="What is generated, and whether the analysis is pre-registered." done>
-				<div class="space-y-3">
-					<div class="flex flex-wrap gap-3">
-						<Segmented
-							aria-label="Mode"
-							value={design.mode}
-							disabled={locked}
-							items={[
-								{ value: 'app', label: MODE_LABELS.app, title: 'An agent builds a whole app per sample' },
-								{ value: 'slot', label: MODE_LABELS.slot, title: 'Regenerate one part of frozen parent apps N times' },
-							]}
-							onValueChange={(v) => update(switchMode(design, v as 'app' | 'slot'))}
-						/>
-						<Segmented
-							aria-label="Kind"
-							value={design.kind}
-							disabled={locked}
-							items={[
-								{ value: 'exploratory', label: 'Exploratory' },
-								{ value: 'confirmatory', label: 'Confirmatory', title: 'Pre-registered: the analysis plan is locked at launch' },
-							]}
-							onValueChange={(v) => update(setKind(design, v as 'exploratory' | 'confirmatory'))}
-						/>
-					</div>
-					<div class="grid gap-3 sm:grid-cols-2">
-						<div class="space-y-1.5">
-							<Label for="study-name">Name</Label>
-							<Input id="study-name" value={b.meta.name} placeholder="Untitled experiment" oninput={(e) => b.setMeta({ name: (e.currentTarget as HTMLInputElement).value })} />
-						</div>
-						<div class="space-y-1.5">
-							<Label for="study-hypothesis">Hypothesis</Label>
-							<Input
-								id="study-hypothesis"
-								value={b.meta.hypothesis}
-								placeholder="e.g. Security guidance lowers the probe exploit rate"
-								oninput={(e) => b.setMeta({ hypothesis: (e.currentTarget as HTMLInputElement).value })}
-							/>
-						</div>
-					</div>
-					<div class="space-y-1.5">
-						<Label for="study-description">Description</Label>
-						<Textarea id="study-description" rows={2} value={b.meta.description} oninput={(e: Event) => b.setMeta({ description: (e.currentTarget as HTMLTextAreaElement).value })} />
-					</div>
-				</div>
-			</ComposerSection>
-
-			<ComposerSection
-				step={2}
-				id="step-units"
-				title={isSlot ? 'Slot targets' : 'Tasks'}
-				description={isSlot ? 'The parts to regenerate, grouped by parent app. Stack, starter, auth and prose are fixed by the parents.' : 'Graded tasks; each is one unit, crossed with every condition.'}
-				done={units > 0}
-				meta={`${units} selected`}
-			>
-				{#if isSlot}
-					<SlotTargetPicker
-						slotSets={design.units.slot_sets}
-						targets={design.units.slot_targets}
-						disabled={locked}
-						onchange={(u) => update({ ...design, units: { ...design.units, ...u } })}
-					/>
-				{:else}
-					<TaskPicker value={design.units.tasks} disabled={locked} onchange={(tasks) => update({ ...design, units: { ...design.units, tasks } })} />
-				{/if}
-			</ComposerSection>
-
-			<ComposerSection step={3} id="step-factors" title="Factors" description="What varies between conditions. A factor left empty uses the default shown." done={sections[2].done}>
-				<div class="space-y-3">
-					<FactorTable
-						mode={design.mode}
-						factors={design.factors}
-						disabled={locked}
-						costByLevel={b.planFresh ? (b.plan?.estimate?.by_level ?? null) : null}
-						oneditprompt={(level) => (overrideTarget = { kind: 'prompt_set', ref: level })}
-						onchange={(factors: FactorSpec[]) => update(withFactors(design, factors))}
-					/>
-					{#if design.grid.type === 'fractional'}
-						<div class="max-w-xs space-y-1.5">
-							<Label for="grid-generator">Fraction generator</Label>
-							<Input
-								id="grid-generator"
-								class="font-mono"
-								placeholder="e.g. D=ABC"
-								value={design.grid.fraction?.generator ?? ''}
-								disabled={locked}
-								onchange={(e) => update({ ...design, grid: { ...design.grid, fraction: { generator: (e.currentTarget as HTMLInputElement).value.trim().toUpperCase() } } })}
-							/>
-							<p class="text-xs text-muted-foreground">Letters name the crossed two-level factors in table order (A = first).</p>
-						</div>
-					{/if}
-					<div class="flex flex-wrap items-end gap-4">
-						<label class="flex items-center gap-2 text-xs">
-							<Checkbox checked={b.dropIncompatible} disabled={locked} onCheckedChange={(v) => b.setDropIncompatible(v === true)} />
-							Drop incompatible combinations (listed in the plan; by-factor slices then use marginal means)
-						</label>
-						<div class="space-y-1">
-							<Label for="scheduling" class="text-xs">Scheduling</Label>
-							<Select.Simple
-								id="scheduling"
-								size="sm"
-								value={design.scheduling}
-								disabled={locked}
-								items={[
-									{ value: 'auto', label: 'Auto', description: 'Blocked when a condition uses a local endpoint' },
-									{ value: 'interleaved', label: 'Interleaved' },
-									{ value: 'blocked', label: 'Blocked by model' },
-								]}
-								onValueChange={(v) => update({ ...design, scheduling: v as Design['scheduling'] })}
-							/>
-						</div>
-					</div>
-				</div>
-			</ComposerSection>
-
-			<ComposerSection step={4} id="step-repeats" title="Replicates & seeds" description="Repeats per (condition, unit); every condition gets the same seed for the same (unit, repeat)." done>
-				<div class="grid gap-4 lg:grid-cols-2">
-					<div class="space-y-3">
-						<NumberField
-							id="repeats"
-							label="Repeats"
-							value={design.repeats}
-							min={REPEAT_LIMITS[design.mode].min}
-							max={REPEAT_LIMITS[design.mode].max}
-							required
-							disabled={locked}
-							hint="{REPEAT_LIMITS[design.mode].min}–{REPEAT_LIMITS[design.mode].max} in {MODE_LABELS[design.mode].toLowerCase()} mode"
-							onchange={(v) => v !== null && update({ ...design, repeats: clampRepeats(design.mode, v) })}
-						/>
-						<div class="flex items-end gap-2">
-							<NumberField id="base-seed" label="Base seed" value={design.base_seed} min={0} max={2 ** 31 - 1} required disabled={locked} onchange={(v) => v !== null && update({ ...design, base_seed: v })} />
-							<Button variant="outline" size="icon" aria-label="Randomise the seeds" disabled={locked} onclick={() => update({ ...design, base_seed: randomSeed(), order_seed: randomSeed() })}>
-								<Dices />
-							</Button>
-						</div>
-						<NumberField id="order-seed" label="Order seed" value={design.order_seed} min={0} max={2 ** 31 - 1} required disabled={locked} hint="Shuffles the unit order and the conditions inside each block" onchange={(v) => v !== null && update({ ...design, order_seed: v })} />
-					</div>
-					<PowerHelper mode={design.mode} {units} repeats={design.repeats} />
-				</div>
-			</ComposerSection>
-
-			<ComposerSection
-				step={5}
-				id="step-budget"
-				title="Budget preset"
-				description="Limits enforced outside the model: the gateway per run, the scheduler per cell and experiment. Never part of the prompt."
-				collapsible
-				bind:open={budgetOpen}
-				summary={budgetSummary}
-			>
-				<ResourcePolicyPicker
-					value={design.resource_policy}
-					disabled={locked}
-					warnOnFingerprintChange={!!b.study?.cloned_from || (b.study?.status !== undefined && b.study.status !== 'draft')}
-					onchange={(ref) => update({ ...design, resource_policy: ref })}
-					onsummary={(line) => (budgetSummary = line)}
-				/>
-			</ComposerSection>
-
-			<ComposerSection
-				step={6}
-				id="step-eval"
-				title="Evaluation"
-				description="What is measured for every sample; part of the design (and of the pre-registration), not of the budget."
-				collapsible
-				bind:open={evalOpen}
-				summary={`${design.evaluation.eval_level} level · ${design.evaluation.eval_suite.split('#')[0]}${Object.keys(design.evaluation.overrides ?? {}).length ? ' · overrides' : ''}`}
-			>
-				<EvaluationSection
-					value={design.evaluation}
-					mode={design.mode}
-					disabled={locked}
-					machineMinutes={b.plan?.estimate?.time?.eval_machine_minutes ?? null}
-					onchange={(evaluation) => update({ ...design, evaluation })}
-				/>
-			</ComposerSection>
-
-			{#if design.kind === 'confirmatory'}
-				<ComposerSection step={7} id="step-analysis" title="Analysis plan" description="Pre-registered at launch (prereg_hash); deviations are reported." done={!!design.analysis_plan}>
-					<AnalysisPlanSection
-						value={design.analysis_plan ?? defaultAnalysisPlan(design.mode)}
-						mode={design.mode}
-						repeats={design.repeats}
-						primaryFeatures={design.slot_primary_features}
-						disabled={locked}
-						onchange={(plan) => update({ ...design, analysis_plan: plan })}
-						onfeatures={(refs) => update({ ...design, slot_primary_features: refs })}
-					/>
-				</ComposerSection>
-			{/if}
-
-			<ComposerSection step={design.kind === 'confirmatory' ? 8 : 7} id="step-after" title="After the runs" description="Static analysis and the report when the experiment completes. Schedules are set on the experiment's Operations page.">
-				<div class="space-y-3">
-					<PostRunEditor bind:value={postRun} mode={design.mode} />
-					<div class="flex flex-wrap items-center gap-2">
-						<Button variant="outline" size="sm" disabled={!b.studyId || postRun.tool_slugs.length === 0} onclick={attachPostRun}>Attach to this experiment</Button>
-						{#if postRunNote}<span class="text-xs text-muted-foreground" role="status">{postRunNote}</span>{/if}
-					</div>
-				</div>
-			</ComposerSection>
-		</div>
-
-		<aside class="min-w-0" aria-label="Plan">
-			<div class="space-y-4 @4xl/composer:sticky @4xl/composer:top-16">
-				<div class="hidden @4xl/composer:block"><ComposerSectionNav {sections} /></div>
-				<div class="rounded-md border border-border bg-card p-3" id="plan-rail">
-					<PlanRail state={b} onfix={applyFix} oncell={openCell} onfreeze={freeze} onstart={() => (launchOpen = true)} />
-					{#if fixError}<p class="mt-2 text-xs text-danger-fg">{fixError}</p>{/if}
-				</div>
-			</div>
-		</aside>
+<div class="@container/builder space-y-4">
+	<div class="sb-stepper">
+		<BuilderStepper items={stepperItems} {current} onselect={(id) => go(id)} />
 	</div>
 
-	<StartBar
-		runs={b.plan?.n_cells ?? null}
-		maxCost={b.plan?.estimate ? estimateBasisTotals(b.plan.estimate).p90 : null}
-		errors={errorCount}
-		label="Start…"
-		canStart={b.canStart}
-		busy={b.launching}
-		reason={b.canStart ? '' : b.frozen ? 'Freeze the current plan again.' : 'Freeze the plan in the rail first.'}
-		summaryHref="#plan-rail"
-		onstart={() => (launchOpen = true)}
-	/>
+	{#if locked}
+		<p class="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" role="note">
+			This experiment is locked: the design is read-only.
+		</p>
+	{/if}
+
+	<div class="grid items-start gap-4 {current === 'review' ? '' : '@4xl/builder:grid-cols-[minmax(0,1fr)_20.5rem]'}">
+		<div class="min-w-0 scroll-mt-16" bind:this={panelEl}>
+			{#key current}
+				<StepPanel
+					{index}
+					total={steps.length}
+					title={def.title}
+					lead={def.lead}
+					headingId="step-{current}-title"
+					backLabel={prev ? labelOf(prev) : undefined}
+					onback={prev ? () => go(prev) : undefined}
+					nextLabel={next ? (next === 'review' ? 'Review' : `Continue to ${labelOf(next)}`) : undefined}
+					onnext={continueOn}
+					blockers={blockersHere}
+					showBlockers={warned.has(current)}
+					footer={current === 'review' ? launchFooter : undefined}
+				>
+					{#snippet aside()}
+						{#if current === 'units' && units > 0}
+							<span class="sb-count">{plural(units, isSlot ? 'target' : 'task')} chosen</span>
+						{:else if current === 'models' && models.length > 0}
+							<span class="sb-count">{plural(models.length, 'model')} chosen</span>
+						{/if}
+					{/snippet}
+
+					{#if current === 'setup'}
+						<SetupStep builder={b} {locked} />
+					{:else if current === 'models'}
+						<ModelsStep
+							value={models}
+							mode={design.mode}
+							disabled={locked}
+							costByLevel={b.planFresh ? (b.plan?.estimate?.by_level?.model ?? null) : null}
+							onchange={(levels) => b.setDesign(setLevels(design, 'model', levels))}
+						/>
+					{:else if current === 'units'}
+						{#if isSlot}
+							<SlotTargetPicker
+								slotSets={design.units.slot_sets}
+								targets={design.units.slot_targets}
+								disabled={locked}
+								onchange={(u) => b.setDesign({ ...design, units: { ...design.units, ...u } })}
+							/>
+						{:else}
+							<TaskPicker value={design.units.tasks} disabled={locked} onchange={(tasks) => b.setDesign({ ...design, units: { ...design.units, tasks } })} />
+						{/if}
+					{:else if current === 'treatments'}
+						<TreatmentsStep builder={b} {locked} onprompt={(level) => (overrideTarget = { kind: 'prompt_set', ref: level })} />
+					{:else if current === 'replication'}
+						<ReplicationStep
+							builder={b}
+							{locked}
+							{units}
+							warnOnFingerprintChange={!!b.study?.cloned_from || (b.study?.status !== undefined && b.study.status !== 'draft')}
+						/>
+					{:else if current === 'measurement'}
+						<MeasurementStep builder={b} {locked} bind:postRun {attachedPostRuns} />
+					{:else}
+						<ReviewStep
+							builder={b}
+							{steps}
+							{missing}
+							issues={serverIssues}
+							{postRun}
+							onselect={(id) => go(id)}
+							oncell={(key) => (drawerCell = key)}
+							onfix={applyFix}
+							{fixError}
+							bind:blockersEl
+						/>
+					{/if}
+				</StepPanel>
+			{/key}
+		</div>
+
+		{#if current !== 'review'}
+			<aside class="hidden min-w-0 @4xl/builder:block" aria-label="Plan">
+				<div class="sticky top-16">
+					<BlueprintRail
+						builder={b}
+						{current}
+						{steps}
+						{missing}
+						{stepIssues}
+						onselect={(id) => go(id)}
+						onprimary={requestLaunch}
+						{primaryLabel}
+						primaryBusy={preparing}
+					/>
+				</div>
+			</aside>
+		{/if}
+	</div>
+
+	<!-- Narrow screens: the rail's essentials as a sticky bar. -->
+	<div class="sb-bar" data-slot="start-bar">
+		<div class="min-w-0 flex-1 text-xs">
+			<p class="font-medium">Step {index + 1} of {steps.length} · {def.label}</p>
+			<p class="text-muted-foreground" role="status" aria-atomic="true">{barStatus}</p>
+		</div>
+		{#if current === 'review'}
+			<Button size="sm" disabled={preparing || b.launching || locked} onclick={requestLaunch}>
+				{#if preparing}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Rocket />{/if}Launch…
+			</Button>
+		{:else if next}
+			<Button size="sm" onclick={continueOn}>{next === 'review' ? 'Review' : 'Next'}<ArrowRight /></Button>
+		{/if}
+	</div>
 </div>
+
+{#snippet launchFooter()}
+	<div class="flex flex-wrap items-center justify-end gap-3">
+		{#if prepareError}
+			<p class="max-w-md text-xs text-danger-fg" role="alert">{prepareError}</p>
+		{:else if missing.length > 0 || errorCount > 0}
+			<p class="text-xs text-muted-foreground">Resolve the items above to launch.</p>
+		{:else if b.planLoading || b.pending}
+			<p class="text-xs text-muted-foreground" role="status">Resolving the plan…</p>
+		{/if}
+		<Button disabled={preparing || b.launching || locked} onclick={requestLaunch}>
+			{#if preparing}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Rocket />{/if}
+			{preparing ? 'Freezing the plan…' : 'Launch experiment…'}
+		</Button>
+	</div>
+{/snippet}
 
 {#if b.studyId && b.plan}
 	<ResolvedCellDrawer
@@ -429,4 +454,57 @@
 	onclose={() => (launchOpen = false)}
 />
 
-<p class="sr-only" aria-live="polite">{b.plan?.estimate ? `Expected ${formatUsd(estimateBasisTotals(b.plan.estimate).expected)}` : ''}</p>
+<style>
+	.sb-stepper {
+		overflow: hidden;
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) + 2px);
+		background: var(--card);
+		box-shadow: var(--shadow-card);
+	}
+	.sb-count {
+		border-radius: 9999px;
+		background: color-mix(in oklab, var(--primary) 12%, transparent);
+		padding: 0.125rem 0.625rem;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		font-variant-numeric: tabular-nums;
+		color: var(--primary);
+	}
+	.sb-bar {
+		position: sticky;
+		bottom: 0;
+		z-index: 20;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-inline: -0.75rem;
+		padding: 0.5rem 0.75rem;
+		border-top: 1px solid var(--border);
+		background: var(--card);
+	}
+	@container builder (min-width: 56rem) {
+		.sb-bar {
+			display: none;
+		}
+	}
+	/* Short (landscape phone) viewports: a sticky bar would cover a third of the screen; it ends the step instead. */
+	@media (max-height: 30rem) {
+		.sb-bar {
+			position: static;
+			margin-top: 0;
+		}
+	}
+	@media (min-width: 640px) {
+		.sb-bar {
+			margin-inline: -1rem;
+			padding-inline: 1rem;
+		}
+	}
+	@media (min-width: 768px) {
+		.sb-bar {
+			margin-inline: -1.25rem;
+			padding-inline: 1.25rem;
+		}
+	}
+</style>

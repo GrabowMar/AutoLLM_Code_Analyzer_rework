@@ -56,7 +56,8 @@
 	onclick={handleClick}
 	onkeydown={handleKeydown}
 	class={cn(
-		'relative inline-flex shrink-0 items-center rounded-full transition-colors duration-200 ease-out',
+		// ::after extends the pointer target to ≥ 24px tall (WCAG 2.2 target size) without moving layout.
+		"relative inline-flex shrink-0 items-center rounded-full transition-colors duration-200 ease-out after:absolute after:-inset-y-1.5 after:-inset-x-1 after:content-['']",
 		'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
 		'motion-reduce:transition-none',
 		disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',

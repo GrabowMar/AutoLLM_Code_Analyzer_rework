@@ -18,7 +18,9 @@
 	import { formatApiError, isAbortError } from '$lib/api/core';
 	import { getSampleTrajectory } from '$lib/api/v3/samples';
 	import type { RunOut, RunTrajectoryOut, TrajectoryStepOut } from '$lib/api/v3/types';
-	import { fmtInt, fmtSeconds, isActiveStatus, shortSha } from './format';
+	import { fmtInt, fmtSeconds, groupTurns, isActiveStatus, shortSha, turnTools } from './format';
+	import TrajectoryChart from './TrajectoryChart.svelte';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 
 	interface Props {
 		run: RunOut;
@@ -79,6 +81,36 @@
 		return times.length ? Math.min(...times) : 0;
 	});
 	const observed = $derived(data?.observed_inputs ?? null);
+
+	// Turn view (default): each LLM call with the actions it triggered. "Steps" keeps the raw table.
+	let view = $state<'turns' | 'steps'>('turns');
+	const turns = $derived(groupTurns(steps));
+	const shownTurns = $derived(kindFilter === 'failed' ? turns.filter((t) => t.failed > 0) : turns);
+	const maxIn = $derived(Math.max(1, ...turns.map((t) => t.tokensIn)));
+	let selectedTurn = $state<number | null>(null);
+	let observedOpen = $state(false);
+
+	function selectTurn(n: number) {
+		selectedTurn = n;
+		view = 'turns';
+		kindFilter = 'all';
+		requestAnimationFrame(() => document.getElementById(`turn-${n}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+	}
+
+	const counts = $derived(
+		trajectory
+			? ([
+					['steps', trajectory.steps.length],
+					['turns', turns.filter((t) => t.llm).length],
+					['tool calls', trajectory.tool_calls],
+					['shell', trajectory.shell_commands],
+					['edits', trajectory.edits],
+					['compactions', trajectory.compactions],
+					['subagent calls', trajectory.subagent_calls],
+					['unparsed lines', trajectory.unparsed_lines],
+				] as [string, number][])
+			: [],
+	);
 </script>
 
 <div class="space-y-4">
@@ -90,19 +122,23 @@
 	{/if}
 
 	{#if trajectory}
-		<div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-			{#each [['Steps', trajectory.steps.length], ['Tool calls', trajectory.tool_calls], ['Edits', trajectory.edits], ['Shell', trajectory.shell_commands], ['Compactions', trajectory.compactions], ['Subagent calls', trajectory.subagent_calls], ['Unparsed lines', trajectory.unparsed_lines]] as [label, value] (label)}
-				<div class="kpi-card">
-					<p class="kpi-label">{label}</p>
-					<p class="kpi-value">{fmtInt(value as number)}</p>
+		<section class="tj-card">
+			<div class="tj-summary">
+				{#each counts as [label, value] (label)}
+					<span class={value ? '' : 'text-muted-foreground/70'}><b class={value ? '' : 'font-normal'}>{fmtInt(value)}</b> {label}</span>
+				{/each}
+				<span class="tj-tags">
+					<Badge variant="outline">parser {trajectory.parser} v{trajectory.parser_version}</Badge>
+					{#if trajectory.max_turns_hit}<Badge variant="secondary">max turns hit</Badge>{/if}
+					{#if trajectory.ended_on_llm_error}<Badge variant="destructive">ended on an LLM error</Badge>{/if}
+				</span>
+			</div>
+			{#if turns.filter((t) => t.llm).length > 1}
+				<div class="tj-chart">
+					<TrajectoryChart {turns} selected={selectedTurn} onselect={selectTurn} />
 				</div>
-			{/each}
-		</div>
-		<div class="flex flex-wrap gap-1.5 text-xs">
-			<Badge variant="outline">parser {trajectory.parser} v{trajectory.parser_version}</Badge>
-			{#if trajectory.max_turns_hit}<Badge variant="secondary">max turns hit</Badge>{/if}
-			{#if trajectory.ended_on_llm_error}<Badge variant="destructive">ended on an LLM error</Badge>{/if}
-		</div>
+			{/if}
+		</section>
 	{/if}
 
 	<Card.Root class="gap-0 overflow-clip py-0">
@@ -118,16 +154,27 @@
 				{/if}
 				<Segmented
 					size="sm"
+					aria-label="View"
+					bind:value={view}
+					items={[
+						{ value: 'turns', label: 'Turns' },
+						{ value: 'steps', label: 'Raw steps' },
+					]}
+				/>
+				<Segmented
+					size="sm"
 					aria-label="Step filter"
 					bind:value={kindFilter}
 					items={[
 						{ value: 'all', label: 'All' },
 						{ value: 'failed', label: 'Failed' },
-						...kinds.slice(0, 2).map((k) => ({ value: k, label: k })),
+						...(view === 'steps' ? kinds.slice(0, 2).map((k) => ({ value: k, label: k })) : []),
 					]}
 				/>
 			</div>
-			<span class="text-xs text-muted-foreground">{shown.length} of {steps.length} steps</span>
+			<span class="text-xs text-muted-foreground">
+				{#if view === 'turns'}{shownTurns.length} of {turns.length} turns{:else}{shown.length} of {steps.length} steps{/if}
+			</span>
 		</div>
 		{#if loading && steps.length === 0}
 			<LoadingState label="loading trajectory" />
@@ -140,6 +187,37 @@
 				title={missing ? 'No trajectory recorded' : 'No steps'}
 				description={running ? 'Steps appear as the harness works.' : 'The harness output could not be parsed into steps, or the attempt never started.'}
 			/>
+		{:else if view === 'turns'}
+			<ol class="tj-turns">
+				{#each shownTurns as t (t.n)}
+					<li id="turn-{t.n}" class="tj-turn" data-selected={selectedTurn === t.n} data-failed={t.failed > 0}>
+						<span class="tj-n">{t.n || '·'}</span>
+						<div class="tj-ctx" title="{fmtInt(t.tokensIn)} prompt tokens (context)">
+							<span class="tj-ctx-bar"><span style:width="{(t.tokensIn / maxIn) * 100}%"></span></span>
+							<span class="tj-ctx-val">{t.llm ? fmtInt(t.tokensIn) : '—'}</span>
+						</div>
+						<span class="tj-out" title="Output tokens">{t.llm ? `+${fmtInt(t.tokensOut)}` : ''}</span>
+						<div class="tj-acts">
+							{#if t.actions.length === 0}
+								<span class="text-muted-foreground">{t.llm ? 'no tool call' : ''}</span>
+							{:else}
+								{#each t.actions as a (a.index)}
+									<span
+										class="tj-act"
+										data-ok={a.ok}
+										title="Step {a.index}: {a.kind}{a.tool ? ` · ${a.tool}` : ''}{a.command_sha ? ` · cmd ${shortSha(a.command_sha, 8)}` : ''}{a.ok === false ? ' · failed' : ''}{a.duration_s != null ? ` · ${fmtSeconds(a.duration_s)}` : ''}"
+										>{a.tool ?? a.kind}</span
+									>
+								{/each}
+							{/if}
+						</div>
+						<span class="tj-files" title={t.files.join('\n')}>{t.files.length ? t.files.map((f) => f.split('/').pop()).join(', ') : ''}</span>
+						<span class="tj-time">{t.seconds != null ? fmtSeconds(t.seconds) : ''}</span>
+					</li>
+				{:else}
+					<li class="px-4 py-6 text-center text-sm text-muted-foreground">No turn with a failed tool call.</li>
+				{/each}
+			</ol>
 		{:else}
 			<div class="table-frame" {@attach tableFrame}>
 				<table>
@@ -182,24 +260,22 @@
 	</Card.Root>
 
 	{#if trajectory?.final_message}
-		<Card.Root>
-			<Card.Header>
-				<Card.Title class="font-display">Final message</Card.Title>
-				{#if trajectory.final_message_truncated}<Card.Description>Truncated by the parser.</Card.Description>{/if}
-			</Card.Header>
-			<Card.Content>
-				<pre class="max-h-80 overflow-auto whitespace-pre-wrap font-mono text-xs">{trajectory.final_message}</pre>
-			</Card.Content>
-		</Card.Root>
+		<section class="tj-card tj-final">
+			<h2 class="tj-h">Agent's last words</h2>
+			<blockquote>{trajectory.final_message}</blockquote>
+			{#if trajectory.final_message_truncated}<p class="text-[11px] text-muted-foreground">Truncated by the parser.</p>{/if}
+		</section>
 	{/if}
 
 	{#if observed}
-		<Card.Root>
-			<Card.Header>
-				<Card.Title class="font-display">Observed inputs</Card.Title>
-				<Card.Description>What the harness actually sent on its first main-class call (normalized hashes).</Card.Description>
-			</Card.Header>
-			<Card.Content class="text-xs">
+		<section class="tj-card">
+			<button type="button" class="tj-disclosure" aria-expanded={observedOpen} onclick={() => (observedOpen = !observedOpen)}>
+				<h2 class="tj-h">Observed inputs</h2>
+				<span class="truncate text-xs text-muted-foreground">What the harness sent on its first main-class call · {observed.tool_names?.join(', ') || 'no tools'}</span>
+				<ChevronDown class="ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 {observedOpen ? 'rotate-180' : ''}" aria-hidden="true" />
+			</button>
+			{#if observedOpen}
+			<div class="px-5 pb-4 text-xs">
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
 					<dt class="text-muted-foreground">system prompt</dt><dd class="font-mono">{shortSha(observed.system_prompt_sha)}</dd>
 					<dt class="text-muted-foreground">first user message</dt><dd class="font-mono">{shortSha(observed.first_user_message_sha)}</dd>
@@ -208,7 +284,191 @@
 					<dt class="text-muted-foreground">calls by class</dt>
 					<dd class="font-mono">{Object.entries(observed.calls_by_class ?? {}).map(([k, n]) => `${k} ${n}`).join(' · ') || '—'}</dd>
 				</dl>
-			</Card.Content>
-		</Card.Root>
+			</div>
+			{/if}
+		</section>
 	{/if}
 </div>
+
+<style>
+	.tj-card {
+		overflow: hidden;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--card);
+		box-shadow: var(--shadow-card);
+	}
+	.tj-h {
+		font-family: var(--font-display);
+		font-size: 1rem;
+		font-weight: 600;
+	}
+	.tj-summary {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.375rem 1.25rem;
+		padding: 0.75rem 1.25rem;
+		font-size: 0.8125rem;
+		color: var(--muted-foreground);
+	}
+	.tj-summary b {
+		font-family: var(--font-mono);
+		font-weight: 600;
+		color: var(--foreground);
+		font-variant-numeric: tabular-nums;
+	}
+	.tj-tags {
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+		margin-left: auto;
+	}
+	.tj-chart {
+		border-top: 1px solid var(--border);
+		padding: 0.875rem 1.25rem 0.75rem;
+	}
+
+	/* Turn list */
+	.tj-turns {
+		max-height: 70vh;
+		overflow-y: auto;
+	}
+	.tj-turn {
+		display: grid;
+		grid-template-columns: 2.5rem minmax(7rem, 11rem) 4.5rem minmax(0, 1fr) minmax(0, 14rem) 4rem;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.4rem 1rem;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+		font-size: 0.8125rem;
+		scroll-margin: 4rem;
+	}
+	.tj-turn[data-failed='true'] {
+		box-shadow: inset 2px 0 0 var(--destructive);
+	}
+	.tj-turn[data-selected='true'] {
+		background: color-mix(in oklab, var(--primary) 9%, transparent);
+	}
+	.tj-turn:hover {
+		background: var(--surface-2, var(--muted));
+	}
+	.tj-n {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		color: var(--muted-foreground);
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.tj-ctx {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.tj-ctx-bar {
+		display: block;
+		flex: 1;
+		height: 4px;
+		border-radius: 9999px;
+		background: var(--muted);
+		overflow: hidden;
+	}
+	.tj-ctx-bar > span {
+		display: block;
+		height: 100%;
+		background: color-mix(in oklab, var(--primary) 70%, transparent);
+	}
+	.tj-ctx-val,
+	.tj-out,
+	.tj-time {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.tj-ctx-val {
+		min-width: 3.75rem;
+		text-align: right;
+	}
+	.tj-out {
+		color: color-mix(in oklab, var(--chart-3, #c2850c) 85%, var(--foreground));
+		text-align: right;
+	}
+	.tj-time {
+		color: var(--muted-foreground);
+		text-align: right;
+	}
+	.tj-acts {
+		display: flex;
+		min-width: 0;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+	}
+	.tj-act {
+		border-radius: 0.25rem;
+		border: 1px solid var(--border);
+		padding: 0 0.375rem;
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		line-height: 1.125rem;
+	}
+	.tj-act[data-ok='false'] {
+		color: var(--danger-fg);
+		border-color: color-mix(in oklab, var(--destructive) 45%, transparent);
+		background: color-mix(in oklab, var(--destructive) 10%, transparent);
+	}
+	.tj-files {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		color: var(--muted-foreground);
+	}
+
+	.tj-final {
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+		padding: 1rem 1.25rem 1.125rem;
+	}
+	.tj-final blockquote {
+		max-height: 20rem;
+		overflow: auto;
+		white-space: pre-wrap;
+		border-left: 2px solid var(--primary);
+		border-radius: 0 calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0;
+		background: color-mix(in oklab, var(--primary) 6%, transparent);
+		padding: 0.625rem 0.875rem;
+		font-size: 0.875rem;
+		line-height: 1.55;
+	}
+	.tj-disclosure {
+		display: flex;
+		width: 100%;
+		min-width: 0;
+		cursor: pointer;
+		align-items: baseline;
+		gap: 0.75rem;
+		padding: 0.875rem 1.25rem;
+		text-align: left;
+	}
+	.tj-disclosure:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: -2px;
+	}
+
+	@media (max-width: 760px) {
+		.tj-turn {
+			grid-template-columns: 2rem minmax(0, 1fr) 4rem;
+		}
+		.tj-acts {
+			grid-column: 2 / -1;
+		}
+		.tj-files,
+		.tj-time {
+			display: none;
+		}
+	}
+</style>

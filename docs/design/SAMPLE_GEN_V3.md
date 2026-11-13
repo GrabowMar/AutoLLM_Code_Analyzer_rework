@@ -2740,7 +2740,7 @@ The frontend follows `frontend/DESIGN_SYSTEM.md` throughout:
 
 ### 10.2 Study builder (`/studies/new`, `lib/components/studies/builder/`)
 
-The layout is a two-column page: the left column has numbered `ComposerSection`s (optional steps collapsible with a one-line summary, per DESIGN_SYSTEM.md), and the right rail (`PlanRail`) shows the live plan.
+The layout is a two-column page: the left column has numbered `ComposerSection`s (optional steps collapsible with a one-line summary, per DESIGN_SYSTEM.md), and the right rail (`PlanRail`) shows the live plan. *(Superseded 2026-11-05: the builder is now a step-by-step workspace — stepper, one open step, `BlueprintRail`, and a Review step that freezes and launches in one action; see `frontend/DESIGN_SYSTEM.md` › Experiment builder. The plan behaviour below is unchanged.)*
 
 1. **Mode & kind.** `Segmented` for `Agentic app` / `Slot` and for `Exploratory` / `Confirmatory`.
 2. **Units.**

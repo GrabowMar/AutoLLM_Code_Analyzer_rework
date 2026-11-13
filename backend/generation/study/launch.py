@@ -1106,6 +1106,42 @@ def launch_adhoc(
     return payload
 
 
+DRY_RUN_MAX_CELLS: Final = 12
+
+
+def dry_run(
+    design: Design | dict[str, Any],
+    *,
+    user: User | None,
+    max_cells: int = DRY_RUN_MAX_CELLS,
+) -> dict[str, Any]:
+    """Everything a generation would receive, without generating (the Library's "Generation dry run" page).
+
+    Resolves the design exactly like ``launch_adhoc`` and returns the plan summary plus the full detail of
+    the first ``max_cells`` cells (rendered stimuli with source spans, effective roles, policy and params,
+    harness, starter tree, identity, estimate). Every row is rolled back: no study, plan or run survives
+    and no LLM is called. Rendered texts may stay in the content-addressed blob store (``blobs.gc``).
+    """
+    from backend.generation.study import serialize
+
+    raw = design.model_dump(mode="json") if hasattr(design, "model_dump") else dict(design)
+    limit = max(1, min(max_cells, DRY_RUN_MAX_CELLS))
+    with transaction.atomic():
+        study = create_study(user=user, name="Dry run", design=raw)
+        study.is_quick = True
+        study.save(update_fields=["is_quick", "updated_at"])
+        bundle = resolve_bundle(study, use_cache=False)
+        plan = serialize.plan_out(bundle, sample_cells=0)
+        plan["persisted"] = False
+        payload = {
+            "plan": plan,
+            "cells": [serialize.cell_detail(bundle, cell) for cell in bundle.plan.cells[:limit]],
+            "truncated": len(bundle.plan.cells) > limit,
+        }
+        transaction.set_rollback(True)
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Pause, resume, cancel
 # ---------------------------------------------------------------------------

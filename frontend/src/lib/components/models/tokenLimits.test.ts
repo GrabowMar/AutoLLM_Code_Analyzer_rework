@@ -148,22 +148,22 @@ describe("knownTokenLimit", () => {
 });
 
 describe("model header", () => {
+  // Header figure: <span class="mh-fig-label">Context</span> then the value span (scoped class suffixes vary).
+  const contextValue = (body: string) =>
+    body.match(
+      /mh-fig-label[^"]*">Context<\/span>\s*<span class="mh-fig-value([^"]*)">([^<]*)<\/span>/,
+    );
+
   it("shows an unreported context window as a muted dash, not 0", () => {
     const body = html(
       render(ModelHeader, {
-        props: {
-          model: model(),
-          slug: "x",
-          efficiency: { grade: "A+", color: "" },
-          refreshing: false,
-        },
+        props: { model: model(), slug: "x", refreshing: false, insights: null },
       }).body,
     );
-    expect(body).toMatch(
-      /<b class="font-normal text-muted-foreground">—<\/b> context/,
-    );
-    expect(body).not.toMatch(/<b[^>]*>0<\/b> context/);
-    expect(body).not.toContain("max out");
+    const m = contextValue(body);
+    expect(m?.[2]).toBe("—");
+    expect(m?.[1]).toContain("is-muted");
+    expect(body).not.toContain("max out</span>");
   });
 
   it("keeps known limits", () => {
@@ -172,13 +172,13 @@ describe("model header", () => {
         props: {
           model: model(known),
           slug: "x",
-          efficiency: { grade: "A+", color: "" },
           refreshing: false,
+          insights: null,
         },
       }).body,
     );
-    expect(body).toMatch(/<b>131K<\/b> context/);
-    expect(body).toMatch(/<b>8K<\/b> max out/);
+    expect(contextValue(body)?.[2]).toBe("131K");
+    expect(body).toContain("8K max out");
   });
 });
 
@@ -187,7 +187,7 @@ describe("model overview", () => {
     const body = overview(model());
     expect(body).not.toContain("0 tokens");
     expect(body).toMatch(
-      /<dt class="text-muted-foreground">Context<\/dt>\s*<dd class="[^"]*text-muted-foreground[^"]*">—/,
+      /<dt class="text-muted-foreground[^"]*">Context<\/dt>\s*<dd class="[^"]*text-muted-foreground[^"]*">—/,
     );
     // Context window row: muted dash, no meter, no "Smaller than …" comparison.
     expect(body).toContain("Context window");
@@ -250,7 +250,8 @@ describe("models table and related list", () => {
 
   it("keeps known limits in the table", () => {
     const body = table([model(known)]);
-    expect(body).toMatch(/<td class="num">131K<\/td>/);
+    // Context renders as a log-scale bar plus its value.
+    expect(body).toMatch(/class="bar-val[^"]*">131K<\/span>/);
     expect(body).toMatch(/<td class="num text-muted-foreground">8K<\/td>/);
   });
 

@@ -73,6 +73,7 @@
 	const pausedConditions = $derived(
 		new Map(((budget?.deviations?.paused_conditions as { condition_id: number; reason: string }[] | undefined) ?? []).map((p) => [p.condition_id, p.reason])),
 	);
+	const liveNow = $derived(!!study && !isTerminal(study.status) && study.status !== 'draft');
 	const editable = $derived(!!study && !isTerminal(study.status) && study.status !== 'draft');
 
 	let actionError = $state('');
@@ -237,22 +238,27 @@
 				{#snippet caption()}One square per cell, in repeat order: ring = waiting, solid = finished (coloured by outcome), dashed = excluded.{/snippet}
 			</StudyFigure>
 
-			<div class="grid gap-4 lg:grid-cols-2">
+			<!-- Live panels only while something can still happen; a finished experiment shows failures alone. -->
+			<div class="grid gap-4 {liveNow || live.activity.length ? 'lg:grid-cols-2' : ''}">
 				<Card.Root>
 					<Card.Header><Card.Title>Failures</Card.Title></Card.Header>
 					<Card.Content><FailureSummary {cells} /></Card.Content>
 				</Card.Root>
-				<Card.Root>
-					<Card.Header><Card.Title>Activity</Card.Title></Card.Header>
-					<Card.Content><ActivityFeed items={live.activity} {conditionLabel} /></Card.Content>
-				</Card.Root>
+				{#if liveNow || live.activity.length}
+					<Card.Root>
+						<Card.Header><Card.Title>Activity</Card.Title></Card.Header>
+						<Card.Content><ActivityFeed items={live.activity} {conditionLabel} /></Card.Content>
+					</Card.Root>
+				{/if}
 			</div>
 		{/if}
 
-		<Card.Root>
-			<Card.Header><Card.Title>Live trajectory</Card.Title></Card.Header>
-			<Card.Content><RunStreamPanel runs={running} /></Card.Content>
-		</Card.Root>
+		{#if liveNow || running.length}
+			<Card.Root>
+				<Card.Header><Card.Title>Live trajectory</Card.Title></Card.Header>
+				<Card.Content><RunStreamPanel runs={running} /></Card.Content>
+			</Card.Root>
+		{/if}
 
 		{#if capacity}<CapacityStrip {capacity} />{/if}
 
@@ -262,7 +268,7 @@
 			</StudyFigure>
 		{/if}
 
-		<StudyFigure id="table-ledger" kind="table" number="O5" title="Spend ledger">
+		<StudyFigure id="table-ledger" kind="table" number="O5" title="Spend ledger" collapsible summary="every reservation, usage and release entry">
 			<LedgerTable studyId={study.id} refreshSignal={ledgerSignal} />
 		</StudyFigure>
 

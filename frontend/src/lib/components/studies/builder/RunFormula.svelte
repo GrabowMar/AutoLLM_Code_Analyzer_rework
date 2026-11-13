@@ -18,11 +18,16 @@
 	 * "before you start" checklist (neutral — no error before the user acts).
 	 *
 	 * Props: `factors`, `total` (`null` while unknown), `unit` (plural, default
-	 * "runs").
+	 * "runs"), `showMissing` (the "Still to choose" line; off where a to-do list already says it).
 	 */
 	import { cn } from '$lib/utils';
 
-	let { factors, total, unit = 'runs' }: { factors: RunFactor[]; total: number | null; unit?: string } = $props();
+	let {
+		factors,
+		total,
+		unit = 'runs',
+		showMissing = true,
+	}: { factors: RunFactor[]; total: number | null; unit?: string; showMissing?: boolean } = $props();
 
 	const missing = $derived(factors.filter((f) => f.count === 0));
 	const totalUnit = $derived(total === 1 ? unit.replace(/s$/, '') : unit);
@@ -67,7 +72,7 @@
 			</div>
 		</div>
 	</div>
-	{#if missing.length > 0}
+	{#if showMissing && missing.length > 0}
 		<p class="text-xs text-muted-foreground">
 			Still to choose:
 			{#each missing as f, i (f.label)}{#if i > 0}{i === missing.length - 1 ? ' and ' : ', '}{/if}{#if f.href}<a

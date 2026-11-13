@@ -24,6 +24,9 @@
 	import { itemSubline, kindInfo } from './kinds';
 	import { libraryStore } from './library.svelte';
 	import PinnedRefBadge from './PinnedRefBadge.svelte';
+	import Highlight from '$lib/components/Highlight.svelte';
+	import { matchesAll, searchTokens } from '$lib/utils/search';
+	import { cn } from '$lib/utils';
 
 	interface Props {
 		kind: LibraryKind;
@@ -44,11 +47,17 @@
 	const info = $derived(kindInfo(kind));
 
 	let search = $state('');
-	const shown = $derived.by(() => {
-		const q = search.trim().toLowerCase();
-		if (!q) return rows;
-		return rows.filter((r) => r.slug.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || r.tags.some((t) => t.includes(q)));
-	});
+	const tokens = $derived(searchTokens(search));
+	// Every word must match somewhere (name, slug, tags or the subline: harness, version, mode…).
+	const shown = $derived(rows.filter((r) => matchesAll([r.name, r.slug, ...r.tags, itemSubline(r)], tokens)));
+
+	function searchKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && search) {
+			e.preventDefault();
+			e.stopPropagation();
+			search = '';
+		}
+	}
 
 	const slugOf = (ref: string) => parseRef(ref)?.slug ?? ref;
 	const selectedSlugs = $derived(new Set(value.map(slugOf)));
@@ -92,12 +101,12 @@
 					<li class="inline-flex items-center gap-1 rounded-md border border-border bg-card py-0.5 pl-1 pr-0.5">
 						<PinnedRefBadge ref={s.ref} {kind} class="border-0" />
 						{#if s.stale}
-							<button type="button" class="cursor-pointer text-[11px] text-primary hover:underline" onclick={() => useLatest(s.ref)} {disabled}>Use latest</button>
+							<button type="button" class="inline-flex min-h-6 cursor-pointer items-center px-1 text-[11px] text-primary hover:underline" onclick={() => useLatest(s.ref)} {disabled}>Use latest</button>
 						{/if}
 						{#if s.missing}<span class="text-[11px] text-danger-fg">not visible</span>{/if}
 						<button
 							type="button"
-							class="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+							class="relative cursor-pointer rounded p-0.5 text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
 							aria-label="Remove {s.ref}"
 							onclick={() => onchange(value.filter((r) => r !== s.ref))}
 							{disabled}
@@ -110,22 +119,40 @@
 		{/if}
 		<div class="rounded-md border border-border">
 			<div class="border-b border-border p-1.5">
-				<Input bind:value={search} placeholder="Search {info.plural.toLowerCase()}…" class="h-8" aria-label="Search {info.plural}" {disabled} />
+				<Input
+					type="search"
+					bind:value={search}
+					placeholder="Search {info.plural.toLowerCase()}…"
+					class="h-8"
+					aria-label="Search {info.plural}"
+					onkeydown={searchKeydown}
+					{disabled}
+				/>
 			</div>
 			{#if list.loading}
 				<p class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"><LoaderCircle class="size-4 animate-spin" />Loading</p>
 			{:else if shown.length === 0}
-				<p class="px-3 py-2 text-sm text-muted-foreground">No {info.plural.toLowerCase()} match.</p>
+				<p class="flex flex-wrap items-center gap-x-2 px-3 py-2 text-sm text-muted-foreground">
+					No {info.plural.toLowerCase()} match{search ? ` “${search.trim()}”` : ''}.
+					{#if search}
+						<button type="button" class="inline-flex min-h-6 cursor-pointer items-center text-primary underline underline-offset-2" onclick={() => (search = '')}>Clear the search</button>
+					{/if}
+				</p>
 			{:else}
 				<ul class="max-h-64 overflow-y-auto py-1">
 					{#each shown as row (row.slug)}
 						{@const on = selectedSlugs.has(row.slug)}
 						<li>
-							<label class="flex cursor-pointer items-start gap-2 px-3 py-1.5 hover:bg-muted/60">
+							<label
+								class={cn('flex cursor-pointer items-start gap-2 px-3 py-1.5 transition-colors duration-150 hover:bg-muted/60', on && 'bg-primary/[0.06]')}
+								title="{row.name || row.slug} — {row.slug}@{row.version} · {itemSubline(row)}"
+							>
 								<Checkbox checked={on} onCheckedChange={(c) => toggle(row, c === true)} {disabled} class="mt-0.5" />
 								<span class="min-w-0 flex-1">
-									<span class="block truncate text-sm">{row.name || row.slug}</span>
-									<span class="block truncate font-mono text-[11px] text-muted-foreground">{row.slug}@{row.version} · {itemSubline(row)}</span>
+									<span class={cn('block truncate text-sm', on && 'font-medium')}><Highlight text={row.name || row.slug} {tokens} /></span>
+									<span class="block truncate font-mono text-[11px] text-muted-foreground"
+										><Highlight text="{row.slug}@{row.version}" {tokens} /> · {itemSubline(row)}</span
+									>
 								</span>
 							</label>
 						</li>
@@ -133,11 +160,12 @@
 				</ul>
 			{/if}
 		</div>
-		{#if selected.length}
-			<div class="flex justify-end">
-				<Button variant="ghost" size="sm" onclick={() => onchange([])} {disabled}>Clear selection</Button>
-			</div>
-		{/if}
+		<div class="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+			<span role="status" aria-atomic="true">{selected.length} of {rows.length} chosen{tokens.length ? ` · ${shown.length} match` : ''}</span>
+			{#if selected.length}
+				<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => onchange([])} {disabled}>Clear selection</Button>
+			{/if}
+		</div>
 	</div>
 {:else}
 	<div class="space-y-1">

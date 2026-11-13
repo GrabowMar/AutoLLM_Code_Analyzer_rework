@@ -1,0 +1,28 @@
+# Add after the local/production compose file and any host overrides.
+# Only trusted app processes can submit email on Postal's private network.
+services:
+  django:
+    networks:
+      default: {}
+      postal: {}
+  celeryworker:
+    networks:
+      default: {}
+      postal: {}
+  celerybeat:
+    networks:
+      default: {}
+      postal: {}
+  executor:
+    networks:
+      default: {}
+      postal: {}
+  flower:
+    networks:
+      default: {}
+      postal: {}
+
+networks:
+  postal:
+    external: true
+    name: llmlab_postal_application

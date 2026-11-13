@@ -23,7 +23,7 @@
 	import { formatSecondsRange, formatUsd, plural } from '../format';
 	import { estimateBasisTotals, launchStudyCap } from './policy';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import Play from '@lucide/svelte/icons/play';
+	import Rocket from '@lucide/svelte/icons/rocket';
 
 	interface Props {
 		open: boolean;
@@ -81,10 +81,15 @@
 
 <Dialog.Root {open} onOpenChange={(v) => !v && onclose()}>
 	<Dialog.Content class="max-w-lg">
-		<Dialog.Header>
-			<Dialog.Title>Start the experiment</Dialog.Title>
+		<Dialog.Header class="mb-1">
+			<Dialog.Title>Launch the experiment</Dialog.Title>
 			<Dialog.Description>
-				{#if plan}{plural(plan.n_cells, 'cell')} in {plural(plan.n_blocks, 'block')}{#if plan.n_cells_by_stage.pilot} · the pilot runs first ({plural(plan.n_cells_by_stage.pilot, 'cell')}){/if}.{/if}
+				{#if plan}{[
+						`${plural(plan.n_cells, 'cell')} in ${plural(plan.n_blocks, 'block')}`,
+						plan.n_cells_by_stage.pilot ? `the pilot runs first (${plural(plan.n_cells_by_stage.pilot, 'cell')})` : '',
+					]
+						.filter(Boolean)
+						.join(' · ')}.{/if}
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if estimate}
@@ -166,7 +171,7 @@
 		<Dialog.Footer class="mt-4 flex justify-end gap-2">
 			<Button variant="outline" onclick={onclose}>Cancel</Button>
 			<Button onclick={launch} disabled={!estimate || !policy || !confirmed || busy || (capMode === 'fixed' && !cap)}>
-				{#if busy}<LoaderCircle class="animate-spin" />{:else}<Play />{/if}Start
+				{#if busy}<LoaderCircle class="animate-spin" />{:else}<Rocket />{/if}Launch
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

@@ -246,7 +246,7 @@
 
 	<div class="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
 		<!-- Desktop: bookmark rail (same shape as the Library nav). -->
-		<div class="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:self-start">
+		<div class="hidden min-w-0 lg:sticky lg:top-[4.25rem] lg:block lg:self-start">
 			<nav
 				class="space-y-4 rounded-md border border-border bg-card p-2 pt-3 shadow-[var(--shadow-card)]"
 				aria-label="Settings sections"

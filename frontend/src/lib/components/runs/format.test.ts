@@ -10,6 +10,8 @@ import {
   fmtSeconds,
   fmtUsd,
   groupChecks,
+  groupTurns,
+  turnTools,
   originCounts,
   presentOrigins,
   scopesFor,
@@ -231,5 +233,64 @@ describe("validity-preserving formats", () => {
     expect(canBeParent(ok)).toBe(true);
     expect(canBeParent({ ...ok, outcome: "build_fail" })).toBe(false);
     expect(canBeParent({ ...ok, kind: "slot_agent" })).toBe(false);
+  });
+});
+
+describe("groupTurns", () => {
+  const step = (
+    index: number,
+    kind: string,
+    extra: Record<string, unknown> = {},
+  ) =>
+    ({
+      index,
+      kind,
+      tool: kind === "llm" ? null : "Bash",
+      ok: true,
+      started: null,
+      duration_s: null,
+      tokens_in: 0,
+      tokens_out: 0,
+      files: [],
+      command_sha: null,
+      ...extra,
+    }) as never;
+
+  it("pairs each LLM call with the actions until the next call", () => {
+    const turns = groupTurns([
+      step(0, "llm", { tokens_in: 100, tokens_out: 5 }),
+      step(1, "shell", { ok: false }),
+      step(2, "shell", { files: ["a.py"] }),
+      step(3, "llm", { tokens_in: 180, tokens_out: 9 }),
+      step(4, "edit", { tool: "Edit", files: ["a.py", "b.py"] }),
+    ]);
+    expect(
+      turns.map((t) => [t.n, t.actions.length, t.tokensIn, t.failed]),
+    ).toEqual([
+      [1, 2, 100, 1],
+      [2, 1, 180, 0],
+    ]);
+    expect(turns[1].files).toEqual(["a.py", "b.py"]);
+    expect(turnTools(turns[0])).toBe("Bash ×2");
+  });
+
+  it("keeps steps before the first LLM call in turn 0", () => {
+    const turns = groupTurns([step(0, "shell"), step(1, "llm")]);
+    expect(turns.map((t) => [t.n, t.llm === null, t.actions.length])).toEqual([
+      [0, true, 1],
+      [1, false, 0],
+    ]);
+  });
+
+  it("sums durations only when the parser records them", () => {
+    expect(
+      groupTurns([step(0, "llm"), step(1, "shell")])[0].seconds,
+    ).toBeNull();
+    expect(
+      groupTurns([
+        step(0, "llm", { duration_s: 2 }),
+        step(1, "shell", { duration_s: 1.5 }),
+      ])[0].seconds,
+    ).toBe(3.5);
   });
 });

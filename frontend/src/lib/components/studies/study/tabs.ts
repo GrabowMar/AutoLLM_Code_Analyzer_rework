@@ -18,11 +18,11 @@ export const STUDY_TABS: {
   label: string;
   modes: StudyMode[];
 }[] = [
-  { value: "summary", label: "Abstract", modes: ["app", "slot"] },
-  { value: "method", label: "Method", modes: ["app", "slot"] },
+  { value: "summary", label: "Overview", modes: ["app", "slot"] },
+  { value: "method", label: "Design", modes: ["app", "slot"] },
   { value: "results", label: "Results", modes: ["app", "slot"] },
   { value: "patterns", label: "Patterns", modes: ["slot"] },
-  { value: "data", label: "Data", modes: ["app", "slot"] },
+  { value: "data", label: "Runs", modes: ["app", "slot"] },
   { value: "operations", label: "Operations", modes: ["app", "slot"] },
 ];
 

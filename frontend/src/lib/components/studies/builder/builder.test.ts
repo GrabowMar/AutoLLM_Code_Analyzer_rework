@@ -359,6 +359,33 @@ describe("BuilderState", () => {
     );
   });
 
+  it("holds an edit that removes a required choice instead of sending a save the server refuses", async () => {
+    const deps = fakeDeps();
+    const b = new BuilderState(
+      readyDesign(),
+      {},
+      { deps: deps as unknown as BuilderDeps },
+    );
+    b.attach(study(readyDesign()));
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    const saves = deps.updateStudy.mock.calls.length;
+
+    const empty = { ...b.design, units: { ...b.design.units, tasks: [] } };
+    b.setDesign(empty);
+    await vi.advanceTimersByTimeAsync(PLAN_DEBOUNCE_MS);
+    await settle();
+    expect(deps.updateStudy.mock.calls.length).toBe(saves); // nothing sent
+    expect(b.held).toBe(true);
+    expect(b.saveError).toBe("");
+    expect(b.issues.map((i) => i.code)).toEqual(["no_tasks"]); // the to-do, not stale plan issues
+
+    b.setDesign(readyDesign()); // e.g. Undo
+    await vi.advanceTimersByTimeAsync(PLAN_DEBOUNCE_MS);
+    await settle();
+    expect(b.held).toBe(false);
+  });
+
   it("destroy stops pending work", async () => {
     const deps = fakeDeps();
     const b = new BuilderState(

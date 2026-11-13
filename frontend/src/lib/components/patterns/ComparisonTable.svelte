@@ -61,13 +61,25 @@
 		return id === undefined ? '—' : labels.get(id) || `#${id}`;
 	}
 	const planned = $derived(rows.filter((r) => r.planned).length);
+
+	// Progressive disclosure: planned rows and rows with a non-zero estimate lead; comparisons whose
+	// estimate is exactly 0 or not estimable sit behind "Show all" (counted, never dropped).
+	let showAll = $state(false);
+	const informative = (r: ComparisonRow) => !!r.planned || (r.diff !== null && r.diff !== 0);
+	const lead = $derived(rows.filter(informative));
+	const shown = $derived(showAll ? rows : lead);
+	const quiet = $derived(rows.length - lead.length);
+	let showAllPooled = $state(false);
+	const pooledRows = $derived((pooled?.rows ?? []) as PooledRow[]);
+	const pooledLead = $derived(pooledRows.filter((p) => p.planned || (p.pooled?.rd != null && p.pooled.rd !== 0)));
+	const pooledShown = $derived(showAllPooled ? pooledRows : pooledLead);
 </script>
 
 <Card.Root class="gap-0 overflow-clip py-0">
 	<TableToolbar>
 		{#snippet summary()}
 			<span>
-				{rows.length} comparisons · {planned} planned (p, plan-adjusted p and decision) · {rows.length - planned} exploratory (Benjamini–Hochberg q)
+				{rows.length} comparisons ({lead.length} shown first) · {planned} planned (p, plan-adjusted p and decision) · {rows.length - planned} exploratory (Benjamini–Hochberg q)
 				{#if interim}· <b>interim: p and q withheld</b>{/if}
 			</span>
 		{/snippet}
@@ -94,7 +106,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each rows as row, i (i)}
+					{#each shown as row, i (i)}
 						<tr>
 							<td class="text-xs">
 								<span class="font-mono">{row.feature}</span>{#if row.scope}<span class="text-muted-foreground"> · {row.scope}</span>{/if}
@@ -115,12 +127,16 @@
 				</tbody>
 			</table>
 		</div>
+		{#if quiet > 0}
+			<button type="button" class="w-full border-t border-border py-2 text-xs font-medium text-muted-foreground hover:bg-surface-2 hover:text-foreground" aria-expanded={showAll} onclick={() => (showAll = !showAll)}>
+				{showAll ? `Hide the ${quiet} comparisons with a 0-point or not-estimable difference` : `Show ${quiet} more comparisons (0-point or not-estimable difference)`}
+			</button>
+		{/if}
 		{#if pooled && pooled.rows.length}
 			<div class="border-t border-border px-4 py-2.5 text-xs">
 				<p class="section-label">Pooled across targets · {pooled.method === 'mh_stratified' ? 'Mantel–Haenszel stratified' : 'per target only'}</p>
 				<ul class="mt-1 space-y-0.5">
-					{#each pooled.rows as p, i (i)}
-						{@const pr = p as PooledRow}
+					{#each pooledShown as pr, i (i)}
 						<li>
 							<span class="font-mono">{pr.feature ?? ''}</span> · {labelOf(pr.a)} vs {labelOf(pr.b)} · {pr.n_targets ?? '—'} targets:
 							{#if pr.pooled}
@@ -135,6 +151,11 @@
 						</li>
 					{/each}
 				</ul>
+				{#if pooledRows.length > pooledLead.length}
+					<button type="button" class="mt-1 text-primary hover:underline" onclick={() => (showAllPooled = !showAllPooled)}>
+						{showAllPooled ? 'Show fewer' : `Show ${pooledRows.length - pooledLead.length} more pooled rows (0-point or not pooled)`}
+					</button>
+				{/if}
 				{#if pooled.notes.length}
 					<p class="mt-1 text-muted-foreground">Notes: {pooled.notes.map((n) => (n === 'few_clusters' ? 'few clusters (< 20 targets: permutation inference, no cluster-robust SEs)' : n)).join(' · ')}</p>
 				{/if}

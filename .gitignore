@@ -320,3 +320,7 @@ deploy.log
 
 # Worktree helpers' private state (.wt-test.sh env file, mode 600; holds DB credentials)
 .wt/
+
+# JupyterLite site for the report Notebook tab (built by frontend/jupyterlite/build.sh)
+frontend/static/jupyterlite/
+frontend/jupyterlite/.jupyterlite.doit.db

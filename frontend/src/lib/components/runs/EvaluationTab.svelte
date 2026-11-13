@@ -83,6 +83,46 @@
 	const grouped = $derived(groupChecks(result?.checks ?? [], result?.flaky_checks ?? []));
 	const flaky = $derived(new Set(result?.flaky_checks ?? []));
 	const measured = $derived(current?.status === 'measured' && result?.measured === true);
+	const failed = $derived(
+		grouped.agent.flatMap((g) => g.checks).filter((c) => (c.status === 'fail' || c.status === 'error') && !flaky.has(c.id)),
+	);
+	let showAll = $state(false);
+
+	function jumpTo(id: string) {
+		showAll = true;
+		requestAnimationFrame(() => {
+			const row = document.getElementById(`check-${id}`);
+			row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+			row?.classList.add('ev-flash');
+			setTimeout(() => row?.classList.remove('ev-flash'), 1600);
+		});
+	}
+
+	/** Response bodies arrive as JSON strings inside the observed object: unwrap them so they read as JSON. */
+	function unwrap(v: unknown): unknown {
+		if (typeof v === 'string') {
+			const t = v.trim();
+			if ((t.startsWith('{') || t.startsWith('[')) && t.length < 200_000) {
+				try {
+					return JSON.parse(t);
+				} catch {
+					return v;
+				}
+			}
+			return v;
+		}
+		if (v && typeof v === 'object' && !Array.isArray(v)) {
+			return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, unwrap(x)]));
+		}
+		return v;
+	}
+
+	function compactJson(v: unknown): string {
+		if (v == null) return '—';
+		const u = unwrap(v);
+		const text = typeof u === 'string' ? u : JSON.stringify(u, null, 1).replace(/\n\s*/g, ' ');
+		return text.length > 220 ? `${text.slice(0, 220)}…` : text;
+	}
 
 	async function reevaluate() {
 		busy = true;
@@ -164,39 +204,71 @@
 
 			{#if result}
 				{@const m = result.metrics}
-				<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-					<div class="kpi-card" title="Agent checks only; infra and flaky checks excluded">
-						<p class="kpi-label">Agent pass rate</p>
-						<p class="kpi-value">{measured ? fmtRate(m.agent_pass_rate) : 'n/m'}</p>
-						<p class="text-[11px] text-muted-foreground">{m.agent_passed}/{m.agent_checks} checks</p>
-					</div>
-					<div class="kpi-card" title="Pass rate of the unchanged starter (what a skeleton gets for free)">
-						<p class="kpi-label">Starter baseline</p>
-						<p class="kpi-value">{fmtRate(m.baseline_pass_rate, '—')}</p>
-						<p class="text-[11px] text-muted-foreground">over baseline {m.over_baseline == null ? '—' : `${(m.over_baseline * 100).toFixed(1)} pts`}</p>
-					</div>
-					<div class="kpi-card" title="Checks whose requirement the prose variant stated / left unstated">
-						<p class="kpi-label">Stated / unstated</p>
-						<p class="kpi-value text-lg">{fmtRate(m.stated_pass_rate, '—')} / {fmtRate(m.unstated_pass_rate, '—')}</p>
-					</div>
-					<div class="kpi-card">
-						<p class="kpi-label">Probes exploited</p>
-						<p class="kpi-value">{m.probes_tested ? `${m.probes_exploited}/${m.probes_tested}` : 'n/m'}</p>
-						<p class="text-[11px] text-muted-foreground">{m.probes_skipped} skipped</p>
-					</div>
-					<div class="kpi-card" title="All functional checks pass and no tested probe was exploited">
-						<p class="kpi-label">Secure pass</p>
-						<p class="kpi-value">{m.sec_pass === null ? 'n/m' : m.sec_pass ? 'yes' : 'no'}</p>
-					</div>
+				<div class="ev-facts">
+					<span title="Agent checks only; infra and flaky checks excluded"><span class="ev-k">Pass rate</span><b>{measured ? fmtRate(m.agent_pass_rate) : 'n/m'}</b> <span class="text-muted-foreground">{m.agent_passed}/{m.agent_checks}</span></span>
+					<span title="Pass rate of the unchanged starter (what a skeleton gets for free)"><span class="ev-k">Starter baseline</span><b>{fmtRate(m.baseline_pass_rate, '—')}</b> <span class="text-muted-foreground">{m.over_baseline == null ? '' : `+${(m.over_baseline * 100).toFixed(1)} pts over it`}</span></span>
+					<span title="Checks whose requirement the prose variant stated / left unstated"><span class="ev-k">Stated / unstated</span><b>{fmtRate(m.stated_pass_rate, '—')} / {fmtRate(m.unstated_pass_rate, '—')}</b></span>
+					<span><span class="ev-k">Probes exploited</span><b>{m.probes_tested ? `${m.probes_exploited}/${m.probes_tested}` : 'n/m'}</b>{#if m.probes_skipped} <span class="text-muted-foreground">{m.probes_skipped} skipped</span>{/if}</span>
+					<span title="All functional checks pass and no tested probe was exploited"><span class="ev-k">Secure pass</span><b>{m.sec_pass === null ? 'n/m' : m.sec_pass ? 'yes' : 'no'}</b></span>
 					{#if m.slot_pass_rate !== undefined && m.slot_pass_rate !== null}
-						<div class="kpi-card" title="Discriminating linked checks of the slot target only">
-							<p class="kpi-label">Slot pass rate</p>
-							<p class="kpi-value">{fmtRate(m.slot_pass_rate)}</p>
-						</div>
+						<span title="Discriminating linked checks of the slot target only"><span class="ev-k">Slot pass rate</span><b>{fmtRate(m.slot_pass_rate)}</b></span>
 					{/if}
 				</div>
 
-				<SectionHeading size="sm" title="Checks" count={result.checks.length} />
+				<!-- Check map: the whole suite at a glance, one square per check. -->
+				{#if grouped.agent.length}
+					<div class="ev-map" aria-label="Checks by category">
+						{#each grouped.agent as group (group.category)}
+							{@const ratio = group.counted ? group.passed / group.counted : null}
+							<div class="ev-tile" data-state={ratio === 1 ? 'all' : ratio === 0 ? 'none' : 'some'}>
+								<div class="ev-tile-head">
+									<span class="ev-tile-name">{group.category}</span>
+									<span class="ev-tile-score">{group.passed}/{group.counted}</span>
+								</div>
+								<div class="ev-squares">
+									{#each group.checks as c (c.id)}
+										<button
+											type="button"
+											class="ev-sq"
+											data-status={flaky.has(c.id) ? 'flaky' : c.status}
+											title="{c.id}: {flaky.has(c.id) ? 'flaky (excluded)' : c.status}"
+											aria-label="{c.id}: {c.status}"
+											onclick={() => jumpTo(c.id)}
+										></button>
+									{/each}
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+
+				<!-- Failures first, with what the tester expected vs what the app returned. -->
+				{#if failed.length}
+					<section class="ev-fails" aria-labelledby="ev-fails-h">
+						<h3 id="ev-fails-h" class="ev-fails-h">{failed.length} failing check{failed.length === 1 ? '' : 's'}</h3>
+						{#each failed as c (c.id)}
+							<article class="ev-fail">
+								<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+									<span class="font-mono text-sm font-medium">{c.id}</span>
+									<span class="text-xs text-muted-foreground">{c.category}{c.endpoint ? ` · ${c.endpoint}` : ''}</span>
+									<StatusBadge status={c.status} tone={c.status === 'fail' ? 'danger' : 'warning'} />
+								</div>
+								{#if c.note}<p class="text-sm">{c.note}</p>{/if}
+								<div class="ev-diff">
+									<div><span class="ev-k">Expected</span><code>{compactJson(c.expected)}</code></div>
+									<div><span class="ev-k">Observed</span><code>{compactJson(c.observed)}</code></div>
+								</div>
+							</article>
+						{/each}
+					</section>
+				{:else if measured && grouped.agent.length}
+					<p class="ev-allpass">Every counted agent check passed.</p>
+				{/if}
+
+				<button type="button" class="ev-toggle" aria-expanded={showAll} onclick={() => (showAll = !showAll)}>
+					{showAll ? 'Hide' : 'Show'} all {result.checks.length} checks
+				</button>
+				{#if showAll}
 				<Card.Root class="gap-0 overflow-clip py-0">
 					<div class="overflow-x-auto">
 						<table>
@@ -211,7 +283,7 @@
 										</td>
 									</tr>
 									{#each group.checks as check (check.id)}
-										<tr>
+										<tr id="check-{check.id}">
 											<td class="font-mono text-xs">
 												{check.id}
 												{#if flaky.has(check.id)}<Badge variant="secondary" class="ml-1" title="Flaky across runs: excluded from every pass rate">flaky</Badge>{/if}
@@ -252,6 +324,7 @@
 						</table>
 					</div>
 				</Card.Root>
+				{/if}
 
 				<SectionHeading size="sm" title="Probes" count={result.probes.length} lead="Probes are separate from pass rates and run only when their preconditions hold." />
 				<Card.Root class="gap-0 overflow-clip py-0">
@@ -324,3 +397,178 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	.ev-k {
+		margin-right: 0.375rem;
+		font-family: var(--font-mono);
+		font-size: 0.625rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--muted-foreground);
+	}
+	.ev-facts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1.75rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--card);
+		padding: 0.75rem 1.125rem;
+		font-size: 0.8125rem;
+	}
+	.ev-facts b {
+		font-family: var(--font-mono);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.ev-map {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+		gap: 0.625rem;
+	}
+	.ev-tile {
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--card);
+		padding: 0.625rem 0.75rem 0.75rem;
+		border-top: 2px solid var(--border);
+	}
+	.ev-tile[data-state='all'] {
+		border-top-color: var(--success);
+	}
+	.ev-tile[data-state='some'] {
+		border-top-color: var(--warning);
+	}
+	.ev-tile[data-state='none'] {
+		border-top-color: var(--destructive);
+	}
+	.ev-tile-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-bottom: 0.5rem;
+	}
+	.ev-tile-name {
+		font-size: 0.8125rem;
+		font-weight: 500;
+	}
+	.ev-tile-score {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		color: var(--muted-foreground);
+		font-variant-numeric: tabular-nums;
+	}
+	.ev-squares {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 3px;
+	}
+	.ev-sq {
+		width: 0.875rem;
+		height: 0.875rem;
+		cursor: pointer;
+		border-radius: 2px;
+		background: var(--muted);
+		transition: transform 120ms;
+	}
+	.ev-sq:hover,
+	.ev-sq:focus-visible {
+		transform: scale(1.25);
+		outline: none;
+		box-shadow: 0 0 0 2px var(--ring);
+	}
+	.ev-sq[data-status='pass'] {
+		background: color-mix(in oklab, var(--success) 75%, transparent);
+	}
+	.ev-sq[data-status='fail'] {
+		background: var(--destructive);
+	}
+	.ev-sq[data-status='error'] {
+		background: var(--warning);
+	}
+	.ev-sq[data-status='flaky'] {
+		background: repeating-linear-gradient(45deg, var(--muted-foreground) 0 2px, transparent 2px 4px);
+		opacity: 0.6;
+	}
+
+	.ev-fails {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.ev-fails-h {
+		font-family: var(--font-display);
+		font-size: 1rem;
+		font-weight: 600;
+		color: var(--danger-fg);
+	}
+	.ev-fail {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		border: 1px solid color-mix(in oklab, var(--destructive) 35%, var(--border));
+		border-left: 3px solid var(--destructive);
+		border-radius: var(--radius);
+		background: var(--card);
+		padding: 0.75rem 1rem;
+	}
+	.ev-diff {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.5rem;
+	}
+	.ev-diff > div {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.25rem;
+		border-radius: 0.25rem;
+		background: var(--muted);
+		padding: 0.375rem 0.5rem;
+	}
+	.ev-diff code {
+		overflow-wrap: anywhere;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+	}
+	.ev-allpass {
+		border: 1px solid color-mix(in oklab, var(--success) 35%, var(--border));
+		border-radius: var(--radius);
+		background: color-mix(in oklab, var(--success) 8%, var(--card));
+		padding: 0.625rem 1rem;
+		font-size: 0.875rem;
+		color: var(--success-fg);
+	}
+	.ev-toggle {
+		cursor: pointer;
+		align-self: flex-start;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: var(--primary);
+	}
+	.ev-toggle:hover {
+		text-decoration: underline;
+	}
+	:global(tr.ev-flash) {
+		animation: ev-flash 1.6s ease-out;
+	}
+	@keyframes ev-flash {
+		from {
+			background: color-mix(in oklab, var(--primary) 25%, transparent);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		:global(tr.ev-flash) {
+			animation: none;
+			background: color-mix(in oklab, var(--primary) 15%, transparent);
+		}
+	}
+	@media (max-width: 640px) {
+		.ev-diff {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

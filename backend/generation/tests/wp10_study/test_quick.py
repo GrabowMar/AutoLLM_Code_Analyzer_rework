@@ -95,3 +95,42 @@ def test_list_hides_quick_studies_unless_asked(api, golden, fake_study, make_stu
     assert rows[quick["study_id"]]["is_quick"] is True
     assert rows[str(regular.pk)]["is_quick"] is False
     assert everything["total"] == 2
+
+
+def test_dry_run_returns_rendered_cells_and_keeps_nothing(api, golden, fake_study):
+    from backend.generation.models import GenerationRun
+    from backend.generation.models import StudyPlan
+
+    before = (Study.objects.count(), StudyPlan.objects.count(), GenerationRun.objects.count())
+    res = api.post("/studies/dry-run/", {"design": _one_app_design()})
+    assert res.status_code == 200, res.content
+    body = res.json()
+    assert body["plan"]["plan_hash"]
+    assert body["plan"]["persisted"] is False
+    assert len(body["cells"]) == body["plan"]["n_cells"]
+    assert body["truncated"] is False
+    cell = body["cells"][0]
+    assert cell["levels"]["model"] == MODELS[0]
+    assert cell["stimuli"], "a dry run shows the rendered prompts"
+    assert all(stimulus["text"] for stimulus in cell["stimuli"])
+    assert cell["manifest"]
+    assert (Study.objects.count(), StudyPlan.objects.count(), GenerationRun.objects.count()) == before
+
+
+def test_dry_run_caps_the_cells_it_renders(api, golden, fake_study):
+    design = _one_app_design()
+    design["repeats"] = 3
+    res = api.post("/studies/dry-run/", {"design": design, "max_cells": 1})
+    assert res.status_code == 200, res.content
+    body = res.json()
+    assert body["plan"]["n_cells"] > 1
+    assert len(body["cells"]) == 1
+    assert body["truncated"] is True
+
+
+def test_dry_run_reports_design_errors(api, golden, fake_study):
+    bad = _one_app_design()
+    bad["units"] = {"tasks": ["no-such-task@1"]}
+    res = api.post("/studies/dry-run/", {"design": bad})
+    assert res.status_code == 400, res.content
+    assert res.json()["code"]
