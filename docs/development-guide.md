@@ -58,7 +58,7 @@ Other settings read from the environment, with their defaults (`config/settings/
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ACCOUNT_EMAIL_VERIFICATION` | `optional` (local), `mandatory` (production) | allauth email verification |
+| `ACCOUNT_EMAIL_VERIFICATION` | `mandatory` | Require the confirmation link before login; local development can opt into `optional` |
 | `DJANGO_ACCOUNT_ALLOW_REGISTRATION` | `True` | Allow self sign-up |
 | `GENERATION_SEED_ON_MIGRATE` | `False` | Seed the generation library after every `migrate` (otherwise `just manage seed_library`) |
 | `AGENT_MAX_CONCURRENT_RUNS` | `1` | Initial executor sandbox slots (editable at runtime by staff; never frozen into a run) |

@@ -113,10 +113,10 @@ CSRF_COOKIE_HTTPONLY = False  # SvelteKit needs to read the CSRF token from the 
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 
-# django-allauth — optional locally so you can log in without Mailpit during dev.
-# Production stays mandatory via base.py. Override: ACCOUNT_EMAIL_VERIFICATION=mandatory
+# django-allauth — confirm new accounts using the link captured by Mailpit.
+# Set ACCOUNT_EMAIL_VERIFICATION=optional to skip confirmation during development.
 # ------------------------------------------------------------------------------
-ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="optional")
+ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="mandatory")
 
 # django-allauth headless — absolute email links (see base.build_headless_frontend_urls)
 # ------------------------------------------------------------------------------

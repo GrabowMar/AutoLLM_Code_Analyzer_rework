@@ -41,6 +41,7 @@ You design a **study**: factors (model, harness preset, stack, style, auth mode,
 | [API reference](/docs/api-reference) | Auth, conventions, routers, exports, relay, MCP, SSE |
 | **Operations** | |
 | [Deployment guide](/docs/deployment-guide) | The deploy script and the production Traefik stack |
+| [Application email](/docs/EMAIL) | Postal setup, sending-domain DNS, confirmation emails and delivery checks |
 | [Troubleshooting](/docs/TROUBLESHOOTING) | Symptom-first fixes for common failures |
 
 ## Where things live
