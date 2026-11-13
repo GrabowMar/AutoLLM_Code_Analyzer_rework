@@ -11,6 +11,8 @@ venv
 .venv
 .git
 .envs/
+.env
+var/
 node_modules
 frontend/node_modules
 .vite/
