@@ -30,7 +30,8 @@ _TASK_HEADERS = [
     "name",
     "status",
     "target",
-    "generation_job_id",
+    "generation_run_id",
+    "code_scope",
     "total_findings",
     *(f"normalized_{level}" for level in _LEVELS),
     "reported_severity_counts",
@@ -67,7 +68,7 @@ def _total_findings(task: Any) -> int | None:
 
 def _task_target(task: Any) -> str:
     if task.generation_job_id:
-        return f"job:{task.generation_job_id}"
+        return f"run:{task.generation_job_id}"
     if task.source_code:
         keys = list((task.source_code or {}).keys())
         return "inline:" + ",".join(keys)
@@ -90,6 +91,7 @@ def analysis_tasks_csv(queryset: QuerySet[Any], *, spreadsheet_safe: bool = True
                     task.status,
                     _task_target(task),
                     str(task.generation_job_id) if task.generation_job_id else "",
+                    task.code_scope,
                     "" if total is None else total,
                     *(("" if counts is None else counts[level]) for level in _LEVELS),
                     "" if reported is None else json.dumps(reported, sort_keys=True),
@@ -113,7 +115,9 @@ def analysis_tasks_json(queryset: QuerySet[Any]) -> list[dict[str, Any]]:
                 "name": task.name,
                 "status": task.status,
                 "target": _task_target(task),
-                "generation_job_id": str(task.generation_job_id) if task.generation_job_id else None,
+                "generation_run_id": str(task.generation_job_id) if task.generation_job_id else None,
+                # app, model or slot (blank for an inline-source analysis).
+                "code_scope": task.code_scope or None,
                 "total_findings": _total_findings(task),
                 "normalized_severity_counts": _task_severity_counts(task),
                 "reported_severity_counts": reported,

@@ -257,7 +257,7 @@ class ResultAppSchema(Schema):
     model_name: str
     condition_label: str
     app_slug: str
-    job_id: Key | None
+    run_id: Key | None
     n_submitted: int
     n_unavailable: int
 

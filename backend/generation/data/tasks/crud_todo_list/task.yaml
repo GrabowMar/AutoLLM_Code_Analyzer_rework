@@ -1,0 +1,275 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Todo list
+summary: Users keep a private list of todos with priorities and due dates.
+category: productivity
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Todo
+  fields:
+  - {name: title, type: string, required: true, max_length: 255}
+  - {name: description, type: text, max_length: 2000}
+  - name: priority
+    type: enum
+    enum: [low, medium, high]
+    default: medium
+  - {name: due_date, type: date}
+  - {name: completed, type: bool, default: false}
+  - {name: completed_at, type: datetime}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: todos.list
+  method: GET
+  path: /api/todos
+  auth: user
+  query:
+  - {name: completed, type: bool, semantics: filter}
+  - name: priority
+    type: enum
+    semantics: filter
+    enum: [low, medium, high]
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 50, max: 200}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size, remaining]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, title]
+          properties:
+            id:
+              type: [integer, string]
+            title: {type: string, maxLength: 255, minLength: 1}
+            description:
+              type: [string, 'null']
+              maxLength: 2000
+            priority:
+              type: [string, 'null']
+              enum: [low, medium, high, null]
+            due_date:
+              type: [string, 'null']
+              format: date
+            completed:
+              type: [boolean, 'null']
+            completed_at:
+              type: [string, 'null']
+              format: date-time
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+      remaining: {type: integer}
+- id: todos.create
+  method: POST
+  path: /api/todos
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 255, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      due_date:
+        type: [string, 'null']
+        format: date
+      completed:
+        type: [boolean, 'null']
+    required: [title]
+  response_schema:
+    type: object
+    required: [id, title]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 255, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      due_date:
+        type: [string, 'null']
+        format: date
+      completed:
+        type: [boolean, 'null']
+      completed_at:
+        type: [string, 'null']
+        format: date-time
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+- id: todos.get
+  method: GET
+  path: /api/todos/{id}
+  auth: owner
+  owner_entity: Todo
+  response_schema:
+    type: object
+    required: [id, title]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 255, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      due_date:
+        type: [string, 'null']
+        format: date
+      completed:
+        type: [boolean, 'null']
+      completed_at:
+        type: [string, 'null']
+        format: date-time
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: todos.update
+  method: PATCH
+  path: /api/todos/{id}
+  auth: owner
+  owner_entity: Todo
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 255, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      due_date:
+        type: [string, 'null']
+        format: date
+      completed:
+        type: [boolean, 'null']
+  response_schema:
+    type: object
+    required: [id, title]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 255, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      due_date:
+        type: [string, 'null']
+        format: date
+      completed:
+        type: [boolean, 'null']
+      completed_at:
+        type: [string, 'null']
+        format: date-time
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404]
+- id: todos.delete
+  method: DELETE
+  path: /api/todos/{id}
+  auth: owner
+  owner_entity: Todo
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.list
+  text: The todo list with title, priority, due date (overdue open todos highlighted) and a checkbox that saves
+    immediately; a counter of open todos.
+  endpoints: [todos.list, todos.update]
+- id: ui.filter
+  text: Tabs for all, open and completed todos, a priority filter and a 'Load more' button.
+  endpoints: [todos.list]
+- id: ui.edit
+  text: An add form and inline editing that show the API's validation messages; delete asks for confirmation.
+  endpoints: [todos.create, todos.update, todos.delete]
+features: [auth, ownership, filter, pagination, sort]
+surfaces: [cwe-639, cwe-862, cwe-89, cwe-79, cwe-915, cwe-256, cwe-20]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: todos.list.open_first
+  category: functional
+  endpoint: todos.list
+  setup:
+  - request:
+      method: POST
+      path: /api/todos
+      json: {title: done one}
+    expect_status: 201
+    capture: {done_id: $.id}
+  - request:
+      method: PATCH
+      path: /api/todos/{done_id}
+      json: {completed: true}
+    expect_status: 200
+  - request:
+      method: POST
+      path: /api/todos
+      json: {title: open one}
+    expect_status: 201
+  request: {method: GET, path: /api/todos}
+  expect:
+    status: 200
+    json_contains:
+      items:
+      - {title: open one}
+      - {title: done one}
+  stated_in: [standard, exhaustive]
+probes:
+- {id: probe.todos.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: todos.get}
+- id: probe.todos.mass_assignment
+  cwe: cwe-915
+  kind: mass_assignment
+  endpoint: todos.update
+  params: {field: user_id}
+- {id: probe.todos.plaintext_password, cwe: cwe-256, kind: plaintext_password_db}

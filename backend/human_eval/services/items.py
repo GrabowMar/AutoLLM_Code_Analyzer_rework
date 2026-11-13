@@ -13,7 +13,7 @@ Items are the units participants evaluate (spec §5.3):
     pairs (the ``all_pairs`` set) are used up; never a duplicate pair;
   - ``vs_baseline`` — each non-baseline app against the baseline app(s) of its group
     (the same ``repeat_index`` when there is one, else every baseline app); the baseline
-    is ``pairing.baseline_condition_id`` or the experiment's baseline condition.
+    is ``pairing.baseline_condition_id`` or the linked study's baseline condition.
 
   ``app_a`` / ``app_b`` are ordered by app id string (canonical orientation).
 
@@ -131,13 +131,13 @@ def condition_key(app: EvalTaskApp) -> Any:
 
 
 def baseline_condition_id(task: EvalTask) -> int | None:
-    """``pairing.baseline_condition_id``, else the task experiment's baseline condition, else None."""
+    """``pairing.baseline_condition_id``, else the linked study's baseline condition, else None."""
+    from backend.human_eval.services import studies
+
     pairing = merged_settings(task.settings)["pairing"]
     if pairing.get("baseline_condition_id") is not None:
         return int(pairing["baseline_condition_id"])
-    if task.experiment_id is not None and task.experiment is not None:
-        return task.experiment.baseline_condition_id
-    return None
+    return studies.baseline_condition_id(task.study_id)
 
 
 def _ordered(first: EvalTaskApp, second: EvalTaskApp) -> tuple[EvalTaskApp, EvalTaskApp]:

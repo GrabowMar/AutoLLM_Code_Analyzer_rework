@@ -30,6 +30,7 @@ SYSTEM_ENDPOINT_DEFAULTS = {
     "max_concurrency": 64,
     "max_active_jobs": 64,
     "visibility": "shared",
+    "cost_basis": "billed",
     "owner": None,
 }
 
@@ -47,13 +48,22 @@ class LLMEndpoint(models.Model):
         RELAY = "relay", _("Relay")
 
     class ApiFlavor(models.TextChoices):
-        # native is valid only for kind=ollama (constraint below)
+        # native is valid only for kind=ollama; anthropic (the native Messages API, prompt caching) only for a
+        # direct openai_compatible endpoint (constraint below: the relay cannot carry /v1/messages).
         NATIVE = "native", _("Native")
         OPENAI = "openai", _("OpenAI")
+        ANTHROPIC = "anthropic", _("Anthropic Messages")
 
     class Visibility(models.TextChoices):
         PRIVATE = "private", _("Private")
         SHARED = "shared", _("Shared")
+
+    class CostBasis(models.TextChoices):
+        # How spend is accounted (spec v3 §3.10): the provider's billed cost (OpenRouter), the catalog
+        # list price (subscription endpoints such as OpenCode Go), or tokens only (local models).
+        BILLED = "billed", _("Billed")
+        LIST_PRICE = "list_price", _("List price")
+        FREE = "free", _("Free (tokens only)")
 
     id = models.BigAutoField(primary_key=True)
     # ^[a-z0-9][a-z0-9-]{1,38}$; reserved: openrouter, local; immutable after create
@@ -91,6 +101,8 @@ class LLMEndpoint(models.Model):
     )
     # SHARED settable by staff only
     visibility = models.CharField(max_length=10, choices=Visibility.choices, default=Visibility.PRIVATE)
+    # Recorded in every run manifest (model.endpoint.cost_basis); new ollama endpoints should use "free".
+    cost_basis = models.CharField(max_length=10, choices=CostBasis.choices, default=CostBasis.BILLED)
 
     # Observed (written by inventory / pumps / relay)
     server_version = models.CharField(max_length=64, blank=True, default="")
@@ -114,8 +126,10 @@ class LLMEndpoint(models.Model):
                 name="llmendpoint_openrouter_direct",
             ),
             models.CheckConstraint(
-                condition=Q(api_flavor="openai") | Q(kind="ollama"),
-                name="llmendpoint_native_only_ollama",
+                condition=Q(api_flavor="openai")
+                | Q(kind="ollama", api_flavor="native")
+                | Q(kind="openai_compatible", api_flavor="anthropic", connection="direct"),
+                name="llmendpoint_flavor_by_kind",
             ),
             models.CheckConstraint(
                 condition=Q(max_concurrency__gte=1) & Q(max_concurrency__lte=256),
@@ -228,7 +242,7 @@ class LLMRequest(models.Model):
         EXPIRED = "expired", _("Expired")
 
     class Source(models.TextChoices):
-        SCAFFOLDING = "scaffolding", _("Scaffolding")
+        SLOT_CALL = "slot_call", _("Slot call")
         AGENT_PROXY = "agent_proxy", _("Agent proxy")
         ANALYSIS = "analysis", _("Analysis")
         WARMUP = "warmup", _("Warm-up")
@@ -238,7 +252,7 @@ class LLMRequest(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     endpoint = models.ForeignKey(LLMEndpoint, on_delete=models.PROTECT, related_name="requests")
     job = models.ForeignKey(
-        "generation.GenerationJob",
+        "generation.GenerationRun",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

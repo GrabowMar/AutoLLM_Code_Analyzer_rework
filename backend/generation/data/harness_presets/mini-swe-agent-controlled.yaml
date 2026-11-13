@@ -1,0 +1,6 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: mini-swe-agent (controlled)
+description: mini-swe-agent 2.4.6 with the equalised knobs of spec 5.5 (command timeout, web tools off, subagents
+  off, turn cap from the budget preset, pinned captured prompt).
+content: {harness: mini-swe-agent, harness_version: 2.4.6, controlled: true, command_timeout_s: 300, subagents: false,
+  pin_system_prompt: true}

@@ -1,378 +1,360 @@
 <script lang="ts">
-	// Every experiment of the user, most recently updated first, with a live
-	// capacity strip. Filters and page live in the URL (`?q&status&mode&endpoint&page`).
-	// Live: one SSE connection (capacity + up to 10 visible active experiments,
-	// whose `tick` patches progress) and a 15 s list refetch while any row is
-	// active; the capacity strip also re-polls every 30 s as a fallback.
-	import { onMount, untrack } from 'svelte';
+	// Every experiment (API: study) of the user, newest first (spec 10.1). Filters and page live in the URL
+	// (`?q&status&mode&kind&quick&page`); while any visible row is active the list refetches every 15 s.
+	// Quick generations (the "Generate app" page) are hidden unless `?quick=1`; they carry a "Quick" badge.
+	//
+	// Same toolbar as Applications / Models: search, then one menu per facet with counts. The counts and the
+	// header figures come from one wider list call (up to 200 experiments matching the search and the quick
+	// toggle, facets ignored), counted client-side; beyond 200 they say so.
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { toast } from 'svelte-sonner';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import FilterMenu, { type FilterMenuOption } from '$lib/components/FilterMenu.svelte';
 	import * as Card from '$lib/components/ui/card';
-	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
+	import { TableToolbar, rowLink, tableFrame } from '$lib/components/table';
 	import { formatApiError } from '$lib/api/core';
-	import { subscribe } from '$lib/api/sse';
-	import { getCapacity, type Capacity } from '$lib/api/execution';
-	import { listEndpoints, type EndpointSummary } from '$lib/api/inference';
-	import {
-		archiveExperiment,
-		cancelExperiment,
-		listExperiments,
-		pauseExperiment,
-		resumeExperiment,
-		type ExperimentListItem,
-		type ExperimentListQuery,
-		type PaginatedExperiments,
-	} from '$lib/api/experiments';
-	import type { CapacityEvent, TickEvent } from '$lib/api/types/events';
-	import CapacityStrip from '$lib/components/experiments/CapacityStrip.svelte';
-	import ExperimentRow, { type RowAction } from '$lib/components/experiments/ExperimentRow.svelte';
-	import { isActive } from '$lib/components/experiments/format';
+	import { listStudies } from '$lib/api/v3/studies';
+	import type { Page, StudyKind, StudyListOut, StudyMode, StudyStatus } from '$lib/api/v3/types';
+	import { KIND_LABELS, MODE_LABELS, STUDY_STATUS_TONES, formatPct, formatUsd, isActive, spendFraction } from '$lib/components/studies/format';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import Lock from '@lucide/svelte/icons/lock';
 	import Plus from '@lucide/svelte/icons/plus';
-	import Server from '@lucide/svelte/icons/server';
+	import Search from '@lucide/svelte/icons/search';
+	import X from '@lucide/svelte/icons/x';
+	import Flag from '@lucide/svelte/icons/flag';
+	import AppWindow from '@lucide/svelte/icons/app-window';
+	import Scissors from '@lucide/svelte/icons/scissors';
+	import Scale from '@lucide/svelte/icons/scale';
+	import Zap from '@lucide/svelte/icons/zap';
 
-	const PER_PAGE = 25;
-	const LIST_POLL_MS = 15_000;
-	const CAPACITY_POLL_MS = 30_000;
-	const SEARCH_DEBOUNCE_MS = 300;
-	const MAX_LIVE_ROWS = 10;
-
-	const STATUS_ITEMS = [
-		{ value: 'active', label: 'Active', description: 'Running or paused' },
-		{ value: 'draft', label: 'Drafts' },
-		{ value: 'finished', label: 'Finished', description: 'Completed or cancelled' },
-		{ value: 'archived', label: 'Archived' },
-		{ value: 'all', label: 'All' },
-	];
-	const MODE_ITEMS = [
-		{ value: 'all', label: 'All methods' },
-		{ value: 'agent', label: 'Agent' },
-		{ value: 'scaffolding', label: 'Scaffolding' },
-	];
+	const PAGE_SIZE = 25;
+	const POLL_MS = 15_000;
+	const COUNT_LIMIT = 200;
 
 	const params = $derived(page.url.searchParams);
 	const q = $derived(params.get('q') ?? '');
-	const statusFilter = $derived(params.get('status') ?? 'all');
-	const modeFilter = $derived(params.get('mode') ?? 'all');
-	const endpointFilter = $derived(params.get('endpoint') ?? 'all');
+	const status = $derived(params.get('status') ?? '');
+	const mode = $derived(params.get('mode') ?? '');
+	const kind = $derived(params.get('kind') ?? '');
+	const showQuick = $derived(params.get('quick') === '1');
 	const pageNum = $derived(Math.max(1, Math.floor(Number(params.get('page'))) || 1));
 
-	let data = $state<PaginatedExperiments | null>(null);
+	let data = $state<Page<StudyListOut> | null>(null);
+	let all = $state<Page<StudyListOut> | null>(null);
 	let loading = $state(true);
 	let error = $state('');
-	let refreshError = $state('');
+	let searchInput = $state(untrack(() => q));
 	let seq = 0;
 
-	let capacity = $state<Capacity | null>(null);
-	let endpoints = $state<EndpointSummary[] | null>(null);
-	let searchInput = $state(untrack(() => q));
-
 	const items = $derived(data?.items ?? []);
-	const anyActive = $derived(items.some((e) => isActive(e.status)));
-	const filtered = $derived(!!q || statusFilter !== 'all' || modeFilter !== 'all' || endpointFilter !== 'all');
+	const pages = $derived(data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1);
 
 	async function load(silent = false) {
 		const mine = ++seq;
-		const query: ExperimentListQuery = {
-			page: pageNum,
-			per_page: PER_PAGE,
-			search: q || undefined,
-			status: statusFilter === 'all' ? undefined : (statusFilter as ExperimentListQuery['status']),
-			mode: modeFilter === 'all' ? undefined : (modeFilter as ExperimentListQuery['mode']),
-			endpoint: endpointFilter === 'all' ? undefined : endpointFilter,
-			ordering: '-updated_at',
-		};
 		try {
-			const res = await listExperiments(query);
+			const [res, wide] = await Promise.all([
+				listStudies({
+					q: q || undefined,
+					status: (status || undefined) as StudyStatus | undefined,
+					mode: (mode || undefined) as StudyMode | undefined,
+					kind: (kind || undefined) as StudyKind | undefined,
+					include_quick: showQuick || undefined,
+					page: pageNum,
+					page_size: PAGE_SIZE,
+				}),
+				listStudies({ q: q || undefined, include_quick: showQuick || undefined, page: 1, page_size: COUNT_LIMIT }).catch(() => null),
+			]);
 			if (mine !== seq) return;
 			data = res;
+			if (wide) all = wide;
 			error = '';
-			refreshError = '';
 		} catch (e) {
 			if (mine !== seq) return;
-			const message = formatApiError(e, 'Could not load experiments.');
-			// A failed background refresh keeps the last good list on screen.
-			if (silent && data) refreshError = message;
-			else error = message;
+			if (!silent || !data) error = formatApiError(e, 'Could not load the experiments.');
 		} finally {
 			if (mine === seq) loading = false;
 		}
 	}
 
-	// URL → data.
 	$effect(() => {
 		void q;
-		void statusFilter;
-		void modeFilter;
-		void endpointFilter;
+		void status;
+		void mode;
+		void kind;
+		void showQuick;
 		void pageNum;
 		untrack(() => load());
 	});
 
 	$effect(() => {
-		if (!anyActive) return;
+		if (!items.some((s) => isActive(s.status))) return;
 		const timer = setInterval(() => {
 			if (!document.hidden) void load(true);
-		}, LIST_POLL_MS);
+		}, POLL_MS);
 		return () => clearInterval(timer);
 	});
 
-	async function loadCapacity() {
-		try {
-			capacity = await getCapacity();
-		} catch {
-			// The strip is informational; keep the last value.
-		}
-	}
-
-	onMount(() => {
-		void loadCapacity();
-		listEndpoints()
-			.then((list) => (endpoints = list))
-			.catch(() => (endpoints = []));
-		const timer = setInterval(() => {
-			if (!document.hidden) void loadCapacity();
-		}, CAPACITY_POLL_MS);
-		return () => clearInterval(timer);
-	});
-
-	// One SSE connection: capacity plus the visible active experiments.
-	const liveIds = $derived(
-		items
-			.filter((e) => isActive(e.status))
-			.slice(0, MAX_LIVE_ROWS)
-			.map((e) => e.id)
-	);
-	const channelsKey = $derived(['capacity', ...liveIds.map((id) => `experiment:${id}`)].join(','));
-
-	$effect(() => {
-		const channels = channelsKey.split(',');
-		return subscribe(channels, (event) => {
-			const d = event.data as Record<string, unknown>;
-			if (d.type === 'capacity' && capacity) {
-				const c = d as unknown as CapacityEvent;
-				capacity = {
-					...capacity,
-					lanes: c.lanes,
-					executor: { ...capacity.executor, ...c.executor },
-					limits: { ...capacity.limits, warnings: c.warnings },
-				};
-			} else if (d.type === 'tick' && typeof d.channel === 'string' && data) {
-				const id = d.channel.slice('experiment:'.length);
-				const tick = d as unknown as TickEvent;
-				data = {
-					...data,
-					items: data.items.map((e) =>
-						e.id === id
-							? {
-									...e,
-									progress: tick.counts ? { ...e.progress, ...tick.counts } : e.progress,
-									eta_seconds: tick.eta_seconds !== undefined ? tick.eta_seconds : e.eta_seconds,
-								}
-							: e,
-					),
-				};
-			} else if (d.type === 'state') {
-				void load(true);
-			}
-		});
-	});
-
-	function setParams(updates: Record<string, string | null>) {
-		const url = new URL(page.url);
-		for (const [key, value] of Object.entries(updates)) {
-			if (value && value !== 'all') url.searchParams.set(key, value);
-			else url.searchParams.delete(key);
-		}
-		if (!('page' in updates)) url.searchParams.delete('page');
-		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+	function setParam(key: string, value: string) {
+		const next = new URL(page.url);
+		if (value) next.searchParams.set(key, value);
+		else next.searchParams.delete(key);
+		if (key !== 'page') next.searchParams.delete('page');
+		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	function onSearch(value: string) {
+		searchInput = value;
 		if (searchTimer) clearTimeout(searchTimer);
-		searchTimer = setTimeout(() => setParams({ q: value.trim() || null }), SEARCH_DEBOUNCE_MS);
+		searchTimer = setTimeout(() => setParam('q', value.trim()), 300);
 	}
 
-	const endpointItems = $derived([
-		{ value: 'all', label: 'All endpoints' },
-		{ value: 'openrouter', label: 'OpenRouter' },
-		...(endpoints ?? []).filter((e) => !e.is_system).map((e) => ({ value: e.slug, label: e.name, description: e.slug })),
-	]);
-
-	const activeTags = $derived.by((): FilterTag[] => {
-		const tags: FilterTag[] = [];
-		if (statusFilter !== 'all') {
-			tags.push({
-				key: 'status',
-				label: STATUS_ITEMS.find((i) => i.value === statusFilter)?.label ?? statusFilter,
-				onRemove: () => setParams({ status: null }),
-			});
-		}
-		if (modeFilter !== 'all') {
-			tags.push({ key: 'mode', label: MODE_ITEMS.find((i) => i.value === modeFilter)?.label ?? modeFilter, onRemove: () => setParams({ mode: null }) });
-		}
-		if (endpointFilter !== 'all') tags.push({ key: 'endpoint', label: `Endpoint: ${endpointFilter}`, onRemove: () => setParams({ endpoint: null }) });
-		return tags;
+	// ── Counts (from the wide list) ──────────────────────────────────────────────
+	const pool = $derived(all?.items ?? []);
+	const capped = $derived((all?.total ?? 0) > COUNT_LIMIT);
+	function countBy<K extends keyof StudyListOut>(key: K): Map<string, number> {
+		const m = new Map<string, number>();
+		for (const s of pool) m.set(String(s[key]), (m.get(String(s[key])) ?? 0) + 1);
+		return m;
+	}
+	const STATUSES: StudyStatus[] = ['draft', 'planned', 'piloting', 'running', 'paused', 'completed', 'stopped', 'cancelled'];
+	const statusOptions = $derived.by<FilterMenuOption[]>(() => {
+		const c = countBy('status');
+		return STATUSES.filter((s) => c.has(s) || s === status).map((s) => ({
+			value: s,
+			label: s.charAt(0).toUpperCase() + s.slice(1),
+			hint: String(c.get(s) ?? 0),
+		}));
 	});
+	const modeOptions = $derived.by<FilterMenuOption[]>(() => {
+		const c = countBy('mode');
+		return (['app', 'slot'] as StudyMode[]).map((m) => ({ value: m, label: MODE_LABELS[m], hint: String(c.get(m) ?? 0) }));
+	});
+	const kindOptions = $derived.by<FilterMenuOption[]>(() => {
+		const c = countBy('kind');
+		return (['exploratory', 'confirmatory'] as StudyKind[]).map((k) => ({ value: k, label: KIND_LABELS[k], hint: String(c.get(k) ?? 0) }));
+	});
+	const stats = $derived({
+		total: all?.total ?? 0,
+		active: pool.filter((s) => isActive(s.status)).length,
+		completed: pool.filter((s) => s.status === 'completed').length,
+		spent: pool.reduce((a, s) => a + (s.spent_usd ?? 0), 0),
+		cells: pool.reduce((a, s) => a + (s.cells_done ?? 0), 0),
+	});
+	const activeCount = $derived([status, mode, kind].filter(Boolean).length);
+	const filtered = $derived(activeCount > 0 || !!q);
 
-	const resultsText = $derived(
-		data && data.total > 0
-			? `Showing ${(data.page - 1) * PER_PAGE + 1}–${Math.min(data.page * PER_PAGE, data.total)} of ${data.total} experiments`
-			: ''
-	);
+	const href = (s: StudyListOut) => (s.status === 'draft' ? `/experiments/new?draft=${s.id}` : `/experiments/${s.id}`);
 
-	// ── row actions ─────────────────────────────────────────────────
-	let busyId = $state<string | null>(null);
-	let cancelTarget = $state<ExperimentListItem | null>(null);
-	let cancelOpen = $state(false);
-
-	async function act(exp: ExperimentListItem, action: RowAction) {
-		if (action === 'cancel') {
-			cancelTarget = exp;
-			cancelOpen = true;
-			return;
-		}
-		busyId = exp.id;
-		try {
-			if (action === 'pause') await pauseExperiment(exp.id);
-			else if (action === 'resume') await resumeExperiment(exp.id);
-			else if (action === 'archive') await archiveExperiment(exp.id);
-			toast.success(
-				action === 'pause' ? 'Experiment paused' : action === 'resume' ? 'Experiment resumed' : 'Experiment archived'
-			);
-			await load(true);
-		} catch (e) {
-			toast.error(formatApiError(e, `Could not ${action} the experiment.`));
-		} finally {
-			busyId = null;
-		}
-	}
-
-	async function confirmCancel() {
-		const exp = cancelTarget;
-		if (!exp) return;
-		busyId = exp.id;
-		try {
-			const result = await cancelExperiment(exp.id, { scope: 'all' });
-			toast.success(
-				`Cancelled ${result.cancelled_pending} queued run${result.cancelled_pending === 1 ? '' : 's'}` +
-					(result.finishing_evaluations ? `; ${result.finishing_evaluations} evaluation(s) finish first` : '')
-			);
-			cancelOpen = false;
-			await load(true);
-		} catch (e) {
-			toast.error(formatApiError(e, 'Could not cancel the experiment.'));
-		} finally {
-			busyId = null;
-		}
+	function relDate(iso: string | null): string {
+		if (!iso) return '';
+		const d = new Date(iso);
+		const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+		if (days <= 0) return 'today';
+		if (days === 1) return 'yesterday';
+		if (days < 7) return `${days} days ago`;
+		return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 	}
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Experiments" description="Designed model comparisons, run in parallel across your endpoints.">
+	<PageHeader title="Experiments" description="Designed comparisons of models, harnesses and prompts: agentic whole apps or regenerated parts.">
 		{#snippet actions()}
-			<Button variant="outline" size="sm" href="/endpoints"><Server />Endpoints</Button>
-			<Button size="sm" href="/experiments/new"><Plus />New experiment</Button>
+			<Button href="/slots/new" size="sm" variant="outline"><Scissors />Slot experiment…</Button>
+			<Button href="/experiments/new" size="sm"><Plus />New experiment</Button>
 		{/snippet}
-		{#if capacity}
-			<CapacityStrip {capacity} class="rounded-none border-0 bg-transparent p-0" />
-		{/if}
+		<div class="header-stats">
+			{#if all}
+				<span class="header-stat"><b>{stats.total.toLocaleString()}</b> experiments</span>
+				<span class="header-stat"><b>{stats.active}</b> active</span>
+				<span class="header-stat"><b>{stats.completed}</b> completed</span>
+				<span class="header-stat"><b>{stats.cells.toLocaleString()}</b> cells run</span>
+				<span class="header-stat"><b>{formatUsd(stats.spent)}</b> spent</span>
+				{#if capped}<span class="header-stat text-muted-foreground">(counts over the newest {COUNT_LIMIT})</span>{/if}
+			{:else}
+				<span class="header-stat text-muted-foreground">loading…</span>
+			{/if}
+		</div>
 	</PageHeader>
 
-	<Card.Root class="gap-0 overflow-clip py-0">
-		<FilterBar
-			embedded
-			searchPlaceholder="Search experiments…"
-			bind:searchValue={searchInput}
-			onSearchInput={onSearch}
-			{activeTags}
-			onClearAll={() => {
-				searchInput = '';
-				setParams({ q: null, status: null, mode: null, endpoint: null });
-			}}
-		>
-			{#snippet filters()}
-				<div class="grid gap-3 sm:grid-cols-3">
-					<div class="space-y-1">
-						<Label class="text-xs" for="exp-filter-status">Status</Label>
-						<Select.Simple id="exp-filter-status" size="sm" value={statusFilter} items={STATUS_ITEMS} onValueChange={(v) => setParams({ status: v })} />
-					</div>
-					<div class="space-y-1">
-						<Label class="text-xs" for="exp-filter-mode">Method</Label>
-						<Select.Simple id="exp-filter-mode" size="sm" value={modeFilter} items={MODE_ITEMS} onValueChange={(v) => setParams({ mode: v })} />
-					</div>
-					<div class="space-y-1">
-						<Label class="text-xs" for="exp-filter-endpoint">Endpoint</Label>
-						<Select.Simple id="exp-filter-endpoint" size="sm" value={endpointFilter} items={endpointItems} onValueChange={(v) => setParams({ endpoint: v })} />
-					</div>
-				</div>
-			{/snippet}
-		</FilterBar>
+	{#if error}<ErrorAlert message={error} onretry={() => load()} />{/if}
 
-		{#if error}
-			<div class="p-3"><ErrorAlert message={error} onretry={() => load()} /></div>
-		{:else if refreshError}
-			<div class="p-3"><ErrorAlert message={`Showing the last list: ${refreshError}`} onretry={() => load()} /></div>
-		{/if}
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<div class="tb-bar" role="search" aria-label="Search and filter experiments">
+			<div class="tb-search">
+				<Search class="tb-search-icon" aria-hidden="true" />
+				<input
+					value={searchInput}
+					oninput={(e) => onSearch((e.target as HTMLInputElement).value)}
+					type="search"
+					placeholder="Search name, description, hypothesis…"
+					aria-label="Search experiments"
+					autocomplete="off"
+				/>
+				{#if searchInput}<button class="tb-search-clear" onclick={() => onSearch('')} aria-label="Clear search"><X class="size-3" /></button>{/if}
+			</div>
+			<div class="tb-menus">
+				<FilterMenu label="Status" icon={Flag} value={status} options={statusOptions} onChange={(v) => setParam('status', v)} anyLabel="Any status" />
+				<FilterMenu label="Mode" icon={AppWindow} value={mode} options={modeOptions} onChange={(v) => setParam('mode', v)} anyLabel="Any mode" />
+				<FilterMenu label="Kind" icon={Scale} value={kind} options={kindOptions} onChange={(v) => setParam('kind', v)} anyLabel="Any kind" />
+				<button
+					type="button"
+					class="fm-trigger {showQuick ? 'fm-trigger-on' : ''}"
+					aria-pressed={showQuick}
+					title="Single apps launched from Generate app"
+					onclick={() => setParam('quick', showQuick ? '' : '1')}
+				>
+					<Zap class="size-3.5" aria-hidden="true" />Quick generations
+				</button>
+				{#if activeCount > 0}
+					<button class="tb-clear" onclick={() => goto(`/experiments${showQuick ? '?quick=1' : ''}`, { replaceState: true })}>
+						<X class="size-3" aria-hidden="true" />Clear{activeCount > 1 ? ` ${activeCount}` : ''}
+					</button>
+				{/if}
+			</div>
+		</div>
 
 		{#if loading && !data}
 			<LoadingState label="loading experiments" />
-		{:else if data && items.length === 0}
-			{#if filtered}
-				<EmptyState compact icon={FlaskConical} title="No experiments match" description="Try another search or clear the filters." />
-			{:else}
-				<EmptyState
-					compact
-					icon={FlaskConical}
-					title="Create your first experiment"
-					description="Pick models, harness presets or prompt profiles and apps; every condition runs on every app, several times, with shared seeds."
-				>
-					{#snippet action()}
-						<Button size="sm" href="/experiments/new"><Plus />New experiment</Button>
-						{#if endpoints && endpoints.filter((e) => !e.is_system).length === 0}
-							<Button variant="outline" size="sm" href="/endpoints/new"><Server />Add a local endpoint</Button>
-						{/if}
-					{/snippet}
-				</EmptyState>
-			{/if}
-		{:else if data}
-			<ul class="data-list rounded-none border-0 shadow-none">
-				{#each items as exp, i (exp.id)}
-					<li class="rise-in" style="--stagger-i: {Math.min(i, 8)}">
-						<ExperimentRow experiment={exp} busy={busyId === exp.id} onaction={(action) => act(exp, action)} />
-					</li>
-				{/each}
-			</ul>
-			<PaginationBar
-				{resultsText}
-				page={data.page}
-				pages={data.pages}
-				onGoToPage={(p) => setParams({ page: String(p) })}
-				class="border-t border-border"
-				scrollToCard
-			/>
+		{:else if items.length === 0}
+			<EmptyState
+				icon={FlaskConical}
+				title={filtered ? 'No experiment matches' : 'No experiments yet'}
+				description={filtered ? 'Change or clear the filters.' : 'Design an experiment: pick tasks, models and harnesses, preview every prompt, then start it within a budget.'}
+			>
+				{#snippet action()}<Button href="/experiments/new" size="sm"><Plus />New experiment</Button>{/snippet}
+			</EmptyState>
+		{:else}
+			<TableToolbar>
+				{#snippet summary()}{data?.total ?? 0} experiment{data?.total === 1 ? '' : 's'}{/snippet}
+			</TableToolbar>
+			<div class="table-frame" {@attach tableFrame}>
+				<table class="xp-table">
+					<thead>
+						<tr>
+							<th class="col-sticky">Experiment</th>
+							<th>Mode</th>
+							<th>Status</th>
+							<th>Progress</th>
+							<th>Spend / cap</th>
+							<th class="num" title="Excluded and infra-pending cells over all cells">Exclusion</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each items as s (s.id)}
+							{@const fraction = spendFraction(s.spent_usd, s.cap_usd)}
+							{@const progress = s.cells_total ? s.cells_done / s.cells_total : null}
+							<tr class="row-link" onclick={rowLink(href(s))}>
+								<td class="col-sticky max-w-0 w-[44%] min-w-[13rem]">
+									<div class="flex min-w-0 items-center gap-1.5">
+										<a href={href(s)} class="truncate font-medium text-foreground hover:text-primary" title={s.name}>{s.name}</a>
+										{#if s.kind === 'confirmatory'}<span class="xp-tag xp-tag-conf" title="Confirmatory: the analysis is pre-registered">Confirmatory</span>{/if}
+										{#if s.locked}<Lock class="size-3 shrink-0 text-muted-foreground" aria-label="Locked (pre-registered)" />{/if}
+										{#if s.is_quick}<span class="xp-tag" title="A single app launched from Generate app">Quick</span>{/if}
+									</div>
+									<span class="cell-sub block text-xs text-muted-foreground" title={s.created_at ?? ''}>{relDate(s.created_at)}</span>
+								</td>
+								<td class="whitespace-nowrap">
+									<span class="xp-mode">
+										{#if s.mode === 'slot'}<Scissors class="size-3.5" aria-hidden="true" />{:else}<AppWindow class="size-3.5" aria-hidden="true" />{/if}
+										{s.mode === 'slot' ? 'Slot' : 'App'}
+									</span>
+								</td>
+								<td class="whitespace-nowrap"><StatusBadge status={s.status} tone={STUDY_STATUS_TONES[s.status]} /></td>
+								<td>
+									{#if progress !== null}
+										<span class="xp-meter" title="{s.cells_done} of {s.cells_total} cells done">
+											<span class="xp-bar"><span style:width="{Math.max(2, progress * 100)}%" data-full={progress >= 1}></span></span>
+											<span class="xp-val">{s.cells_done}/{s.cells_total}</span>
+										</span>
+									{:else}<span class="text-xs text-muted-foreground">no cells yet</span>{/if}
+								</td>
+								<td>
+									<span class="xp-meter" title={fraction === null ? undefined : `${formatPct(fraction)} of the cap`}>
+										<span class="xp-bar xp-bar-spend"><span style:width="{fraction === null ? 0 : Math.max(fraction > 0 ? 2 : 0, Math.min(1, fraction) * 100)}%" data-warn={fraction !== null && fraction >= 0.8}></span></span>
+										<span class="xp-val">{formatUsd(s.spent_usd)}<span class="text-muted-foreground">{` / ${s.cap_usd === null ? '—' : formatUsd(s.cap_usd)}`}</span></span>
+									</span>
+								</td>
+								<td class="num">
+									{#if s.exclusion_rate === null}<span class="text-muted-foreground">—</span>
+									{:else}<span class={s.exclusion_rate >= 0.2 ? 'text-warning-fg' : ''}>{formatPct(s.exclusion_rate, 1)}</span>{/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+			<PaginationBar class="border-t border-border" page={pageNum} {pages} onGoToPage={(p) => setParam('page', String(p))} resultsText="{data?.total ?? 0} experiments" />
 		{/if}
 	</Card.Root>
 </div>
 
-<ConfirmDialog
-	bind:open={cancelOpen}
-	title="Cancel “{cancelTarget?.name ?? ''}”?"
-	description="Queued runs are dropped and running ones are stopped. Runs already being evaluated finish and are graded. You can top up failed and cancelled cells later."
-	confirmLabel="Cancel experiment"
-	cancelLabel="Keep running"
-	destructive
-	busy={busyId === cancelTarget?.id}
-	onConfirm={confirmCancel}
-/>
+<style>
+
+	.xp-table :global(td) {
+		vertical-align: middle;
+	}
+	.xp-tag {
+		flex-shrink: 0;
+		border-radius: 9999px;
+		border: 1px solid var(--border);
+		padding: 0 0.4375rem;
+		font-size: 0.625rem;
+		font-weight: 500;
+		line-height: 1rem;
+		color: var(--muted-foreground);
+	}
+	.xp-tag-conf {
+		border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
+		color: var(--accent-foreground);
+		background: var(--accent);
+	}
+	.xp-mode {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+		color: var(--muted-foreground);
+	}
+	.xp-meter {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.625rem;
+	}
+	.xp-bar {
+		display: block;
+		width: 4.5rem;
+		height: 5px;
+		overflow: hidden;
+		border-radius: 9999px;
+		background: var(--muted);
+	}
+	.xp-bar > span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: var(--primary);
+	}
+	.xp-bar > span[data-full='true'] {
+		background: var(--success);
+	}
+	.xp-bar-spend > span {
+		background: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
+	}
+	.xp-bar-spend > span[data-warn='true'] {
+		background: var(--warning);
+	}
+	.xp-val {
+		font-family: var(--font-mono);
+		font-size: 0.8125rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+</style>

@@ -1,0 +1,9 @@
+name: Model's choice, neutral tone
+description: No styling prescription, with the neutral visual tone.
+content:
+  system: model-choice
+  tone: neutral
+  tone_text: 'Neutral and unobtrusive: system fonts, a light background, restrained colour used only for primary
+    actions and status.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

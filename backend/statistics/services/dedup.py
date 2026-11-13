@@ -102,6 +102,19 @@ _LINT_CLASSES: dict[str, str] = {
     "eslint-security:security/detect-non-literal-regexp": "redos",
     "eslint-security:security/detect-unsafe-regex": "redos",
     "eslint-security:security/detect-non-literal-fs-filename": "path-traversal",
+    # CodeQL rules whose first CWE tag differs from the class the other tools use
+    # (its security rules otherwise match on that CWE, see _CWE_CLASSES).
+    "codeql:py/unused-import": "unused-import",
+    "codeql:py/unused-local-variable": "unused-variable",
+    "codeql:py/unused-global-variable": "unused-variable",
+    "codeql:js/unused-local-variable": "unused-variable",
+    "codeql:py/unreachable-statement": "unreachable-code",
+    "codeql:js/unreachable-statement": "unreachable-code",
+    "codeql:py/empty-except": "try-except-pass",
+    "codeql:py/flask-debug": "flask-debug",
+    "codeql:py/bind-socket-all-network-interfaces": "bind-all-interfaces",
+    "codeql:py/code-injection": "eval-used",
+    "codeql:js/code-injection": "eval-used",
     # A file the linter could not parse: several linters report the one broken file.
     "ruff:syntax-error": "syntax-error",
     "ruff:invalid-syntax": "syntax-error",
@@ -244,7 +257,7 @@ def issue_class(  # noqa: PLR0911
 class IssueCluster:
     """One deduplicated issue: every finding (from one or more tools) that reports it.
 
-    ``run_id`` is the app (generation job) the findings describe.
+    ``run_id`` is the app (the GenerationRun) the findings describe.
     """
 
     run_id: str
@@ -291,8 +304,8 @@ class IssueCluster:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            # The generation job: per-app tables' ``run_id`` is the AnalysisRun.
-            "job_id": self.run_id,
+            # The GenerationRun (per-app tables name the AnalysisRun ``analysis_run_id``).
+            "run_id": self.run_id,
             "issue_class": self.issue_class,
             "file_path": self.file_path,
             "line": self.line,
@@ -405,6 +418,13 @@ def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
         "issue_key": extra.get("issue_key") or "",
         "title": row["title"],
         "tool_severity": row.get("tool_severity") or "",
+        # The scanner's own confidence in the finding (ZAP, bandit ...), "" when it states none.
+        # (vulture prints a percentage: 60% is its lowest class, "may be used in a way it cannot see").
+        "tool_confidence": str(
+            extra.get("tool_confidence") or (f"{extra['confidence_pct']}%" if extra.get("confidence_pct") else ""),
+        ),
+        # Where the finding's file comes from (starter, authored, modified, slot, parent), as the runner tagged it.
+        "file_origin": str(extra.get("file_origin") or ""),
         "fixed_versions": _fixed_versions(extra),
         # The version the scanner found installed (vulnerability scanners), "" when not said.
         "installed_version": str(extra.get("installed_version") or extra.get("version") or ""),

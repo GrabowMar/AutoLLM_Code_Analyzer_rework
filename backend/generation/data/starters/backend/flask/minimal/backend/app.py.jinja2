@@ -1,0 +1,38 @@
+"""Flask entry point."""
+
+{% if has_frontend %}
+from pathlib import Path
+
+from flask import Flask
+from flask import send_from_directory
+
+DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+app = Flask(__name__, static_folder=None)
+{% else %}
+from flask import Flask
+from flask import render_template
+
+app = Flask(__name__)
+{% endif %}
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+{% if has_frontend %}
+
+
+@app.get("/")
+@app.get("/<path:path>")
+def frontend(path: str = "index.html"):
+    if (DIST / path).is_file():
+        return send_from_directory(DIST, path)
+    return send_from_directory(DIST, "index.html")
+{% else %}
+
+
+@app.get("/")
+def index():
+    return render_template("index.html")
+{% endif %}

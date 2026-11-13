@@ -43,6 +43,7 @@ config_schema:
     placeholder: python.flask.security.audit.app-run-param-config.avoid_app_run_with_bad_host
 default_config:
   exclude_rules: python.flask.security.audit.app-run-param-config.avoid_app_run_with_bad_host
+sample_filename: sample.py
 sample_code: |
   import subprocess
 

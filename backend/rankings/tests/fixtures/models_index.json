@@ -1,0 +1,69 @@
+{
+ "data": [
+  {
+   "id": "deepseek/deepseek-v4.1-flash-1017",
+   "canonical_slug": "deepseek/deepseek-v4.1-flash-20261017",
+   "created": 1792225624
+  },
+  {
+   "id": "deepseek/deepseek-v4.1-flash-1017:batch",
+   "canonical_slug": "deepseek/deepseek-v4.1-flash-20261017",
+   "created": 1792225624
+  },
+  {
+   "id": "nvidia/nemotron-3.5-super-vl",
+   "canonical_slug": "nvidia/nemotron-3.5-super-vl-20261015",
+   "created": 1792076662
+  },
+  {
+   "id": "nvidia/nemotron-3.5-super-vl:free",
+   "canonical_slug": "nvidia/nemotron-3.5-super-vl-20261015",
+   "created": 1792076662
+  },
+  {
+   "id": "anthropic/claude-opus-5.5",
+   "canonical_slug": "anthropic/claude-opus-5.5-20260921",
+   "created": 1790094732
+  },
+  {
+   "id": "anthropic/claude-opus-5.5:batch",
+   "canonical_slug": "anthropic/claude-opus-5.5-20260921",
+   "created": 1790094732
+  },
+  {
+   "id": "deepseek/deepseek-v4.1-flash",
+   "canonical_slug": "deepseek/deepseek-v4.1-flash-20260910",
+   "created": 1789021285
+  },
+  {
+   "id": "deepseek/deepseek-v4.1-flash:batch",
+   "canonical_slug": "deepseek/deepseek-v4.1-flash-20260910",
+   "created": 1789021285
+  },
+  {
+   "id": "tencent/hy4-preview",
+   "canonical_slug": "tencent/hy4-preview-20260827",
+   "created": 1787897375
+  },
+  {
+   "id": "z-ai/glm-5.3-flash",
+   "canonical_slug": "z-ai/glm-5.3-flash-20260826",
+   "created": 1787752741
+  },
+  {
+   "id": "z-ai/glm-5.3-flash:batch",
+   "canonical_slug": "z-ai/glm-5.3-flash-20260826",
+   "created": 1787752741
+  },
+  {
+   "id": "nvidia/nemotron-3-ultra-550b-a55b",
+   "canonical_slug": "nvidia/nemotron-3-ultra-550b-a55b-20260604",
+   "created": 1780551208
+  },
+  {
+   "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+   "canonical_slug": "nvidia/nemotron-3-ultra-550b-a55b-20260604",
+   "created": 1780551208
+  }
+ ]
+}

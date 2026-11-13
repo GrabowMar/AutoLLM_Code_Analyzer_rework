@@ -4,13 +4,13 @@ Spec §5.1 + R1/R3:
 
 - **Create**: a preset fills design/settings (explicit ones win; settings deep-merge over
   the preset's); both documents must validate (``design.validate_design`` /
-  ``validate_settings``; error paths prefixed ``design.`` / ``settings.``). An
-  ``experiment_id`` must be the user's (404); ``job_ids`` add apps (pool rules). An
-  experiment brings its current completed attempts in addition to ``job_ids`` (union, like
-  ``pool.add_jobs``); an explicit empty ``job_ids: []`` links the experiment without adding apps.
+  ``validate_settings``; error paths prefixed ``design.`` / ``settings.``). A
+  ``study_id`` must be the user's (404); ``run_ids`` add apps (pool rules). A
+  study brings its current completed runs in addition to ``run_ids`` (union, like
+  ``pool.add_runs``); an explicit empty ``run_ids: []`` links the study without adding apps.
 - **PATCH**: title / description / instructions / opens_at / closes_at always; after the
   first open, changes to title, description and instructions are appended to
-  ``protocol_log`` (sha256 of old and new text). ``mode``, ``design``, ``experiment_id`` and
+  ``protocol_log`` (sha256 of old and new text). ``mode``, ``design``, ``study_id`` and
   the frozen settings keys only while not frozen (409 ``design_frozen``); the
   ``design.editable_after_freeze`` settings keys stay editable. Settings patches deep-merge
   over the stored settings.
@@ -44,7 +44,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
 from backend.human_eval.api.schemas.common import paginate
 from backend.human_eval.models import EvalTask
 from backend.human_eval.models import EvalTaskApp
@@ -55,6 +55,7 @@ from backend.human_eval.services import hosting
 from backend.human_eval.services import items as items_service
 from backend.human_eval.services import pool
 from backend.human_eval.services import snapshot as snapshot_service
+from backend.human_eval.services import studies
 from backend.human_eval.services.access import researcher_tasks_qs
 from backend.human_eval.services.errors import HumanEvalServiceError
 from backend.human_eval.services.errors import conflict
@@ -83,7 +84,7 @@ WARNING_MIXED_SPEC_VERSIONS = "mixed_spec_versions"
 WARNING_MODEL_NAME_IN_SOURCE = "model_name_in_source"
 WARNING_LAYOUT_REVEALS_CONDITION = "layout_reveals_condition"
 
-_APP_JOB_RELATIONS = tuple(f"job__{relation}" for relation in pool._JOB_RELATIONS)  # noqa: SLF001
+_APP_RUN_RELATIONS = tuple(f"job__{relation}" for relation in pool.RUN_RELATIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -196,26 +197,27 @@ def create_task(user: Any, data: dict[str, Any]) -> EvalTask:
     _check_window(opens_at, closes_at, errors)
     _raise_if(errors)
 
-    experiment = pool.owned_experiment(user, data["experiment_id"]) if data.get("experiment_id") else None
-    job_ids = data.get("job_ids")
-    jobs = pool.resolve_job_ids(user, job_ids) if job_ids else []
-    if experiment is not None and job_ids != []:
-        known = {job.id for job in jobs}
-        jobs += [job for job in pool.experiment_jobs(user, experiment) if job.id not in known]
+    study = pool.owned_study(user, data["study_id"]) if data.get("study_id") else None
+    run_ids = data.get("run_ids")
+    runs = pool.resolve_run_ids(user, run_ids) if run_ids else []
+    if study is not None and run_ids != []:
+        known = {run.pk for run in runs}
+        runs += [run for run in pool.study_runs(user, study) if run.pk not in known]
     with transaction.atomic():
-        task = EvalTask.objects.create(
+        task = EvalTask(
             title=title,
             description=description,
             instructions=instructions,
             mode=mode,
             design=normalized_design,
             settings=normalized_settings,
-            experiment=experiment,
             opens_at=opens_at,
             closes_at=closes_at,
             created_by=user,
         )
-        pool.create_task_apps(task, jobs)
+        studies.link_study(task, study)
+        task.save()
+        pool.create_task_apps(task, runs)
     return task
 
 
@@ -241,12 +243,12 @@ def update_task(task: EvalTask, user: Any, data: dict[str, Any]) -> EvalTask:
             changes[key] = _datetime(data[key], key, errors)
     _check_window(changes.get("opens_at", task.opens_at), changes.get("closes_at", task.closes_at), errors)
 
-    experiment_changed = False
-    if "experiment_id" in data:
-        experiment = pool.owned_experiment(user, data["experiment_id"]) if data["experiment_id"] else None
-        experiment_changed = (experiment.pk if experiment else None) != task.experiment_id
-        if experiment_changed:
-            changes["experiment"] = experiment
+    study_changed = False
+    if "study_id" in data:
+        study = pool.owned_study(user, data["study_id"]) if data["study_id"] else None
+        study_changed = (study.pk if study else None) != task.study_id
+        if study_changed:
+            changes["study"] = study
 
     mode = data.get("mode") or task.mode
     mode_changed = mode != task.mode
@@ -260,9 +262,9 @@ def update_task(task: EvalTask, user: Any, data: dict[str, Any]) -> EvalTask:
             if design_errors or normalized != task.design:
                 msg = "The design cannot change once the task has been opened"
                 raise _frozen(msg, "design")
-        if experiment_changed:
-            msg = "The experiment cannot change once the task has been opened"
-            raise _frozen(msg, "experiment_id")
+        if study_changed:
+            msg = "The study cannot change once the task has been opened"
+            raise _frozen(msg, "study_id")
     if mode_changed:
         if mode not in design_service.MODES:
             errors.append({"path": "mode", "message": "Choose single or pairwise"})
@@ -332,25 +334,26 @@ def duplicate_task(task: EvalTask, user: Any) -> EvalTask:
         .order_by("position", "id")
         .values("job_id", "is_active"),
     )
-    jobs_by_id = {
-        job.id: job
-        for job in GenerationJob.objects.filter(id__in=[row["job_id"] for row in source_apps])
-        .select_related(*pool._JOB_RELATIONS)  # noqa: SLF001
-        .defer("result_data")
+    runs_by_id = {
+        run.pk: run
+        for run in GenerationRun.objects.filter(pk__in=[row["job_id"] for row in source_apps]).select_related(
+            *pool.RUN_RELATIONS,
+        )
     }
-    ordered = [row for row in source_apps if row["job_id"] in jobs_by_id]
+    ordered = [row for row in source_apps if row["job_id"] in runs_by_id]
     with transaction.atomic():
-        copy_task = EvalTask.objects.create(
+        copy_task = EvalTask(
             title=f"Copy of {task.title}"[:TITLE_MAX],
             description=task.description,
             instructions=task.instructions,
             mode=task.mode,
             design=copy.deepcopy(task.design),
             settings=copy.deepcopy(task.settings),
-            experiment=task.experiment,
             created_by=user,
         )
-        created = pool.create_task_apps(copy_task, [jobs_by_id[row["job_id"]] for row in ordered])
+        copy_task.study_id = task.study_id
+        copy_task.save()
+        created = pool.create_task_apps(copy_task, [runs_by_id[row["job_id"]] for row in ordered])
         inactive = [app.pk for app, row in zip(created, ordered, strict=True) if not row["is_active"]]
         if inactive:
             EvalTaskApp.objects.filter(pk__in=inactive).update(is_active=False)
@@ -372,7 +375,7 @@ def delete_task(task: EvalTask) -> None:
 
 
 def _apps(task: EvalTask) -> list[EvalTaskApp]:
-    """The task's apps without their jobs (blockers and warnings only need ``job_id`` and the snapshot)."""
+    """The task's apps without their runs (blockers and warnings only need ``job_id`` and the snapshot)."""
     return list(EvalTaskApp.objects.filter(task=task).order_by("position", "id"))
 
 
@@ -382,15 +385,15 @@ def _first_open(task: EvalTask, now: dt.datetime) -> None:
         _raise_blocked(blockers)
     # Re-take every snapshot (what the app is at the moment the study starts).
     apps = list(
-        EvalTaskApp.objects.filter(task=task).select_related(*_APP_JOB_RELATIONS).order_by("position", "id"),
+        EvalTaskApp.objects.filter(task=task).select_related(*_APP_RUN_RELATIONS).order_by("position", "id"),
     )
     snapshots = snapshot_service.full_snapshots([app.job for app in apps if app.job_id])
     for app in apps:
         if app.job_id:
             app.snapshot = snapshots[str(app.job_id)]
             app.group_key = snapshot_service.group_key(app.snapshot, app.id)
-            # Freeze the spec the requirement items come from (context.frozen_spec): later raters of the
-            # app get the same items even if the job is deleted (EvalTaskApp.job is SET_NULL).
+            # Freeze the task the requirement items come from (context.frozen_spec): later raters of the
+            # app get the same items even if the run is deleted (EvalTaskApp.job is SET_NULL).
             app.snapshot = {**app.snapshot, "spec": context_service.spec_dict(app.job)}
     EvalTaskApp.objects.bulk_update(apps, ["snapshot", "group_key"])
     blockers = open_blockers(task, apps)
@@ -429,9 +432,7 @@ def transition(task: EvalTask, user: Any, action: Any) -> EvalTask:
         msg = "Unknown action"
         raise invalid(msg, [{"path": "action", "message": f"Choose one of: {', '.join(ACTIONS)}"}])
     with transaction.atomic():
-        task = (
-            EvalTask.objects.select_for_update(of=("self",)).select_related("experiment", "created_by").get(pk=task.pk)
-        )
+        task = EvalTask.objects.select_for_update(of=("self",)).select_related("study", "created_by").get(pk=task.pk)
         target = TRANSITIONS.get(task.status, {}).get(action)
         if target is None:
             msg = f"A {task.status} task cannot {action}"
@@ -494,14 +495,14 @@ def open_blockers(task: EvalTask, apps: Iterable[EvalTaskApp]) -> list[str]:
         return blockers
     orphaned = [app.label for app in active if app.job_id is None]
     if orphaned:
-        blockers.append(f"Deactivate or remove apps whose generation job was deleted: {', '.join(orphaned)}")
+        blockers.append(f"Deactivate or remove apps whose generation run was deleted: {', '.join(orphaned)}")
     if task.mode == EvalTask.Mode.PAIRWISE:
         pairing = design_service.merged_settings(task.settings)["pairing"]
         if pairing.get("strategy") == "vs_baseline" and items_service.baseline_condition_id(task) is None:
-            blockers.append("Choose a baseline condition for vs-baseline pairing (or link an experiment with one)")
+            blockers.append("Choose a baseline condition for vs-baseline pairing (or link a study with one)")
         elif not items_service.plan_pairs(task, active):
             blockers.append(
-                "No pair of apps can be formed: pairs need two active apps built from the same app spec"
+                "No pair of apps can be formed: pairs need two active apps built from the same task version"
                 + (" in different conditions" if pairing.get("cross_condition_only") else ""),
             )
     return blockers
@@ -515,10 +516,10 @@ def _source_mentions(app: EvalTaskApp) -> list[str]:
         return scan["source"]
     if app.job_id is None:
         return []
-    job = GenerationJob.objects.filter(pk=app.job_id).only("id", "result_data").first()
-    if job is None:
+    run = GenerationRun.objects.filter(pk=app.job_id).first()
+    if run is None:
         return []
-    found = snapshot_service.scan_text(snapshot_service.source_texts(job), snapshot_service.model_tokens(snap))
+    found = snapshot_service.scan_text(snapshot_service.source_texts(run), snapshot_service.model_tokens(snap))
     app.snapshot = {**snap, "blinding_scan": {"source": found, "findings": []}}
     EvalTaskApp.objects.filter(pk=app.pk).update(snapshot=app.snapshot)
     return found
@@ -553,9 +554,10 @@ def open_warnings(task: EvalTask, apps: Iterable[EvalTaskApp]) -> list[str]:
     if leaks:
         warnings.append(WARNING_MODEL_NAME_IN_SOURCE)
     if show_source:
-        modes = {(app.snapshot or {}).get("mode") or "" for app in active}
+        kinds = {(app.snapshot or {}).get("kind") or "" for app in active}
         harnesses = {(app.snapshot or {}).get("harness") or "" for app in active}
-        if len(modes) > 1 or len(harnesses) > 1:
+        stacks = {(app.snapshot or {}).get("stack") or "" for app in active}
+        if len(kinds) > 1 or len(harnesses) > 1 or len(stacks) > 1:
             warnings.append(WARNING_LAYOUT_REVEALS_CONDITION)
     return warnings
 
@@ -563,12 +565,6 @@ def open_warnings(task: EvalTask, apps: Iterable[EvalTaskApp]) -> list[str]:
 # ---------------------------------------------------------------------------
 # Serialization and listing
 # ---------------------------------------------------------------------------
-
-
-def _experiment_ref(task: EvalTask) -> dict[str, str] | None:
-    if task.experiment_id is None or task.experiment is None:
-        return None
-    return {"id": str(task.experiment_id), "name": task.experiment.name}
 
 
 def serialize_task_list_item(task: EvalTask) -> dict[str, Any]:
@@ -579,7 +575,7 @@ def serialize_task_list_item(task: EvalTask) -> dict[str, Any]:
         "status": task.status,
         "mode": task.mode,
         "counts": counts.task_counts(task),
-        "experiment": _experiment_ref(task),
+        "study": studies.study_ref(task),
         "opens_at": task.opens_at,
         "closes_at": task.closes_at,
         "created_at": task.created_at,

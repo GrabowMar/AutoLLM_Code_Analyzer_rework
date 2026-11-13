@@ -1,12 +1,11 @@
-"""Contracts the web process uses to hand work to the executor (spec §C.1, §C.9).
+"""Contracts the web process uses to hand work to the executor (spec §C.1, §C.9; v3 sections 3.7 and D6).
 
-:func:`wake`, :func:`enqueue_jobs`, :func:`request_reeval`, :func:`cancel_jobs`
-(delegates to ``execution.transitions.cancel_jobs``) and
-:func:`requeue_legacy_jobs` (thread-era rows, spec §B.3 step 3).
+:func:`wake`, :func:`enqueue_runs`, :func:`enqueue_evaluation`, :func:`request_reeval` and
+:func:`cancel_runs` (delegates to ``execution.transitions.cancel_runs``).
 
-The web process never executes jobs: it writes rows and rings the
-``executor:wake`` doorbell after commit. Redis carries doorbells only, so a
-Redis outage costs at most one executor tick of latency.
+The web process never executes runs: it writes rows and rings the ``executor:wake`` doorbell after
+commit. Redis carries doorbells only, so a Redis outage costs at most one executor tick of latency.
+Callers enqueue in ``transaction.on_commit`` (launch, top-up, retry, evaluate, cancel).
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from django.utils import timezone
 if TYPE_CHECKING:
     import redis
 
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
 logger = logging.getLogger(__name__)
 
@@ -55,79 +54,127 @@ def wake() -> None:
         logger.warning("executor wake failed (Redis unavailable?)", exc_info=True)
 
 
-def _lane_for(job: GenerationJob) -> str:
-    from backend.generation.models import GenerationJob
+def wake_preview_build(action_id=None) -> None:
+    """A BUILD ContainerAction is the durable queue; Redis is only its doorbell."""
+    transaction.on_commit(wake)
 
-    return GenerationJob.Lane.SANDBOX if job.mode == GenerationJob.Mode.AGENT else GenerationJob.Lane.LLM
+
+def lane_for(run: GenerationRun) -> str:
+    """The generation lane of ``run``, from its kind (section 3.7): agentic kinds use ``sandbox``, else ``llm``."""
+    from backend.generation.models.choices import Lane
+    from backend.generation.models.run import LANE_BY_KIND
+
+    return LANE_BY_KIND.get(run.kind, Lane.LLM)
 
 
-def enqueue_jobs(jobs: Iterable[GenerationJob]) -> int:
-    """Hand saved PENDING jobs to the executor; idempotent. Returns the number of rows updated.
+def _as_runs(runs: Iterable[GenerationRun | Any]) -> list[GenerationRun]:
+    """Run objects for a mix of runs and ids (ids are loaded in one query; unknown ids are dropped)."""
+    from backend.generation.models import GenerationRun
 
-    Sets ``queued_at`` (only if NULL), ``lane`` (agent → sandbox, else llm),
-    ``endpoint`` (denormalized from ``model.endpoint``; NULL = OpenRouter),
-    ``priority`` (the experiment's, when the job has one and none is set) and
-    ``sequence`` (kept when already set by launch; ad-hoc jobs get their index
-    order) in one bulk UPDATE, then ``transaction.on_commit(wake)``.
+    items = list(runs)
+    if all(isinstance(item, GenerationRun) for item in items):
+        return items
+    ids = [str(getattr(item, "pk", item)) for item in items]
+    by_id = {str(run.pk): run for run in GenerationRun.objects.filter(pk__in=ids)}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+def enqueue_runs(runs: Iterable[GenerationRun | Any]) -> int:
+    """Hand saved PENDING runs (objects or ids) to the executor; idempotent. Returns the number of rows updated.
+
+    Sets ``queued_at`` (only if NULL), ``lane`` (from ``run.kind``), ``endpoint`` (denormalized from
+    ``model.endpoint``; NULL = OpenRouter), ``priority`` (the study's, when the run has one and none is
+    set) and ``sequence`` (kept when set by launch; ad-hoc runs get their index order) in one bulk
+    UPDATE, then ``transaction.on_commit(wake)``.
     """
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models import Study
 
-    jobs = list(jobs)
-    if not jobs:
+    items = _as_runs(runs)
+    if not items:
         return 0
     now = timezone.now()
     model_endpoints = dict(
-        GenerationJob.objects.filter(pk__in=[j.pk for j in jobs], model__isnull=False).values_list(
+        GenerationRun.objects.filter(pk__in=[r.pk for r in items], model__isnull=False).values_list(
             "pk",
             "model__endpoint_id",
         ),
     )
-    experiment_priority: dict[Any, int] = {}
-    experiment_ids = {j.experiment_id for j in jobs if j.experiment_id}
-    if experiment_ids:
-        from backend.generation.models import Experiment
+    study_ids = {r.study_id for r in items if r.study_id}
+    study_priority: dict[Any, int] = {}
+    if study_ids:
+        study_priority = dict(Study.objects.filter(pk__in=study_ids).values_list("pk", "priority"))
 
-        experiment_priority = dict(Experiment.objects.filter(pk__in=experiment_ids).values_list("pk", "priority"))
-
-    for index, job in enumerate(jobs):
-        if job.queued_at is None:
-            job.queued_at = now
-        job.lane = _lane_for(job)
-        job.endpoint_id = model_endpoints.get(job.pk)
-        if job.experiment_id and not job.priority:
-            job.priority = experiment_priority.get(job.experiment_id, 0)
-        if job.sequence is None:
-            job.sequence = index
-    GenerationJob.objects.bulk_update(
-        jobs,
+    for index, run in enumerate(items):
+        if run.queued_at is None:
+            run.queued_at = now
+        run.lane = lane_for(run)
+        run.endpoint_id = model_endpoints.get(run.pk)
+        if run.study_id and not run.priority:
+            run.priority = study_priority.get(run.study_id, 0)
+        if run.sequence is None:
+            run.sequence = index
+    GenerationRun.objects.bulk_update(
+        items,
         ["queued_at", "lane", "endpoint", "priority", "sequence"],
         batch_size=500,
     )
     transaction.on_commit(wake)
-    return len(jobs)
+    return len(items)
 
 
-def request_reeval(job: GenerationJob) -> bool:
+def enqueue_evaluation(runs: Iterable[GenerationRun | Any]) -> int:
+    """Make saved runs (objects or ids) claimable evaluation work: ``status=running, phase=eval_queued``.
+
+    For ``reference`` runs, which have no generation stage (D6, section 3.7): ``_EVAL_CLAIM_SQL`` claims
+    them by phase like any other evaluation. Rows already in the generation stage or being evaluated,
+    and rows a worker still holds, are left alone. Returns the number of rows updated.
+    """
+    from backend.generation.models import GenerationRun
+    from backend.generation.models.choices import RunPhase
+    from backend.generation.models.choices import RunStatus
+
+    ids = [str(getattr(item, "pk", item)) for item in runs]
+    if not ids:
+        return 0
+    now = timezone.now()
+    updated = (
+        GenerationRun.objects.filter(pk__in=ids, lease_owner="", status__in=[RunStatus.PENDING, RunStatus.RUNNING])
+        .exclude(status=RunStatus.RUNNING, phase__in=[RunPhase.RUNNING, RunPhase.EVALUATING])
+        .update(
+            status=RunStatus.RUNNING,
+            phase=RunPhase.EVAL_QUEUED,
+            queued_at=Coalesce(F("queued_at"), Value(now)),
+            stage_entered_at=Coalesce(F("stage_entered_at"), Value(now)),
+            updated_at=now,
+        )
+    )
+    if updated:
+        transaction.on_commit(wake)
+    return updated
+
+
+def request_reeval(run: GenerationRun, *, force_rebuild: bool = False) -> bool:
     """Queue a manual re-evaluation: ``RUNNING/eval_queued`` with ``execution.reeval``.
 
-    Sets ``queued_at = coalesce(queued_at, now())`` (so legacy jobs are
-    counted), stores ``execution.reeval = true`` and
-    ``execution.reeval_prev_status``, and ``stage_entered_at = now``. A
-    re-evaluation ends in the previous status, never FAILED (§C.4 step 2).
-    Returns False when the job is active (pending/running) and nothing changed.
+    Sets ``queued_at = coalesce(queued_at, now())``, stores ``execution.reeval = true`` and
+    ``execution.reeval_prev_status``, and ``stage_entered_at = now``. A re-evaluation ends in the
+    previous status, never FAILED by itself (§C.4 step 2). Returns False when the run is active
+    (pending/running) and nothing changed.
     """
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models.choices import RunPhase
+    from backend.generation.models.choices import RunStatus
 
     now = timezone.now()
-    prev_status = job.status
-    patch = {"reeval": True, "reeval_prev_status": prev_status}
+    patch = {"reeval": True, "reeval_prev_status": run.status, "force_rebuild": force_rebuild}
     json_field = JSONField()
     updated = (
-        GenerationJob.objects.filter(pk=job.pk)
-        .exclude(status__in=[GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING])
+        GenerationRun.objects.filter(pk=run.pk)
+        .exclude(status__in=[RunStatus.PENDING, RunStatus.RUNNING])
         .update(
-            status=GenerationJob.Status.RUNNING,
-            phase=GenerationJob.Phase.EVAL_QUEUED,
+            status=RunStatus.RUNNING,
+            phase=RunPhase.EVAL_QUEUED,
             queued_at=Coalesce(F("queued_at"), Value(now)),
             stage_entered_at=now,
             lease_owner="",
@@ -143,52 +190,13 @@ def request_reeval(job: GenerationJob) -> bool:
     )
     if not updated:
         return False
-    job.refresh_from_db()
+    run.refresh_from_db()
     transaction.on_commit(wake)
     return True
 
 
-def cancel_jobs(qs, scope: str = "all", *, experiment=None) -> dict[str, int]:
-    """Cancel jobs (spec §C.8): see ``execution.transitions.cancel_jobs``."""
-    from backend.execution.transitions import cancel_jobs as _cancel_jobs
+def cancel_runs(qs, scope: str = "all", *, study=None) -> dict[str, int]:
+    """Cancel runs (spec §C.8): see ``execution.transitions.cancel_runs``."""
+    from backend.execution.transitions import cancel_runs as _cancel_runs
 
-    return _cancel_jobs(qs, scope=scope, experiment=experiment)
-
-
-def requeue_legacy_jobs(qs) -> int:
-    """Hand thread-era jobs (``queued_at IS NULL``) of ``qs`` to the executor (spec §B.3 step 3).
-
-    Legacy PENDING **and** RUNNING rows (their threads died with the old
-    process) become PENDING with ``queued_at=now()`` and a fresh lane /
-    endpoint / priority; nothing else is cancelled. Each touched batch is
-    refreshed. Returns the number of jobs requeued.
-    """
-    from backend.generation.models import GenerationBatch
-    from backend.generation.models import GenerationJob
-    from backend.generation.services.batches import refresh_batch
-
-    with transaction.atomic():
-        jobs = list(
-            qs.select_for_update()
-            .filter(
-                queued_at__isnull=True,
-                status__in=[GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING],
-            )
-            .order_by("created_at", "id"),
-        )
-        if not jobs:
-            return 0
-        GenerationJob.objects.filter(id__in=[j.id for j in jobs]).update(
-            status=GenerationJob.Status.PENDING,
-            phase=GenerationJob.Phase.NONE,
-            started_at=None,
-            lease_owner="",
-            lease_expires_at=None,
-        )
-        for job in jobs:
-            job.status = GenerationJob.Status.PENDING
-            job.phase = GenerationJob.Phase.NONE
-        enqueue_jobs(jobs)
-    for batch_id in {j.batch_id for j in jobs if j.batch_id}:
-        refresh_batch(GenerationBatch(id=batch_id))
-    return len(jobs)
+    return _cancel_runs(qs, scope=scope, study=study)

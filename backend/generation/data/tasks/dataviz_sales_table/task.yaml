@@ -1,0 +1,251 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Sales dashboard
+summary: Record sales and explore them as a filterable table, headline totals and a daily chart.
+category: data-visualization
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Sale
+  fields:
+  - {name: product, type: string, required: true, max_length: 100}
+  - {name: amount, type: float, required: true, min: 0.01, max: 1000000}
+  - {name: quantity, type: int, required: true, min: 1}
+  - {name: date, type: date}
+  - {name: created_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: sales.list
+  method: GET
+  path: /api/sales
+  auth: public
+  query:
+  - {name: start_date, type: date, semantics: filter}
+  - {name: end_date, type: date, semantics: filter}
+  - {name: product, type: string, semantics: filter}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 25, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, product, amount, quantity]
+          properties:
+            id:
+              type: [integer, string]
+            product: {type: string, maxLength: 100, minLength: 1}
+            amount: {type: number, minimum: 0.01, maximum: 1000000}
+            quantity: {type: integer, minimum: 1}
+            date:
+              type: [string, 'null']
+              format: date
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: sales.create
+  method: POST
+  path: /api/sales
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      product: {type: string, maxLength: 100, minLength: 1}
+      amount: {type: number, minimum: 0.01, maximum: 1000000}
+      quantity: {type: integer, minimum: 1}
+      date:
+        type: [string, 'null']
+        format: date
+    required: [product, amount, quantity]
+  response_schema:
+    type: object
+    required: [id, product, amount, quantity]
+    properties:
+      id:
+        type: [integer, string]
+      product: {type: string, maxLength: 100, minLength: 1}
+      amount: {type: number, minimum: 0.01, maximum: 1000000}
+      quantity: {type: integer, minimum: 1}
+      date:
+        type: [string, 'null']
+        format: date
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+- id: sales.summary
+  method: GET
+  path: /api/sales/summary
+  auth: public
+  query:
+  - {name: start_date, type: date, semantics: filter}
+  - {name: end_date, type: date, semantics: filter}
+  - {name: product, type: string, semantics: filter}
+  response_schema:
+    type: object
+    properties:
+      total_sales: {type: number}
+      total_transactions: {type: integer}
+      average_sale: {type: number}
+      total_quantity: {type: integer}
+    required: [total_sales, total_transactions, average_sale, total_quantity]
+  errors: [400]
+- id: sales.daily
+  method: GET
+  path: /api/sales/daily
+  auth: public
+  query:
+  - {name: start_date, type: date, semantics: filter}
+  - {name: end_date, type: date, semantics: filter}
+  - {name: product, type: string, semantics: filter}
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            date: {type: string}
+            total: {type: number}
+            count: {type: integer}
+          required: [date, total, count]
+  errors: [400]
+- id: sales.get
+  method: GET
+  path: /api/sales/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, product, amount, quantity]
+    properties:
+      id:
+        type: [integer, string]
+      product: {type: string, maxLength: 100, minLength: 1}
+      amount: {type: number, minimum: 0.01, maximum: 1000000}
+      quantity: {type: integer, minimum: 1}
+      date:
+        type: [string, 'null']
+        format: date
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: sales.replace
+  method: PUT
+  path: /api/sales/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      product: {type: string, maxLength: 100, minLength: 1}
+      amount: {type: number, minimum: 0.01, maximum: 1000000}
+      quantity: {type: integer, minimum: 1}
+      date:
+        type: [string, 'null']
+        format: date
+    required: [product, amount, quantity]
+  response_schema:
+    type: object
+    required: [id, product, amount, quantity]
+    properties:
+      id:
+        type: [integer, string]
+      product: {type: string, maxLength: 100, minLength: 1}
+      amount: {type: number, minimum: 0.01, maximum: 1000000}
+      quantity: {type: integer, minimum: 1}
+      date:
+        type: [string, 'null']
+        format: date
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404]
+- id: sales.delete
+  method: DELETE
+  path: /api/sales/{id}
+  auth: user
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.cards
+  text: Headline cards for total sales, number of transactions and average sale.
+  endpoints: [sales.summary]
+- id: ui.chart
+  text: A bar chart of daily totals.
+  endpoints: [sales.daily]
+- id: ui.filters
+  text: A date range filter ('This month', 'Last month', custom dates) and a product filter that the cards, chart
+    and table all follow.
+  endpoints: [sales.list, sales.summary, sales.daily]
+- id: ui.table
+  text: A sales table with date, product, quantity and amount and paging; add and edit forms showing the API's validation
+    messages; delete asks for confirmation.
+  endpoints: [sales.list, sales.create, sales.replace, sales.delete]
+features: [auth, filter, pagination, money]
+surfaces: [cwe-89, cwe-862, cwe-20, cwe-79, cwe-400]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: sales.summary.average
+  category: functional
+  endpoint: sales.summary
+  setup:
+  - request:
+      method: POST
+      path: /api/sales
+      json: {product: zz-widget, amount: 10, quantity: 1, date: '2026-01-02'}
+    expect_status: 201
+  - request:
+      method: POST
+      path: /api/sales
+      json: {product: zz-widget, amount: 20.5, quantity: 3, date: '2026-01-03'}
+    expect_status: 201
+  request:
+    method: GET
+    path: /api/sales/summary
+    query: {product: zz-widget}
+  expect:
+    status: 200
+    json_contains: {total_sales: 30.5, total_transactions: 2, average_sale: 15.25, total_quantity: 4}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.sales.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: sales.list
+  params: {param: product}

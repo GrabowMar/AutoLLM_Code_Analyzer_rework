@@ -5,10 +5,11 @@ from __future__ import annotations
 import pytest
 
 from backend.reports.services.loc import is_test_path
-from backend.reports.services.loc import loc_for_jobs
+from backend.reports.services.loc import loc_for_runs
 from backend.reports.services.loc import loc_from_files
-from backend.reports.services.loc import loc_from_result_data
+from backend.reports.services.loc import loc_from_run
 from backend.reports.services.loc import loc_of_test_files
+from backend.reports.services.loc import source_loc
 
 
 @pytest.mark.parametrize(
@@ -65,24 +66,96 @@ def test_test_files_are_outside_the_source_loc_and_counted_apart():
     }
     assert loc_from_files(files) == {"backend_loc": 2, "frontend_loc": 1, "total_loc": 3, "source_files": 2}
     assert loc_of_test_files(files) == {"test_loc": 4, "test_files": 3}
-    out = loc_from_result_data({"files": files})
-    assert (out["total_loc"], out["test_loc"], out["test_files"]) == (3, 4, 3)
 
 
-def test_single_blob_results_have_unknown_test_code():
-    """No paths, so no file can be told apart as a test: unknown, not zero (P8)."""
-    out = loc_from_result_data({"backend_code": "a\nb\n"})
-    assert (out["total_loc"], out["test_loc"], out["test_files"]) == (2, None, None)
+@pytest.mark.parametrize(
+    ("path", "text", "expected"),
+    [
+        ("backend/app.py", "import os\n\n# comment\nprint(1)\n", 2),
+        ("frontend/src/App.jsx", "// c\nexport default 1;\n", 1),
+        ("backend/tests/test_app.py", "def test_a():\n    assert 1\n", 0),
+        ("frontend/package-lock.json", '{\n  "lockfileVersion": 3\n}\n', 0),
+        ("README.md", "# Title\ntext\n", 0),
+        ("frontend/node_modules/x/index.js", "var x = 1;\n", 0),
+        ("frontend/dist/app.min.js", "var x=1;\n", 0),
+        ("backend/empty.py", "", 0),
+        ("backend/none.py", None, 0),
+    ],
+)
+def test_source_loc_of_one_file(path, text, expected):
+    assert source_loc(path, text) == expected
 
 
-def test_loc_for_jobs_sums_test_code_only_where_it_is_known():
-    from types import SimpleNamespace
+def test_source_loc_matches_the_map_counter():
+    files = {"a.py": "x = 1\n# c\ny = 2\n", "b.js": "// c\nlet a;\n", "tests/test_a.py": "x\n"}
+    assert sum(source_loc(p, t) for p, t in files.items()) == loc_from_files(files)["total_loc"]
 
-    blob = SimpleNamespace(id=1, result_data={"backend_code": "a\n"})
-    files = SimpleNamespace(id=2, result_data={"files": {"app.py": "x\n", "tests/test_a.py": "a\nb\n"}})
-    assert loc_for_jobs([blob])["test_loc"] is None
-    out = loc_for_jobs([blob, files])
-    assert (out["total_loc"], out["test_loc"], out["counted"]) == (2, 2, 2)
+
+def test_run_view_delegates_to_the_reports_rules():
+    from backend.generation.runs.view import source_loc as view_source_loc
+
+    assert view_source_loc("backend/app.py", "a = 1\nb = 2\n") == 2
+    assert view_source_loc("tests/test_a.py", "a = 1\n") == 0
+
+
+def _add(run, path, text, origin="authored", **extra):
+    from backend.generation import blobs
+    from backend.generation.testing import factories
+
+    extra.setdefault("loc", source_loc(path, text))
+    return factories.RunFileFactory(
+        run=run,
+        path=path,
+        blob=blobs.put_text(text),
+        size=len(text),
+        origin=origin,
+        **extra,
+    )
+
+
+@pytest.mark.django_db
+def test_loc_from_run_counts_the_model_scope_by_layer_and_tests_apart():
+    from backend.generation.testing import factories
+
+    run = factories.GenerationRunFactory(tested=True)
+    _add(run, "backend/app.py", "import flask\napp = 1\n", origin="starter")
+    _add(run, "backend/routes.py", "def a():\n    return 1\n")
+    _add(run, "frontend/src/App.jsx", "export default 1;\n", origin="modified")
+    _add(run, "backend/tests/test_routes.py", "def test_a():\n    assert 1\n", is_test=True)
+    _add(run, "frontend/package-lock.json", "{}\n", excluded="lockfile")
+    _add(run, "frontend/dist/app.js", "x\n", origin="artifact")
+    assert loc_from_run(run) == {
+        "backend_loc": 2,
+        "frontend_loc": 1,
+        "total_loc": 3,
+        "source_files": 2,
+        "test_loc": 2,
+        "test_files": 1,
+    }
+
+
+@pytest.mark.django_db
+def test_loc_is_unknown_without_a_tree_and_zero_for_a_tree_without_model_code():
+    """No collected tree is unknown (None), never a silent 0; a tree the model did not change is a measured 0."""
+    from backend.generation.testing import factories
+
+    pending = factories.GenerationRunFactory()
+    assert set(loc_from_run(pending).values()) == {None}
+    untouched = factories.GenerationRunFactory(tested=True)
+    _add(untouched, "backend/app.py", "a = 1\n", origin="starter")
+    assert loc_from_run(untouched)["total_loc"] == 0
+
+
+@pytest.mark.django_db
+def test_loc_for_runs_sums_only_runs_with_a_known_loc():
+    from backend.generation.testing import factories
+
+    pending = factories.GenerationRunFactory()
+    measured = factories.GenerationRunFactory(tested=True)
+    _add(measured, "backend/app.py", "a = 1\nb = 2\n")
+    out = loc_for_runs([pending, measured])
+    assert (out["total_loc"], out["counted"], len(out["per_run"])) == (2, 1, 2)
+    assert loc_for_runs([pending])["total_loc"] is None
 
 
 def test_files_in_dependency_or_scratch_dirs_are_not_source():

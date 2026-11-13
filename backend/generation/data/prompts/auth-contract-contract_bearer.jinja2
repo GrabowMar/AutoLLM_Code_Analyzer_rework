@@ -1,0 +1,5 @@
+{% if "auth" in task.features %}
+`POST /api/auth/register` with the JSON body `{"username": ..., "password": ...}` creates an account and answers 201. `POST /api/auth/login` with the same fields answers 200 with `{"token": "<token>"}`. Requests made as a signed-in user send the header `Authorization: Bearer <token>`; requests that need a signed-in user answer 401 without a valid token.
+{% if "admin" in task.features %}
+There is one admin account, named `admin`. Its password is read from the environment variable `ADMIN_PASSWORD` when the app starts; when the variable is unset or empty, admin sign-in is disabled. There is no built-in admin password.
+{% endif %}{% endif %}

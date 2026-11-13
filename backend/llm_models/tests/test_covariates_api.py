@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.tests.factories import GenerationRunFactory
 from backend.inference.models import LLMEndpoint
 from backend.llm_models.models import LLMModel
 from backend.llm_models.services.model_covariates import COLUMNS
@@ -125,9 +125,9 @@ class TestCovariatesAPI:
         used = LLMModelFactory(model_id="lab/flash-one", metadata=CATALOG_META)
         LLMModelFactory(model_id="lab/unused")
         other_users_model = LLMModelFactory(model_id="lab/others")
-        GenerationJobFactory(model=used, created_by=user, status="completed")
-        GenerationJobFactory(model=used, created_by=user, status="failed")
-        GenerationJobFactory(model=other_users_model, created_by=UserFactory(), status="completed")
+        GenerationRunFactory(model=used, created_by=user, status="completed")
+        GenerationRunFactory(model=used, created_by=user, status="failed")
+        GenerationRunFactory(model=other_users_model, created_by=UserFactory(), status="completed")
 
         data = api_client.get(URL).json()
         assert data["used_only"] is True
@@ -151,7 +151,7 @@ class TestCovariatesAPI:
             input_price_per_token=0.0000002,
             output_price_per_token=0.0000008,
         )
-        GenerationJobFactory(model=model, created_by=user)
+        GenerationRunFactory(model=model, created_by=user)
         row = api_client.get(URL).json()["rows"][0]
         assert row["open_weights"] is True
         assert row["license"] == "mit"
@@ -179,7 +179,7 @@ class TestCovariatesAPI:
 
     def test_missing_values_are_null_not_zero(self, api_client, user):
         model = LLMModelFactory(model_id="lab/bare", metadata={}, context_window=0, max_output_tokens=0)
-        GenerationJobFactory(model=model, created_by=user)
+        GenerationRunFactory(model=model, created_by=user)
         row = api_client.get(URL).json()["rows"][0]
         for key in (
             "context_window",
@@ -212,7 +212,7 @@ class TestCovariatesAPI:
                 "lmarena": {"categories": {"webdev": {"rating": 1600.0}}, "match": "assumed"},
             },
         )
-        GenerationJobFactory(model=local, created_by=user)
+        GenerationRunFactory(model=local, created_by=user)
         row = api_client.get(URL).json()["rows"][0]
         assert row["is_local"] is True
         assert row["endpoint"] == "sub-go"
@@ -238,7 +238,7 @@ class TestCovariatesAPI:
             _local_endpoint(user),
             metadata={"catalog_twin": {"model_id": twin.model_id, "source": "models.dev:sub-go"}},
         )
-        GenerationJobFactory(model=local, created_by=user)
+        GenerationRunFactory(model=local, created_by=user)
         row = api_client.get(URL).json()["rows"][0]
         assert {"epoch", "lmarena"} <= set(row["inherited_fields"])
         assert row["lmarena_webdev_rating"] == pytest.approx(1619.2)
@@ -247,7 +247,7 @@ class TestCovariatesAPI:
     def test_manual_twin_from_map_when_enrichment_has_not_linked(self, api_client, user):
         LLMModelFactory(model_id="lab/flash-one", metadata=CATALOG_META)
         local = _local_model(_local_endpoint(user))
-        GenerationJobFactory(model=local, created_by=user)
+        GenerationRunFactory(model=local, created_by=user)
         with patch(
             "backend.llm_models.services.model_covariates.map_twins",
             return_value={local.model_id: "lab/flash-one"},
@@ -260,7 +260,7 @@ class TestCovariatesAPI:
     def test_private_endpoint_models_are_hidden_from_other_users(self, client, user):
         owner = UserFactory()
         hidden = _local_model(_local_endpoint(owner, visibility=LLMEndpoint.Visibility.PRIVATE))
-        GenerationJobFactory(model=hidden, created_by=user)  # even with a job, visibility rules apply
+        GenerationRunFactory(model=hidden, created_by=user)  # even with a job, visibility rules apply
         client.force_login(user)
         rows = client.get(URL, {"used_only": "false"}).json()["rows"]
         assert hidden.model_id not in {r["model_id"] for r in rows}
@@ -271,7 +271,7 @@ class TestCovariatesAPI:
             model_name='=HYPERLINK("http://x")',
             metadata=CATALOG_META,
         )
-        GenerationJobFactory(model=model, created_by=user)
+        GenerationRunFactory(model=model, created_by=user)
         resp = api_client.get(URL, {"format": "csv"})
         assert resp.status_code == HTTPStatus.OK
         assert resp["Content-Type"].startswith("text/csv")

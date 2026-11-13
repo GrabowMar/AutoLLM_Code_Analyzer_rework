@@ -1,0 +1,4 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: opencode (native)
+description: opencode 1.18.35 with its native system prompt, tools and defaults (incl. its task subagent tool).
+content: {harness: opencode, harness_version: 1.18.35, subagents: true}

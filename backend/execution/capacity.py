@@ -1,15 +1,16 @@
 """Capacity snapshot, slot settings and the apps-dind memory rule (spec §C.4 step 1, §C.6, §C.10).
 
 :func:`snapshot` is what the scheduler admits against: one grouped query
-over the jobs a worker may still hold, plus the endpoint rows with their
+over the runs a worker may still hold, plus the endpoint rows with their
 liveness (live relay session / recent direct inventory / always for
 OpenRouter), what each one serves and has loaded, and the outstanding model
 warm-ups.
 
-Jobs count against capacity whenever a worker may still hold them:
-``lease_owner <> ''`` **whatever the status** (a cancelled job whose thread is
+Runs count against capacity whenever a worker may still hold them:
+``lease_owner <> ''`` **whatever the status** (a cancelled run whose thread is
 still tearing down keeps its slot until the worker's ``finally`` clears the
-lease), plus every RUNNING executor-owned job.
+lease), plus every RUNNING executor-owned run. Residency counts the run's
+pinned served name (``pinned_served_name``, copied from the manifest at launch).
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 # Hard bounds of the runtime-editable slot settings (§B.4).
-SLOT_BOUNDS = {"sandbox_slots": (0, 8), "eval_slots": (0, 4), "llm_job_threads": (1, 32), "post_run_slots": (0, 1)}
+SLOT_BOUNDS = {"sandbox_slots": (0, 8), "eval_slots": (0, 4), "llm_job_threads": (1, 32), "post_run_slots": (0, 2)}
 SANDBOX_OVERHEAD = "256m"  # gateway container + slack next to each agent sandbox
 MEMORY_HEADROOM = 0.95
 LOADED_MODELS_FRESH_S = 30  # /api/ps older than this is "unknown" (prefetch)
@@ -85,8 +86,9 @@ class MemoryCheck:
 
 def _terms() -> dict[str, int]:
     return {
-        "sandbox": parse_mem(settings.AGENT_SANDBOX_MEM_LIMIT) + parse_mem(SANDBOX_OVERHEAD),
-        "eval": parse_mem(settings.EVAL_SLOT_MEM),
+        # The largest sandbox any policy may ask for: effective policies clamp sandbox.memory to it (WP-11).
+        "sandbox": parse_mem(settings.AGENT_SANDBOX_MEM_LIMIT_MAX) + parse_mem(SANDBOX_OVERHEAD),
+        "eval": max(parse_mem(settings.EVAL_SLOT_MEM), parse_mem(getattr(settings, "SAMPLE_BUILD_MEMORY", "1536m"))),
         "post": parse_mem(settings.ANALYSIS_WORKSPACE_MEM),
         "reserve": parse_mem(settings.APPS_DIND_APP_RESERVE),
     }
@@ -98,7 +100,7 @@ def memory_limit() -> int:
 
 
 def check_memory(sandbox_slots: int, eval_slots: int, post_run_slots: int) -> MemoryCheck:
-    """``sandbox x (AGENT_SANDBOX_MEM_LIMIT + 256m) + eval x EVAL_SLOT_MEM + post x ANALYSIS_WORKSPACE_MEM
+    """``sandbox x (AGENT_SANDBOX_MEM_LIMIT_MAX + 256m) + eval x EVAL_SLOT_MEM + post x ANALYSIS_WORKSPACE_MEM
     + APPS_DIND_APP_RESERVE ≤ APPS_DIND_MEM_LIMIT x 0.95``."""
     t = _terms()
     base = sandbox_slots * t["sandbox"] + eval_slots * t["eval"] + t["reserve"]
@@ -245,6 +247,7 @@ class EndpointState:
     max_active_jobs: int | None
     max_resident_models: int | None
     keep_alive: str
+    cost_basis: str = "billed"
     online: bool = False
     served: set[tuple[str, str]] | None = None  # None: serves everything (OpenRouter)
     loaded: set[str] = field(default_factory=set)  # names on fresh /api/ps
@@ -252,7 +255,7 @@ class EndpointState:
 
     @property
     def job_cap(self) -> int:
-        """Active jobs admitted at once (both lanes): ``max_active_jobs`` or ``max_concurrency``."""
+        """Active runs admitted at once (both lanes): ``max_active_jobs`` or ``max_concurrency``."""
         return int(self.max_active_jobs if self.max_active_jobs is not None else self.max_concurrency)
 
     def serves(self, name: str, digest: str) -> bool:
@@ -286,7 +289,11 @@ class CapacitySnapshot:
     ep_active: Counter = field(default_factory=Counter)  # phase running, both lanes
     ep_user_active: Counter = field(default_factory=Counter)  # (endpoint, user) -> running
     resident: dict[int, set[str]] = field(default_factory=dict)
-    exp_active: Counter = field(default_factory=Counter)  # all phases
+    study_active: Counter = field(default_factory=Counter)  # all phases
+    # Generation stages per study and endpoint / model / pinned provider (concurrency.per_* knobs).
+    study_ep_active: Counter = field(default_factory=Counter)  # (study, endpoint) -> running
+    study_model_active: Counter = field(default_factory=Counter)  # (study, model) -> running
+    study_provider_active: Counter = field(default_factory=Counter)  # (study, provider) -> running
     user_active: Counter = field(default_factory=Counter)  # all phases
     endpoints: dict[int, EndpointState] = field(default_factory=dict)
     warmups: dict[int, dict[str, Warmup]] = field(default_factory=dict)
@@ -302,11 +309,14 @@ def residency_key(served_name: str, model_id: int | None) -> str:
 
 
 _ACTIVE_SQL = """
-SELECT lane, phase, status, coalesce(endpoint_id, %s) AS ep, experiment_id, created_by_id,
-       coalesce(resolved_bundle->'endpoint'->>'served_model_name', '') AS served, model_id, count(*)
-FROM generation_generationjob
-WHERE queued_at IS NOT NULL AND (status = 'running' OR lease_owner <> '')
-GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+SELECT j.lane, j.phase, j.status, coalesce(j.endpoint_id, %s) AS ep, j.study_id, j.created_by_id,
+       j.pinned_served_name AS served, j.model_id,
+       coalesce(rm.manifest #>> '{gateway,routing,only,0}',
+                rm.manifest #>> '{gateway,routing,provider,only,0}', '') AS provider,
+       count(*)
+FROM generation_run j LEFT JOIN generation_runmanifest rm ON rm.run_id = j.id
+WHERE j.queued_at IS NOT NULL AND (j.status = 'running' OR j.lease_owner <> '')
+GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
 """
 
 
@@ -357,6 +367,7 @@ def _endpoint_states(now: datetime) -> dict[int, EndpointState]:
             max_active_jobs=ep.max_active_jobs,
             max_resident_models=ep.max_resident_models,
             keep_alive=ep.keep_alive,
+            cost_basis=ep.cost_basis,
             loaded=loaded,
             loaded_fresh=fresh,
         )
@@ -421,22 +432,26 @@ def _warmups(now: datetime, endpoint_ids: list[int]) -> dict[int, dict[str, Warm
 
 
 def snapshot(system_ep: int | None = None) -> CapacitySnapshot:
-    """The capacity the scheduler admits against (one grouped job query + endpoints + warm-ups)."""
+    """The capacity the scheduler admits against (one grouped run query + endpoints + warm-ups)."""
     if system_ep is None:
         from backend.inference.access import system_openrouter
 
         system_ep = system_openrouter().pk
     now = timezone.now()
     snap = CapacitySnapshot(system_ep=system_ep, taken_at=now)
+    from backend.execution.models import RuntimeBuildLease
+    from backend.execution.runtime_builds import CACHED_START_PREFIX
+
+    snap.eval_used = RuntimeBuildLease.objects.exclude(owner__startswith=CACHED_START_PREFIX).count()
     with connection.cursor() as cursor:
         cursor.execute(_ACTIVE_SQL, [system_ep])
         rows = cursor.fetchall()
-    for lane, raw_phase, status, ep, experiment_id, user_id, served, model_id, count in rows:
+    for lane, raw_phase, status, ep, study_id, user_id, served, model_id, provider, count in rows:
         # A cancelled (or otherwise finished) row whose worker still holds it counts as running.
         phase = raw_phase if status == "running" else (raw_phase or "running")
         snap.user_active[user_id] += count
-        if experiment_id is not None:
-            snap.exp_active[experiment_id] += count
+        if study_id is not None:
+            snap.study_active[study_id] += count
         if phase == "evaluating":
             snap.eval_used += count
         elif phase == "running":
@@ -446,6 +461,11 @@ def snapshot(system_ep: int | None = None) -> CapacitySnapshot:
                 snap.llm_used += count
             snap.ep_active[ep] += count
             snap.ep_user_active[(ep, user_id)] += count
+            if study_id is not None:
+                snap.study_ep_active[(study_id, ep)] += count
+                snap.study_model_active[(study_id, model_id)] += count
+                if provider:
+                    snap.study_provider_active[(study_id, provider)] += count
             snap.resident.setdefault(ep, set()).add(residency_key(served, model_id))
     snap.endpoints = _endpoint_states(now)
     local_ids = [s.id for s in snap.endpoints.values() if not s.is_system]

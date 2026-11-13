@@ -1,4 +1,4 @@
-"""GitHub integration: export a generated application to a repository or Gist.
+"""GitHub integration: export a generated application (a ``GenerationRun``) to a repository or Gist.
 
 The token is the user's ``github`` credential (``/api/credentials/github/``).
 Repository exports land as a single commit built with the Git Data API; the
@@ -17,14 +17,13 @@ import gzip
 import json
 import logging
 import re
-import tempfile
 import uuid
 from collections import Counter
 from dataclasses import dataclass
 from dataclasses import field
-from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Literal
 
 import requests
 
@@ -33,7 +32,7 @@ from backend.credentials.models import Provider
 from backend.credentials.services.resolver import get_user_credential_for
 
 if TYPE_CHECKING:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
     from backend.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -68,6 +67,10 @@ SKIP_DIRS = frozenset(
 )
 SKIP_FILES = frozenset({".DS_Store", "Thumbs.db", ".env"})
 SKIP_SUFFIXES = (".pyc", ".pyo", ".log")
+
+# "app": the buildable tree (starter and parent files plus what the model wrote, RunView scope "app");
+# "model": only the files the model authored or modified.
+ExportScope = Literal["app", "model"]
 
 HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
@@ -239,26 +242,26 @@ def status(user: User) -> dict[str, Any]:
 # ── application files ─────────────────────────────────────────────────
 
 
-def resolve_application(user: User, application_ref: GenerationJob | str | uuid.UUID) -> GenerationJob:
-    """The user's generation job (an "application") for an id, or the job itself if already loaded.
+def resolve_application(user: User, application_ref: GenerationRun | str | uuid.UUID) -> GenerationRun:
+    """The user's generation run (an "application") for an id, or the run itself if already loaded.
 
     Mirrors the generation API: applications are visible to their creator only.
     """
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
-    if isinstance(application_ref, GenerationJob):
-        job = application_ref
-        if job.created_by_id != user.pk:
+    if isinstance(application_ref, GenerationRun):
+        run = application_ref
+        if run.created_by_id != user.pk:
             raise GitHubError(_NOT_FOUND, status_code=404)
-        return job
+        return run
     try:
-        job_id = uuid.UUID(str(application_ref))
+        run_id = uuid.UUID(str(application_ref))
     except ValueError as exc:
         raise GitHubError(_NOT_FOUND, status_code=404) from exc
-    job = GenerationJob.objects.select_related("model", "app_requirement").filter(id=job_id, created_by=user).first()
-    if job is None:
+    run = GenerationRun.objects.select_related("model").filter(id=run_id, created_by=user).first()
+    if run is None:
         raise GitHubError(_NOT_FOUND, status_code=404)
-    return job
+    return run
 
 
 @dataclass
@@ -280,77 +283,42 @@ def _is_junk(rel: str) -> bool:
     return name in SKIP_FILES or name.endswith(SKIP_SUFFIXES)
 
 
-def _raw_file_map(job: GenerationJob) -> dict[str, str]:
-    """The generated files alone (no stack skeleton)."""
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    files = data.get("files")
-    if isinstance(files, dict):
-        out = {k: v for k, v in files.items() if isinstance(k, str) and isinstance(v, str)}
-        if out:
-            return out
-    # Legacy single-blob results.
-    legacy = {"backend_code": "app.py", "frontend_code": "App.jsx", "content": "output.md"}
-    return {name: data[key] for key, name in legacy.items() if isinstance(data.get(key), str) and data[key].strip()}
+def collect_app_files(run: GenerationRun, *, scope: ExportScope = "app") -> AppFiles:
+    """Gather a run's files (``RunView.files(scope)``), dropping junk and anything over the size caps.
 
+    A file whose blob is missing is listed in ``skipped``, never exported empty.
+    """
+    from backend.generation import blobs
+    from backend.generation.runs.view import run_view
 
-def _scaffolded_file_map(job: GenerationJob) -> tuple[dict[str, bytes], set[str]] | None:
-    """The app as it is built (stack skeleton + generated code), or None if it cannot be materialized."""
-    from backend.runtime.services.scaffolding import ScaffoldPhase
-    from backend.runtime.services.scaffolding import apply_scaffold
-
-    with tempfile.TemporaryDirectory(prefix="gh-export-") as tmp:
-        root = Path(tmp) / "app"
-        try:
-            apply_scaffold(job, root, phase=ScaffoldPhase.BUILD)
-        except Exception:  # noqa: BLE001 — any scaffold failure degrades to the raw files
-            logger.warning("GitHub export: scaffolding failed for job %s; exporting raw files", job.id, exc_info=True)
-            return None
-        files: dict[str, bytes] = {}
-        executable: set[str] = set()
-        for path in sorted(root.rglob("*")):
-            if not path.is_file() or path.is_symlink():
-                continue
-            rel = path.relative_to(root).as_posix()
-            files[rel] = path.read_bytes()
-            if path.stat().st_mode & 0o111:
-                executable.add(rel)
-        return files, executable
-
-
-def collect_app_files(job: GenerationJob, *, include_scaffold: bool = True) -> AppFiles:
-    """Gather an application's files, dropping junk and anything over the size caps."""
-    raw: dict[str, bytes]
-    executable: set[str] = set()
-    scaffolded = _scaffolded_file_map(job) if include_scaffold else None
-    if scaffolded is not None:
-        raw, executable = scaffolded
-    else:
-        raw = {k: v.encode("utf-8") for k, v in _raw_file_map(job).items()}
-
-    out = AppFiles(executable=executable)
+    out = AppFiles()
     total = 0
-    for rel in sorted(raw):
+    for entry in run_view(run).files(scope):
+        rel = entry.path
         clean = rel.strip().lstrip("/")
-        if not clean or ".." in clean.split("/") or _is_junk(clean):
+        if not clean or ".." in clean.split("/") or _is_junk(clean) or entry.size > MAX_FILE_BYTES:
             out.skipped.append(rel)
             continue
-        content = raw[rel]
-        if len(content) > MAX_FILE_BYTES:
+        try:
+            content = blobs.get_bytes(entry.blob)
+        except Exception:  # noqa: BLE001 — a missing or corrupt blob skips the file, it is reported
+            logger.warning("GitHub export: blob %s of %s (run %s) is unreadable", entry.blob, rel, run.pk)
             out.skipped.append(rel)
             continue
-        if total + len(content) > MAX_TOTAL_BYTES:
+        if len(content) > MAX_FILE_BYTES or total + len(content) > MAX_TOTAL_BYTES:
             out.skipped.append(rel)
             continue
         total += len(content)
         out.files[clean] = content
-    out.executable &= set(out.files)
+        if entry.mode & 0o111:
+            out.executable.add(clean)
     return out
 
 
 # ── findings ──────────────────────────────────────────────────────────
 
 
-def latest_results(job: GenerationJob):
+def latest_results(run: GenerationRun):
     """The app's latest completed result per tool (``ToolResult.latest_ids_per_job``): what the study tables count.
 
     Re-running one tool supersedes only that tool's result, so a partial
@@ -359,7 +327,7 @@ def latest_results(job: GenerationJob):
     from backend.analysis.models import ToolResult
 
     return ToolResult.objects.filter(
-        id__in=ToolResult.latest_ids_per_job([job.id]),
+        id__in=ToolResult.latest_ids_per_job([run.id]),
         status=ToolResult.Status.COMPLETED,
     )
 
@@ -411,7 +379,7 @@ def _match_path(uri: str, exported: set[str]) -> str:
     return norm.lstrip("/")
 
 
-def build_sarif(job: GenerationJob, exported_paths: set[str]) -> tuple[dict[str, Any], int]:
+def build_sarif(run: GenerationRun, exported_paths: set[str]) -> tuple[dict[str, Any], int]:
     """SARIF for the app's findings (:func:`latest_results`), shaped for GitHub code scanning.
 
     Returns the document and the number of results kept. Code scanning places
@@ -424,7 +392,7 @@ def build_sarif(job: GenerationJob, exported_paths: set[str]) -> tuple[dict[str,
     from backend.export.services.findings import dynamic_tool_slugs
     from backend.export.services.findings import findings_sarif
 
-    sarif = findings_sarif(_findings_qs(latest_results(job)))
+    sarif = findings_sarif(_findings_qs(latest_results(run)))
     dynamic = dynamic_tool_slugs()
     kept = 0
     for sarif_run in sarif.get("runs", []):
@@ -458,13 +426,13 @@ def _upload_sarif(
     full_name: str,
     ref: str,
     commit_sha: str,
-    job: GenerationJob,
+    run: GenerationRun,
     exported: set[str],
 ) -> dict[str, Any]:
     """Upload the app's findings; never raises — failures come back as a message."""
-    if not latest_results(job).exists():
+    if not latest_results(run).exists():
         return {"uploaded": False, "message": "This application has no completed analysis run; nothing to upload."}
-    sarif, kept = build_sarif(job, exported)
+    sarif, kept = build_sarif(run, exported)
     if kept == 0:
         return {"uploaded": False, "message": "The latest analysis results have no file-located findings to upload."}
     payload = base64.b64encode(gzip.compress(json.dumps(sarif).encode("utf-8"))).decode("ascii")
@@ -507,11 +475,22 @@ def _upload_sarif(
 # ── README ────────────────────────────────────────────────────────────
 
 
-def build_readme(job: GenerationJob, summary: dict[str, Any] | None, *, files_count: int) -> str:
-    resolved = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    template = job.app_requirement
-    title = template.name if template else f"Generated application {str(job.id)[:8]}"
-    model = job.model
+def _md_cell(text: str) -> str:
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def build_readme(run: GenerationRun, summary: dict[str, Any] | None, *, files_count: int) -> str:
+    from backend.generation.runs.view import run_view
+
+    view = run_view(run)
+    task = view.task_dict() or {}
+    title = task.get("title") or f"Generated application {str(run.id)[:8]}"
+    model = run.model
+    model_label = (
+        f"{model.model_name} (`{model.model_id}`)"
+        if model
+        else (f"`{view.model_slug}`" if view.model_slug else "unknown")
+    )
     lines = [
         f"# {title}",
         "",
@@ -522,24 +501,30 @@ def build_readme(job: GenerationJob, summary: dict[str, Any] | None, *, files_co
         "",
         "| | |",
         "|---|---|",
-        f"| Model | {f'{model.model_name} (`{model.model_id}`)' if model else 'unknown'} |",
-        f"| Generation mode | {job.get_mode_display()} |",
+        f"| Model | {_md_cell(model_label)} |",
+        f"| Run kind | {_md_cell(run.get_kind_display())} |",
     ]
-    if template:
-        lines.append(f"| App template | {template.name} (`{template.slug}`) |")
-    if job.bundle_key:
-        lines.append(f"| Generation profile | `{job.bundle_key}` |")
-    stack = (resolved.get("stack") or {}).get("slug") or resolved.get("scaffolding_slug") or job.stack_slug
-    if stack:
-        lines.append(f"| Stack | `{stack}` |")
+    if task.get("pinned_ref") or task.get("ref"):
+        lines.append(f"| Task | {_md_cell(task.get('title') or '')} (`{task.get('pinned_ref') or task.get('ref')}`) |")
+    if view.stack is not None:
+        lines.append(f"| Stack | `{view.stack.ref}` |")
+    if view.harness is not None:
+        lines.append(f"| Harness | `{view.harness[0]}@{view.harness[1]}` |")
+    if view.style_ref:
+        lines.append(f"| Style | `{view.style_ref}` |")
+    if view.study_id:
+        lines.append(f"| Study | `{view.study_id}` |")
+    if run.config_fingerprint:
+        lines.append(f"| Config fingerprint | `{run.config_fingerprint[:16]}` |")
     lines += [
-        f"| Job id | `{job.id}` |",
-        f"| Generated at | {job.completed_at or job.created_at:%Y-%m-%d %H:%M UTC} |",
+        f"| Run id | `{run.id}` |",
+        f"| Generated at | {run.completed_at or run.created_at:%Y-%m-%d %H:%M UTC} |",
         f"| Files exported | {files_count} |",
         "",
     ]
-    if template and template.description:
-        lines += ["## Task", "", template.description.strip(), ""]
+    task_text = (task.get("summary") or task.get("prose") or "").strip()
+    if task_text:
+        lines += ["## Task", "", task_text, ""]
 
     lines += ["## Static analysis", ""]
     if summary is None:
@@ -611,13 +596,13 @@ def _tree_entry(client: GitHubClient, full_name: str, path: str, content: bytes,
 
 def export_to_repo(
     user: User,
-    application_ref: GenerationJob | str | uuid.UUID,
+    application_ref: GenerationRun | str | uuid.UUID,
     repo_name: str,
     *,
     private: bool = True,
     description: str = "",
     upload_sarif: bool = False,
-    include_scaffold: bool = True,
+    scope: ExportScope = "app",
 ) -> dict[str, Any]:
     """Create ``repo_name`` on the user's account and push the app as one commit.
 
@@ -626,17 +611,17 @@ def export_to_repo(
     is then built as an orphan (no parent) and force-set as the branch head,
     leaving a single-commit history.
     """
-    job = resolve_application(user, application_ref)
+    run = resolve_application(user, application_ref)
     repo_name = validate_repo_name(repo_name)
     token = _token_for(user)
-    app = collect_app_files(job, include_scaffold=include_scaffold)
+    app = collect_app_files(run, scope=scope)
     if not app.files:
         msg = "This application has no exportable files."
         raise GitHubError(msg, status_code=400)
 
     readme_name = _readme_path(app.files)
-    summary = _findings_summary(latest_results(job))
-    readme = build_readme(job, summary, files_count=len(app.files) + 1).encode("utf-8")
+    summary = _findings_summary(latest_results(run))
+    readme = build_readme(run, summary, files_count=len(app.files) + 1).encode("utf-8")
     files = {**app.files, readme_name: readme}
 
     client = GitHubClient(token)
@@ -647,7 +632,7 @@ def export_to_repo(
         json_body={
             "name": repo_name,
             "private": private,
-            "description": (description or f"LLM-generated application exported from LLM Lab ({job.id})")[:350],
+            "description": (description or f"LLM-generated application exported from LLM Lab ({run.id})")[:350],
             "auto_init": False,
         },
     )
@@ -682,13 +667,13 @@ def export_to_repo(
         action="create the tree",
         json_body={"tree": tree_entries},
     )
-    model_label = job.model.model_id if job.model else "an LLM"
+    model_label = run.model.model_id if run.model else "an LLM"
     commit = client.call(
         "POST",
         f"/repos/{full_name}/git/commits",
         action="create the commit",
         json_body={
-            "message": f"Generated application exported from LLM Lab\n\nModel: {model_label}\nJob: {job.id}",
+            "message": f"Generated application exported from LLM Lab\n\nModel: {model_label}\nRun: {run.id}",
             "tree": tree["sha"],
             "parents": [],
         },
@@ -711,25 +696,25 @@ def export_to_repo(
         "sarif": {"uploaded": False, "message": "SARIF upload not requested."},
     }
     if upload_sarif:
-        result["sarif"] = _upload_sarif(client, full_name, ref, commit_sha, job, set(files))
+        result["sarif"] = _upload_sarif(client, full_name, ref, commit_sha, run, set(files))
     return result
 
 
 def export_to_gist(
     user: User,
-    application_ref: GenerationJob | str | uuid.UUID,
+    application_ref: GenerationRun | str | uuid.UUID,
     *,
     public: bool = False,
     description: str = "",
 ) -> dict[str, Any]:
-    """Export the generated files (no stack skeleton) as a Gist.
+    """Export the files the model wrote (RunView scope ``model``) as a Gist.
 
     Gists have no directories, so ``a/b.py`` becomes ``a__b.py``. Only small,
     text-only apps qualify.
     """
-    job = resolve_application(user, application_ref)
+    run = resolve_application(user, application_ref)
     token = _token_for(user)
-    app = collect_app_files(job, include_scaffold=False)
+    app = collect_app_files(run, scope="model")
     if not app.files:
         msg = "This application has no exportable files."
         raise GitHubError(msg, status_code=400)
@@ -750,15 +735,15 @@ def export_to_gist(
         if text.strip():
             gist_files[path.replace("/", "__")] = {"content": text}
     readme_name = "LLM_LAB_EXPORT.md" if "README.md" in gist_files else "README.md"
-    summary = _findings_summary(latest_results(job))
-    gist_files[readme_name] = {"content": build_readme(job, summary, files_count=len(gist_files) + 1)}
+    summary = _findings_summary(latest_results(run))
+    gist_files[readme_name] = {"content": build_readme(run, summary, files_count=len(gist_files) + 1)}
 
     gist = GitHubClient(token).call(
         "POST",
         "/gists",
         action="create the Gist",
         json_body={
-            "description": (description or f"LLM-generated application exported from LLM Lab ({job.id})")[:1000],
+            "description": (description or f"LLM-generated application exported from LLM Lab ({run.id})")[:1000],
             "public": public,
             "files": gist_files,
         },

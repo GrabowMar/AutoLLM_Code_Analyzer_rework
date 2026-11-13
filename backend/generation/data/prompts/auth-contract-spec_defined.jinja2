@@ -1,0 +1,9 @@
+{% if "auth" in task.features %}
+{% if task.auth_flow %}
+{% if task.auth_flow.register %}Accounts are created with {% for e in task.endpoints if e.id == task.auth_flow.register %}`{{ e.method }} {{ e.path }}`{% endfor %} and signed in with {% for e in task.endpoints if e.id == task.auth_flow.login %}`{{ e.method }} {{ e.path }}`{% endfor %}.{% else %}Users sign in with {% for e in task.endpoints if e.id == task.auth_flow.login %}`{{ e.method }} {{ e.path }}`{% endfor %}.{% endif %}{% if task.auth_flow.credential == "bearer" %} The sign-in response carries a token{% if task.auth_flow.token_json_path %} at `{{ task.auth_flow.token_json_path }}`{% endif %}; requests made as a signed-in user send it as `Authorization: Bearer <token>`.{% else %} Signing in starts a session carried in a cookie.{% endif %}{% if task.auth_flow.logout %} {% for e in task.endpoints if e.id == task.auth_flow.logout %}`{{ e.method }} {{ e.path }}`{% endfor %} signs out.{% endif %}{% if task.auth_flow.csrf == "double_submit_cookie" %} Every state-changing request of a signed-in user carries the header `X-CSRF-Token` with the value of the `csrf_token` cookie.{% endif %}{% if task.auth_flow.csrf == "header_from_endpoint" %} Every state-changing request of a signed-in user carries the header `X-CSRF-Token` with the token returned by {% for e in task.endpoints if e.id == task.auth_flow.csrf_endpoint %}`{{ e.method }} {{ e.path }}`{% endfor %}.{% endif %} Requests that need a signed-in user answer 401 without valid credentials.
+{% else %}
+Users sign up and sign in as the task describes.
+{% endif %}
+{% if "admin" in task.features %}
+There is one admin account, named `admin`. Its password is read from the environment variable `ADMIN_PASSWORD` when the app starts; when the variable is unset or empty, admin sign-in is disabled. There is no built-in admin password.
+{% endif %}{% endif %}

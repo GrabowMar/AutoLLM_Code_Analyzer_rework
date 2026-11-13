@@ -1,0 +1,193 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Link previews
+summary: Save links and show a preview card built from the fetched page's title, description and image.
+category: integration
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Preview
+  fields:
+  - {name: url, type: url, required: true, max_length: 2048}
+  - {name: final_url, type: string}
+  - {name: status_code, type: int}
+  - {name: title, type: string}
+  - {name: description, type: string}
+  - {name: image_url, type: string}
+  - {name: fetched_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: previews.create
+  method: POST
+  path: /api/previews
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      url: {type: string, maxLength: 2048, format: uri}
+    required: [url]
+  response_schema:
+    type: object
+    required: [id, url]
+    properties:
+      id:
+        type: [integer, string]
+      url: {type: string, maxLength: 2048, format: uri}
+      final_url:
+        type: [string, 'null']
+      status_code:
+        type: [integer, 'null']
+      title:
+        type: [string, 'null']
+      description:
+        type: [string, 'null']
+      image_url:
+        type: [string, 'null']
+      fetched_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+  tags: [outbound]
+- id: previews.list
+  method: GET
+  path: /api/previews
+  auth: user
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, url]
+          properties:
+            id:
+              type: [integer, string]
+            url: {type: string, maxLength: 2048, format: uri}
+            final_url:
+              type: [string, 'null']
+            status_code:
+              type: [integer, 'null']
+            title:
+              type: [string, 'null']
+            description:
+              type: [string, 'null']
+            image_url:
+              type: [string, 'null']
+            fetched_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: previews.get
+  method: GET
+  path: /api/previews/{id}
+  auth: owner
+  owner_entity: Preview
+  response_schema:
+    type: object
+    required: [id, url]
+    properties:
+      id:
+        type: [integer, string]
+      url: {type: string, maxLength: 2048, format: uri}
+      final_url:
+        type: [string, 'null']
+      status_code:
+        type: [integer, 'null']
+      title:
+        type: [string, 'null']
+      description:
+        type: [string, 'null']
+      image_url:
+        type: [string, 'null']
+      fetched_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: previews.refresh
+  method: POST
+  path: /api/previews/{id}/refresh
+  auth: owner
+  owner_entity: Preview
+  response_schema:
+    type: object
+    required: [id, url]
+    properties:
+      id:
+        type: [integer, string]
+      url: {type: string, maxLength: 2048, format: uri}
+      final_url:
+        type: [string, 'null']
+      status_code:
+        type: [integer, 'null']
+      title:
+        type: [string, 'null']
+      description:
+        type: [string, 'null']
+      image_url:
+        type: [string, 'null']
+      fetched_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+  tags: [outbound]
+- id: previews.delete
+  method: DELETE
+  path: /api/previews/{id}
+  auth: owner
+  owner_entity: Preview
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.add
+  text: A field to paste a link and an 'Add' button with a loading state.
+  endpoints: [previews.create]
+- id: ui.cards
+  text: Preview cards with image, title, description and the site's host, linking to the page, with refresh and
+    delete buttons and paging.
+  endpoints: [previews.list, previews.refresh, previews.delete]
+features: [auth, ownership, outbound-http, pagination]
+surfaces: [cwe-918, cwe-20, cwe-400, cwe-79, cwe-639, cwe-601, cwe-116]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+probes:
+- id: probe.previews.ssrf
+  cwe: cwe-918
+  kind: ssrf_mock
+  endpoint: previews.create
+  params: {field: url}
+- {id: probe.previews.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: previews.get}

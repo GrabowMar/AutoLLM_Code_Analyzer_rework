@@ -1,0 +1,11 @@
+name: 'Argon2 password hashing (Python)'
+description: 'Passwords are hashed or verified with Argon2 (argon2-cffi''s PasswordHasher or passlib''s argon2 scheme).'
+content:
+  engine: regex
+  languages: [python]
+  rule: '\bPasswordHasher\s*\(|\bargon2\.(?:hash|verify|using)\s*\(|\bCryptContext\(\s*schemes\s*=\s*\[[^\]]*["'']argon2["'']'
+  tool: {name: re, version: py3.13}
+  feature_key: py-argon2-used
+  polarity: secure
+  cwe: [cwe-916]
+  description: 'argon2''s PasswordHasher (or passlib argon2) is used.'

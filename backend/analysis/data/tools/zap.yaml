@@ -4,9 +4,9 @@ description: >-
   Dynamic application security testing (DAST) against the running app: spiders
   its pages, then passively and actively scans them for missing security
   headers, XSS, SQL injection, information leaks and misconfigurations. The
-  spider does not run JavaScript, so it reaches only what the start page links
-  to: the API endpoints of a single-page app are not attacked. Requires the
-  app's container to be running.
+  spider does not run JavaScript; for a generated app the scan is seeded with
+  the task's API endpoints and a signed-in session, so the JSON API is
+  attacked too. Requires the app's container to be running.
 category: security
 kind: container
 target_language: any
@@ -36,13 +36,19 @@ uninstall_cmd: "rm -rf /home/analyzer/.local/opt/zap /home/analyzer/.local/opt/z
 # Quick scan = spider + active scan. A fresh -dir per run keeps no state
 # between apps; the JSON report is the only thing printed (no report, or an
 # empty one, fails the result).
-run_cmd: >-
-  rm -rf /tmp/zap && mkdir -p /tmp/zap &&
-  zap -cmd -silent -dir /tmp/zap/home
-  -config spider.maxDuration={config:spider_minutes}
-  -config scanner.maxScanDurationInMins={config:scan_minutes}
-  -config scanner.threadPerHost=4
-  -quickurl {url}/ -quickout /tmp/zap/report.json >/tmp/zap/zap.log 2>&1;
+# For a generated app the runner writes /tmp/dast/zap-plan.yaml first
+# (analysis/services/dast_seed.py): the task's API imported from an OpenAPI
+# file, the scan's credential on every request, then spider and active scan.
+# Without it (pasted code, no task spec) the quick scan crawls the start page.
+run_cmd: |
+  rm -rf /tmp/zap && mkdir -p /tmp/zap
+  if [ -f /tmp/dast/zap-plan.yaml ]; then
+    sp={config:spider_minutes}; sc={config:scan_minutes}
+    sed -e "s/\"__ZAP_SPIDER_MIN__\"/${sp%%.*}/" -e "s/\"__ZAP_SCAN_MIN__\"/${sc%%.*}/" /tmp/dast/zap-plan.yaml > /tmp/zap/plan.yaml
+    zap -cmd -silent -dir /tmp/zap/home -autorun /tmp/zap/plan.yaml >/tmp/zap/zap.log 2>&1
+  else
+    zap -cmd -silent -dir /tmp/zap/home -config spider.maxDuration={config:spider_minutes} -config scanner.maxScanDurationInMins={config:scan_minutes} -config scanner.threadPerHost=4 -quickurl {url}/ -quickout /tmp/zap/report.json >/tmp/zap/zap.log 2>&1
+  fi
   cat /tmp/zap/report.json
 parser_key: zap
 run_timeout: 1200

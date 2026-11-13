@@ -12,8 +12,10 @@ from django.test import Client
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models import GenerationRun
+from backend.generation.models.choices import Outcome
+from backend.generation.models.choices import RunStatus
+from backend.generation.tests.factories import GenerationRunFactory
 from backend.users.tests.factories import UserFactory
 
 _FIVE_CLIENTS = 5
@@ -237,8 +239,8 @@ def test_app_stats_staff_ok(staff_client):
     resp = client.get("/api/system/app-stats")
     assert resp.status_code == HTTPStatus.OK
     data = resp.json()
-    assert "analysis_tasks" in data
-    assert "generation_jobs" in data
+    assert "analysis_runs" in data
+    assert "generation_runs" in data
     assert "reports" in data
     assert "container_instances" in data
 
@@ -286,18 +288,28 @@ def test_clear_stuck_generation_updates_db(staff_client, db):
     client, _ = staff_client
     old_time = timezone.now() - timedelta(minutes=90)
 
-    job = GenerationJobFactory(status=GenerationJob.Status.RUNNING)
-    GenerationJob.objects.filter(pk=job.pk).update(updated_at=old_time)
+    run = GenerationRunFactory(status=RunStatus.RUNNING)
+    healthy = GenerationRunFactory(status=RunStatus.PENDING, queued_at=timezone.now())
+    GenerationRun.objects.filter(pk__in=[run.pk, healthy.pk]).update(updated_at=old_time)
 
-    resp = client.post(
-        "/api/system/maintenance/clear-stuck-generation?older_than_minutes=60",
-    )
+    with (
+        patch("backend.execution.transitions.publish_run", create=True) as publish,
+        patch("backend.execution.transitions.maybe_complete_study", create=True),
+    ):
+        resp = client.post(
+            "/api/system/maintenance/clear-stuck-generation?older_than_minutes=60",
+        )
     assert resp.status_code == HTTPStatus.OK
-    data = resp.json()
-    assert data["updated"] >= 1
+    assert resp.json()["updated"] == 1
 
-    job.refresh_from_db()
-    assert job.status == GenerationJob.Status.FAILED
+    run.refresh_from_db()
+    assert run.status == RunStatus.FAILED
+    # A stuck run is an infrastructure failure, never a model outcome.
+    assert run.outcome == Outcome.INFRA_ERROR
+    assert run.usable is False
+    assert publish.call_count == 1
+    healthy.refresh_from_db()
+    assert healthy.status == RunStatus.PENDING
 
 
 @pytest.mark.django_db

@@ -1,0 +1,15 @@
+You write one missing part of an existing application. Reply with a single JSON object that matches the output contract and nothing else.
+
+Output contract: {{ slot.output_contract.description }}
+{% if slot.output_contract.schema %}
+
+JSON schema of the reply:
+
+```json
+{{ slot.output_contract.schema | tojson(2) }}
+```
+{% endif %}
+{% if guidance.fragment_text %}
+
+{{ guidance.fragment_text }}
+{% endif %}

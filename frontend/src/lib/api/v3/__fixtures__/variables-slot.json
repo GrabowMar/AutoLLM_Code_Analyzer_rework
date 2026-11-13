@@ -1,0 +1,133 @@
+[
+  {
+    "name": "task",
+    "type": "object",
+    "description": "The task: {title, summary, category, prose (the condition's prose variant), entities, endpoints, ui, features, surfaces, has_frontend, auth_flow}. Owned by the task version.",
+    "example": {
+      "title": "Todo list",
+      "summary": "Personal todo lists.",
+      "prose": "Build a todo app ..."
+    },
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "stack",
+    "type": "object",
+    "description": "The stack profile: {backend, frontend, database, run_contract, fragment_text}; fragment_text is the stack's brief fragment rendered from its pinned template.",
+    "example": {
+      "backend": {
+        "framework": "flask"
+      },
+      "frontend": {
+        "framework": "react"
+      },
+      "database": "sqlite"
+    },
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "style",
+    "type": "object",
+    "description": "The style directive: {system, library, tone, tone_text, accessibility, fragment_text}.",
+    "example": {
+      "system": "tailwind",
+      "fragment_text": "Style the frontend with Tailwind CSS utility classes."
+    },
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "auth_contract",
+    "type": "string",
+    "description": "The auth contract text of the cell's auth mode (the prompt set's auth_contract.<mode> fragment).",
+    "example": "Authentication: POST /api/auth/register ...",
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "guidance",
+    "type": "object",
+    "description": "The guidance: {security_hint, cwes, prescriptions: [{purpose, library}], fragment_text}.",
+    "example": {
+      "security_hint": "generic",
+      "cwes": [],
+      "fragment_text": "Write secure code."
+    },
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "harness",
+    "type": "object",
+    "description": "The harness: {name, agentic}; agentic is false for editors such as aider.",
+    "example": {
+      "name": "opencode",
+      "agentic": true
+    },
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "network",
+    "type": "object",
+    "description": "The sandbox network policy: {policy: none|packages, sentence} (the prompt set's network.<policy> fragment).",
+    "example": {
+      "policy": "packages",
+      "sentence": "The sandbox can reach package registries only."
+    },
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "budget_neutral",
+    "type": "string",
+    "description": "The prompt set's budget_neutral fragment (a fixed sentence with no numbers), or an empty string.",
+    "example": "The run has a fixed resource budget; work efficiently.",
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "stack_fragment",
+    "type": "string",
+    "description": "Alias of stack.fragment_text.",
+    "example": "Use Flask (Python 3.13) ...",
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "style_fragment",
+    "type": "string",
+    "description": "Alias of style.fragment_text.",
+    "example": "Style the frontend as you see fit.",
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "guidance_fragment",
+    "type": "string",
+    "description": "Alias of guidance.fragment_text (empty for no guidance).",
+    "example": "",
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "run_contract",
+    "type": "object",
+    "description": "Alias of stack.run_contract.",
+    "example": {
+      "port": 8000,
+      "health_path": "/api/health"
+    },
+    "modes": ["app", "slot"]
+  },
+  {
+    "name": "slot",
+    "type": "object",
+    "description": "The slot (section 7.5): {kind, label, path, language, signature, decorators, hole_marker, context_files: [{path, text}], endpoint, spec_excerpt, output_contract, allowlist}.",
+    "example": {
+      "kind": "symbol",
+      "label": "the update_todo handler",
+      "path": "backend/todos.py",
+      "language": "python"
+    },
+    "modes": ["slot"]
+  },
+  {
+    "name": "context",
+    "type": "string",
+    "description": "slot.context_files rendered as fenced Markdown blocks (one per file, in resolved-context order).",
+    "example": "### `backend/todos.py`\n```\n...\n```",
+    "modes": ["slot"]
+  }
+]

@@ -1,0 +1,10 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: aider (controlled)
+description: aider 0.86.2 with the equalised knobs of spec 5.5 (command timeout, web tools off, subagents off, turn
+  cap from the budget preset).
+content:
+  harness: aider
+  harness_version: 0.86.2
+  controlled: true
+  subagents: false
+  options: {edit_format: diff, map_tokens: 1024}

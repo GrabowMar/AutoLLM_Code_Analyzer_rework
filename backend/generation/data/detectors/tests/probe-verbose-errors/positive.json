@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-verbose_errors",
+      "cwe": "cwe-209",
+      "kind": "verbose_errors",
+      "status": "exploited",
+      "evidence": "fixture"
+    },
+    {
+      "id": "p-other",
+      "cwe": "cwe-611",
+      "kind": "xxe",
+      "status": "not_exploited"
+    }
+  ]
+}

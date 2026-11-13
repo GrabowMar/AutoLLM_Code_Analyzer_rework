@@ -1,0 +1,14 @@
+name: Spring Boot + Vue (SQLite)
+description: Spring Boot 4 (Java 21, Maven) API serving a Vite Vue (TypeScript) build.
+content:
+  choice_mode: fixed
+  backend: {language: java, framework: spring-boot, runtime: temurin21}
+  frontend: {framework: vue, language: ts, build_tool: vite}
+  database: sqlite
+  run_contract: {port: 8000, api_prefix: /api, health_path: /api/health, static_serving: backend, data_dir: ./data, start: dockerfile}
+  brief_fragment: stack-spring-boot-vue@1
+  adherence:
+    backend_markers: [spring-boot-starter-webmvc]
+    frontend_markers: [vue]
+    db_markers: [sqlite-jdbc]
+  resources: {min_memory: 3g, min_cpus: 2.0}

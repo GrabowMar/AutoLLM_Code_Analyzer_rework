@@ -7,6 +7,9 @@
 	 * numeric id) and is descriptive only: n is shown, no p-values.
 	 */
 	import SectionHeading from '$lib/components/SectionHeading.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import { Button } from '$lib/components/ui/button';
+	import Activity from '@lucide/svelte/icons/activity';
 	import ModelBehaviourPanel from './ModelBehaviourPanel.svelte';
 	import ModelProviderPerformance from './ModelProviderPerformance.svelte';
 	import ModelVariabilityPanel from './ModelVariabilityPanel.svelte';
@@ -17,11 +20,25 @@
 		/** Catalog twin of a local model: its data is NOT shown here (no pooling), only named. */
 		twinModelId?: string | null;
 		twinSlug?: string | null;
+		/** The caller's runs of this model (insights); 0 shows one empty state instead of three empty panels. */
+		runsTotal?: number | null;
+		slug?: string;
 	}
 
-	let { modelId, twinModelId = null, twinSlug = null }: Props = $props();
+	let { modelId, twinModelId = null, twinSlug = null, runsTotal = null, slug = '' }: Props = $props();
 </script>
 
+{#if runsTotal === 0}
+	<EmptyState
+		icon={Activity}
+		title="No runs to describe yet"
+		description="Agent behaviour, per-call provider telemetry and same-setup variability come from your runs of this model. Generate apps with it to fill this tab."
+	>
+		{#snippet action()}
+			<Button size="sm" href="/generate?model={encodeURIComponent(slug)}">Generate an app</Button>
+		{/snippet}
+	</EmptyState>
+{:else}
 <div class="space-y-8">
 	{#if twinModelId}
 		<p class="text-xs text-muted-foreground">
@@ -46,3 +63,4 @@
 		<ModelVariabilityPanel {modelId} />
 	</section>
 </div>
+{/if}

@@ -1,16 +1,16 @@
 <script lang="ts">
 	/**
-	 * SameSetupPanel — the job's same-setup group (`GET /jobs/{id}/replicates/`,
-	 * contract C3): every visible run sharing its configuration fingerprint
-	 * (legacy jobs: an approximate key, badged), with each run's relation
-	 * (this run, replicate, replay = same seed, rerun = outside the design),
+	 * SameSetupPanel — a run's same-setup group (`GET /generation/runs/{id}/replicates/`):
+	 * every visible run sharing its configuration fingerprint, with each run's relation
+	 * (this run, retry = same cell, replay = same run fingerprint, rerun = ad hoc /
+	 * beyond plan, replicate),
 	 * its metrics, its code similarity to this run and links to its page;
 	 * summary rows (mean, SD, min, max, CV) under the members; the
 	 * determinism probe for seeded replays; the server's caveats.
 	 * Self-fetching; unmeasured values show "—", never 0.
 	 *
 	 * Props:
-	 * - `jobId`: the job the page shows.
+	 * - `jobId`: the generation run the page shows (a v3 run id).
 	 * - `variant`: 'app' (default: generation metrics first) or 'analysis'
 	 *   (findings first: code issues, issues per kLOC, measured or not).
 	 */
@@ -23,7 +23,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { tableFrame } from '$lib/components/table';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { getJobReplicates, type JobReplicates, type ReplicateMember } from '$lib/api/variability';
+	import { getRunReplicates, type ReplicateMember, type RunReplicates } from '$lib/api/variability';
 	import {
 		DASH,
 		RELATION_HELP,
@@ -31,7 +31,7 @@
 		formatMetricValue,
 		formatRatio,
 		shortId,
-	} from '$lib/components/experiments/variability';
+	} from '$lib/components/studies/variability/variability';
 	import Layers from '@lucide/svelte/icons/layers';
 
 	interface Props {
@@ -41,7 +41,7 @@
 
 	let { jobId, variant = 'app' }: Props = $props();
 
-	let data = $state<JobReplicates | null>(null);
+	let data = $state<RunReplicates | null>(null);
 	let loading = $state(false);
 	let error = $state('');
 	let controller: AbortController | null = null;
@@ -53,7 +53,7 @@
 		loading = true;
 		error = '';
 		try {
-			const next = await getJobReplicates(jobId, { signal: ctrl.signal });
+			const next = await getRunReplicates(jobId, { signal: ctrl.signal });
 			if (controller === ctrl) data = next;
 		} catch (e) {
 			if (!isAbortError(e) && controller === ctrl) error = formatApiError(e, 'Could not load runs with the same setup');
@@ -82,7 +82,7 @@
 		{ key: 'cost', label: 'Cost', unit: 'USD' },
 		{ key: 'total_tokens', label: 'Tokens', unit: 'tokens' },
 		{ key: 'llm_calls', label: 'Calls', unit: 'calls', title: 'LLM calls' },
-		{ key: 'wall_seconds', label: 'Wall', unit: 's', title: 'Sandbox wall clock (agent runs), else the job duration' },
+		{ key: 'wall_seconds', label: 'Wall', unit: 's', title: 'Sandbox wall clock (agent runs), else the run duration' },
 	];
 	const FINDINGS: Column[] = [
 		{ key: 'code_issues', label: 'Code issues', unit: 'issues', title: 'Deduplicated code issues (common tools of this group, latest result per tool)' },
@@ -112,8 +112,10 @@
 	}
 
 	function origin(m: ReplicateMember): string {
-		if (m.experiment_name) return `${m.experiment_name}${m.repeat_index != null ? ` · repeat ${m.repeat_index + 1}` : ''}`;
-		if (m.batch_id) return `batch ${shortId(m.batch_id)}${m.repeat_index != null ? ` · trial ${m.repeat_index + 1}` : ''}`;
+		if (m.study_name) {
+			const repeat = m.repeat_index != null ? ` · repeat ${m.repeat_index + 1}` : '';
+			return `${m.study_name}${repeat}${m.beyond_plan ? ' · beyond plan' : ''}`;
+		}
 		return 'ad hoc';
 	}
 </script>
@@ -124,9 +126,7 @@
 			Same setup
 			{#if data}
 				<Badge variant="outline" title="Runs in this group (yours)">{data.n} run{data.n === 1 ? '' : 's'}</Badge>
-				{#if data.grouping.approximate}
-					<Badge variant="secondary" title="No configuration fingerprint: grouped by mode, model, app, prompt hash, method and stack">approximate</Badge>
-				{/if}
+
 			{/if}
 		</Card.Title>
 		<Card.Description class="text-xs">
@@ -135,10 +135,8 @@
 			{:else if data.grouping.key === 'config_fingerprint'}
 				Runs with configuration fingerprint <code class="font-mono">{data.grouping.value}</code> (seed excluded): their spread is run-to-run
 				variation.
-			{:else if data.grouping.key === 'approximate'}
-				Legacy runs without a fingerprint, matched on mode, model, app, prompt hash, method and stack.
 			{:else}
-				This run has no configuration fingerprint and no model or app to group by.
+				This run has no configuration fingerprint (reference runs have none), so it is its own group.
 			{/if}
 		</Card.Description>
 	</Card.Header>
@@ -175,13 +173,13 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each members as m (m.job_id)}
+						{#each members as m (m.run_id)}
 							<tr data-selected={m.is_self ? 'true' : undefined} class={m.is_self ? 'bg-primary/5' : ''}>
 								<td class="col-sticky font-mono text-xs {m.is_self ? 'bg-primary/5' : 'bg-card'}">
 									{#if m.is_self}
-										<span class="font-medium">{shortId(m.job_id)}</span>
+										<span class="font-medium">{shortId(m.run_id)}</span>
 									{:else}
-										<a href="/applications/{m.job_id}" class="text-primary hover:underline">{shortId(m.job_id)}</a>
+										<a href="/samples/{m.run_id}" class="text-primary hover:underline">{shortId(m.run_id)}</a>
 									{/if}
 								</td>
 								<td><Badge variant={relationVariant(m)} title={RELATION_HELP[m.relation]}>{RELATION_LABEL[m.relation]}</Badge></td>
@@ -238,9 +236,9 @@
 				<div class="border-t border-border/60 px-4 py-2.5">
 					<p class="section-label">Seeded replays</p>
 					<ul class="mt-1 space-y-1 text-xs">
-						{#each probes as p (p.job_id)}
+						{#each probes as p (p.run_id)}
 							<li>
-								<a href="/applications/{p.job_id}" class="font-mono text-primary hover:underline">{shortId(p.job_id)}</a>:
+								<a href="/samples/{p.run_id}" class="font-mono text-primary hover:underline">{shortId(p.run_id)}</a>:
 								{#if !p.comparable}
 									<span class="text-muted-foreground">no stored LLM calls to compare.</span>
 								{:else if p.reproduced}

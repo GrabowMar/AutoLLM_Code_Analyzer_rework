@@ -1,0 +1,7 @@
+name: 'Style fragment: Vuetify'
+role: fragment
+modes:
+- app
+- slot
+variables:
+- style

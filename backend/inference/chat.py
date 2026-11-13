@@ -1,15 +1,15 @@
 """Generalised chat client (spec §D.2).
 
-``chat`` is the single entry point for scaffolding, repairs and AI-review
-analysis calls:
+``chat`` is the single entry point for in-process LLM calls (AI-review
+analysis, endpoint probes; agent runs go through ``proxy_server``):
 
 - ``kind=openrouter``: delegates to ``OpenRouterClient(access.api_key).chat_completion``
   with today's behaviour and retries; ``OpenRouterError`` is re-raised unchanged.
 - local: ``build_upstream_body`` → ``requests.enqueue`` (an ``LLMRequest``) →
   ``requests.wait_result`` → translation to the OpenAI ``chat.completion``
-  shape (``usage.cost = 0.0``, ``provider = endpoint.slug``,
+  shape (``usage.cost = 0.0``, except on the native Anthropic route; ``provider = endpoint.slug``,
   ``model = f"{served}@{digest[7:19]}"``). Adds ``leased_at - created_at`` to
-  ``job.execution.llm_queue_wait_s``.
+  the run's ``execution.llm_queue_wait_s`` (``job`` = the ``GenerationRun``).
 
 Errors raise ``inference.access.LLMAccessError`` (``upstream_error``,
 ``upstream_oom``, ``timeout``, ``lease_expired``, ``cancelled``, ...).
@@ -30,6 +30,7 @@ from backend.inference.ollama_native import from_openai_response
 from backend.inference.ollama_native import served_model_label
 from backend.inference.ollama_native import to_native_messages
 from backend.inference.params import STATIC_PARAMS
+from backend.inference.upstream import is_opencode
 
 if TYPE_CHECKING:
     from backend.inference.access import Access
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 NATIVE_CHAT_PATH = "/api/chat"
 OPENAI_CHAT_PATH = "/v1/chat/completions"
+ANTHROPIC_MESSAGES_PATH = "/v1/messages"  # == anthropic_native.MESSAGES_PATH
 # OpenAI param name → Ollama native ``options`` key.
 _NATIVE_OPTION_NAMES = {
     "max_tokens": "num_predict",
@@ -52,6 +54,10 @@ _NATIVE_OPTION_NAMES = {
     "frequency_penalty": "frequency_penalty",
 }
 OOM_MARKER = "requires more system memory"
+REASONING_REJECTED_HINT = (
+    "OpenCode Go rejected the policy's reasoning_effort for this model: clear its effort flag with "
+    "`manage.py go_reasoning_effort --unset --model <model_id>` (back to provider default) and relaunch"
+)
 OPENROUTER_DEFAULT_TEMPERATURE = 0.3
 OPENROUTER_DEFAULT_MAX_TOKENS = 32000
 
@@ -98,16 +104,36 @@ def build_upstream_body(
     *,
     tools: list[dict[str, Any]] | None = None,
     stream: bool = False,
+    tool_choice: Any = None,
+    parallel_tool_calls: Any = None,
+    anthropic_options: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """The exact upstream request ``(path, body)`` for a local endpoint.
 
     Ollama native → ``("/api/chat", {model, messages, stream: false, keep_alive,
     options: {num_ctx, num_predict, seed, ...}, tools, format, think})``;
-    OpenAI flavor → ``("/v1/chat/completions", {model, messages, max_tokens, seed, ...})``.
+    OpenAI flavor → ``("/v1/chat/completions", {model, messages, max_tokens, seed, ...})``;
+    Anthropic flavor → ``("/v1/messages", <Messages request>)`` built by
+    :func:`backend.inference.anthropic_native.to_messages_request` (it alone reads ``tool_choice``,
+    ``parallel_tool_calls`` and ``anthropic_options``; it always streams upstream).
     Params outside ``STATIC_PARAMS[(kind, flavor)]`` are dropped; ``provider``,
-    ``usage`` and ``tool_choice`` are never sent. Upstream calls are always
-    non-streaming (``stream`` is accepted for signature compatibility).
+    ``usage`` and ``tool_choice`` are never sent to the other flavors. Their upstream
+    calls are non-streaming (``stream`` is accepted for signature compatibility).
     """
+    if access.api_flavor == "anthropic":
+        from backend.inference import anthropic_native
+
+        merged = {**dict(params or {}), **({"seed": seed} if seed is not None else {})}
+        body = anthropic_native.to_messages_request(
+            access.served_model_name,
+            messages,
+            merged,
+            tools=tools,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            options=anthropic_options or anthropic_native.Options(),
+        )
+        return anthropic_native.MESSAGES_PATH, body
     params = dict(params or {})
     allowed = STATIC_PARAMS.get((access.kind, access.api_flavor), frozenset())
     if seed is not None:
@@ -153,6 +179,10 @@ def build_upstream_body(
         body["response_format"] = params["response_format"]
     if tools and "tools" in allowed:
         body["tools"] = tools
+    if isinstance(params.get("reasoning"), dict) and is_opencode(access.base_url):
+        # OpenCode Go (C2): the canonical ``reasoning`` object is kept and ``upstream._provider_quirks`` sends its
+        # effort as ``reasoning_effort``. No other OpenAI-flavor endpoint receives it (unchanged).
+        body["reasoning"] = dict(params["reasoning"])
     return OPENAI_CHAT_PATH, body
 
 
@@ -202,11 +232,21 @@ def raise_for_request(row: LLMRequest) -> None:
                 status_code=status,
                 remediation="Lower the endpoint's num_ctx cap or max resident models.",
             )
+        message = f"{slug} answered {status}: {text[:1000]}"
+        remediation = None
+        if status < 500 and "effort" in text.lower() and is_opencode(row.endpoint.base_url):
+            # C2: a Go model that refuses ``reasoning_effort`` fails loudly, with the way back to provider default.
+            # Keyed on "effort" (the parameter only the policy's forced effort sends; ``row.body`` is cleared
+            # by now), never on "reasoning" alone: DeepSeek's thinking-mode 400 ("The reasoning_content in the
+            # thinking mode must be passed back") happens under provider default too and is not this.
+            remediation = REASONING_REJECTED_HINT
+            message = f"{message} ({REASONING_REJECTED_HINT})"
         raise LLMAccessError(
             code="upstream_error",
-            message=f"{slug} answered {status}: {text[:1000]}",
+            message=message,
             retryable=status >= 500,
             status_code=status,
+            remediation=remediation,
         )
 
 
@@ -230,6 +270,8 @@ def translate(row: LLMRequest, access: Access) -> dict[str, Any]:
         served_model=label,
         provider=access.endpoint.slug,
         created=created,
+        # Anthropic's native route is real money priced from the list-price table: never a stamped $0.
+        zero_cost=row.path != ANTHROPIC_MESSAGES_PATH,
     )
 
 
@@ -248,15 +290,18 @@ def served_info(row: LLMRequest, access: Access) -> dict[str, Any]:
 
 
 def add_queue_wait(job, row: LLMRequest) -> None:
-    """Add ``leased_at - created_at`` to ``job.execution.llm_queue_wait_s`` (one guarded jsonb UPDATE)."""
+    """Add ``leased_at - created_at`` to the run's ``execution.llm_queue_wait_s`` (one guarded jsonb UPDATE).
+
+    ``job`` is the ``GenerationRun`` (or any object with its ``pk``) the request belongs to.
+    """
     if job is None or row.leased_at is None or row.created_at is None:
         return
     seconds = max(0.0, (row.leased_at - row.created_at).total_seconds())
     from django.db import connection
 
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
-    table = GenerationJob._meta.db_table  # noqa: SLF001
+    table = GenerationRun._meta.db_table  # noqa: SLF001
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
@@ -281,13 +326,16 @@ def chat(
     messages: list[dict[str, Any]],
     params: dict[str, Any],
     seed: int | None,
+    source: str,
     job=None,
-    source: str = "scaffolding",
     cancel_check: Callable[[], bool] | None = None,
     priority: int = 0,
 ) -> ChatResult:
     """Run one chat completion for ``access`` and return it in OpenAI shape.
 
+    ``source`` is the ``LLMRequest.Source`` value the queued row records
+    (required: there is no default caller kind in v3). ``job`` is the
+    ``GenerationRun`` the call belongs to, if any.
     ``params`` are the resolved LLM params (max_tokens, temperature, ...);
     unsupported ones are dropped per ``params.STATIC_PARAMS``.
     ``cancel_check`` is polled every 5 s while waiting; True cancels the

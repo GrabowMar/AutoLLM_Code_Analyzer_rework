@@ -16,7 +16,7 @@
 		{
 			id: 'compact-tables',
 			title: 'Compact tables',
-			description: 'Tighter rows in every data table. Table toolbars can switch density too.',
+			description: 'One line per row in every data table: smaller type, second lines (ids, endpoints, dates) hidden.',
 			get: () => prefs.compactTables,
 			set: (v: boolean) => prefs.setCompactTables(v),
 		},

@@ -1,0 +1,11 @@
+name: Time-based SQL injection probe exploited
+description: Maps the evaluation's sqli_time probes (CWE-89) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:sqli_time'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-sqli-time
+  polarity: insecure
+  cwe: [cwe-89]
+  description: A sqli_time probe was exploited against the assembled app.

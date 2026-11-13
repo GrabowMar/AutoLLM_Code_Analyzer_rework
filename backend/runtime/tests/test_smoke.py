@@ -1,4 +1,7 @@
-"""Tests for the functional smoke test (health + declared endpoint probing)."""
+"""Tests for the preview smoke probe (health + the task's declared GET endpoints).
+
+The probe result lives on the container only; ``GenerationRun.metrics`` is never written (Appendix A #7).
+"""
 
 from __future__ import annotations
 
@@ -6,8 +9,9 @@ from unittest import mock
 
 import pytest
 
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.testing.content import task_content
+from backend.generation.tests.factories import GenerationRunFactory
+from backend.generation.tests.factories import TaskSpecVersionFactory
 from backend.runtime.services import smoke
 from backend.runtime.tests.factories import ContainerInstanceFactory
 
@@ -15,18 +19,20 @@ pytestmark = pytest.mark.django_db
 
 
 def _job_with_endpoints(user=None, **kwargs):
-    app_req = AppRequirementTemplateFactory(
-        api_endpoints=[
-            {"method": "GET", "path": "/api/urls", "description": "list"},
-            {"method": "GET", "path": "/api/urls/:id", "description": "detail"},
-            {"method": "POST", "path": "/api/shorten", "description": "create"},
-        ],
-        admin_api_endpoints=[
-            {"method": "GET", "path": "/api/admin/urls", "description": "admin list"},
-        ],
-    )
+    content = task_content(title="URL shortener")
+    content["endpoints"] = [
+        {"id": "urls.list", "method": "GET", "path": "/api/urls", "auth": "user"},
+        {"id": "urls.detail", "method": "GET", "path": "/api/urls/{id}", "auth": "user"},
+        {"id": "urls.create", "method": "POST", "path": "/api/shorten", "auth": "user", "success_status": 201},
+        {"id": "admin.urls", "method": "GET", "path": "/api/admin/urls", "auth": "admin"},
+        {"id": "auth.register", "method": "POST", "path": "/api/auth/register", "auth": "public"},
+        {"id": "auth.login", "method": "POST", "path": "/api/auth/login", "auth": "public"},
+    ]
+    content["ui"] = []
+    content["acceptance"] = []
+    content["probes"] = []
     extra = {"created_by": user} if user else {}
-    return GenerationJobFactory(app_requirement=app_req, **extra, **kwargs)
+    return GenerationRunFactory(task_version=TaskSpecVersionFactory(content=content), **extra, **kwargs)
 
 
 def _status_map(mapping: dict[str, int]):
@@ -56,9 +62,9 @@ def test_smoke_all_ok_passes(user):
 
     job.refresh_from_db()
     container.refresh_from_db()
-    assert job.metrics["functional"]["passed"] is True
-    assert "checks" not in job.metrics["functional"]  # job copy stays lean
+    assert container.metadata["smoke"]["passed"] is True
     assert container.metadata["smoke"]["checks"]
+    assert job.metrics == {}  # a preview probe is never a measurement
 
 
 def test_smoke_health_down_fails_without_probing(user):
@@ -98,8 +104,8 @@ def test_smoke_missing_static_route_fails_parametrized_404_tolerated(user):
 
     by_path = {c["path"]: c for c in result["checks"]}
     assert by_path["/api/urls"]["ok"] is False  # declared route missing
-    assert by_path["/api/urls/:id"]["ok"] is True  # record 1 may just not exist
-    assert by_path["/api/urls/:id"]["probed"] == "/api/urls/1"
+    assert by_path["/api/urls/{id}"]["ok"] is True  # record 1 may just not exist
+    assert by_path["/api/urls/{id}"]["probed"] == "/api/urls/1"
     # 2/3 ok is below the 0.8 gate.
     assert result["passed"] is False
 
@@ -113,14 +119,26 @@ def test_smoke_no_routing_configured(user):
     assert "error" in result
 
 
-def test_smoke_keeps_conformance_verdict(user):
-    conformance = {"source": "conformance", "status": "failed", "passed": False, "pass_rate": 0.4375}
-    job = _job_with_endpoints(user, metrics={"functional": conformance})
+def test_smoke_never_touches_run_metrics(user):
+    graded = {
+        "eval": {
+            "eval_suite": "eval@1",
+            "eval_level": "functional",
+            "status": "measured",
+            "measured": True,
+            "agent_pass_rate": 0.4375,
+        },
+    }
+    job = _job_with_endpoints(user, metrics=graded)
+    job.refresh_from_db()
+    before = dict(job.metrics)
     container = ContainerInstanceFactory(generation_job=job, created_by=user)
 
     with mock.patch.object(smoke.requests, "get", side_effect=_status_map({})):
         smoke.run_smoke(job, container)
 
     job.refresh_from_db()
-    assert job.metrics["functional"] == conformance
-    assert job.metrics["smoke"]["pass_rate"] == 1.0
+    assert job.metrics == before
+    assert before["eval"]["agent_pass_rate"] == 0.4375
+    container.refresh_from_db()
+    assert container.metadata["smoke"]["pass_rate"] == 1.0

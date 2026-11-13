@@ -1,0 +1,11 @@
+name: FastAPI + Vue, bare
+description: A Dockerfile that installs from manifests if present, and the run contract.
+stack_profile: fastapi-vue@1
+level: bare
+base_images:
+  - {ref: "python:3.13-slim", digest: "python:3.13-slim@sha256:3333333333333333333333333333333333333333333333333333333333333333"}
+composition:
+  backend_fragment: backend/fastapi/bare
+  frontend_fragment: frontend/vue/bare
+  dockerfile_template: fastapi.Dockerfile.jinja2
+forbidden_content_check: {passed: true, linter_version: 1}

@@ -26,6 +26,7 @@
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import Braces from '@lucide/svelte/icons/braces';
 	import Activity from '@lucide/svelte/icons/activity';
+	import '$lib/components/models/detail.css';
 	import ModelHeader from '$lib/components/models/ModelHeader.svelte';
 	import ModelOverviewTab from '$lib/components/models/ModelOverviewTab.svelte';
 	import ModelResultsTab from '$lib/components/models/ModelResultsTab.svelte';
@@ -34,20 +35,18 @@
 	import ModelPricingTab from '$lib/components/models/ModelPricingTab.svelte';
 	import ModelDataTab from '$lib/components/models/ModelDataTab.svelte';
 	import ModelApplicationsSection from '$lib/components/models/ModelApplicationsSection.svelte';
-	import ModelUsageSection from '$lib/components/models/ModelUsageSection.svelte';
 	import ModelGenerationDataTab from '$lib/components/models/ModelGenerationDataTab.svelte';
-	import { costEfficiencyGrade } from '$lib/components/models/helpers';
 
 	const slug = $derived($page.params.slug ?? '');
 
 	const sections = [
 		{ id: 'overview', label: 'Overview', icon: Info },
 		{ id: 'results', label: 'Results', icon: FlaskConical },
-		{ id: 'generation', label: 'Generation data', icon: Activity },
+		{ id: 'generation', label: 'Behaviour', icon: Activity },
 		{ id: 'benchmarks', label: 'Benchmarks', icon: Trophy },
-		{ id: 'capabilities', label: 'Capabilities', icon: Zap },
-		{ id: 'pricing', label: 'Pricing & providers', icon: DollarSign },
-		{ id: 'applications', label: 'Applications', icon: AppWindow },
+		{ id: 'capabilities', label: 'Specs', icon: Zap },
+		{ id: 'pricing', label: 'Pricing', icon: DollarSign },
+		{ id: 'applications', label: 'Apps', icon: AppWindow },
 		{ id: 'data', label: 'Raw data', icon: Braces },
 	] as const;
 	type SectionId = (typeof sections)[number]['id'];
@@ -75,11 +74,24 @@
 	let insights = $state<ModelInsights | null>(null);
 	let insightsError = $state('');
 
-	const efficiency = $derived(model ? costEfficiencyGrade(model.cost_efficiency) : { grade: 'D', color: 'text-danger-fg' });
-	const applicationCount = $derived(insights?.generation.jobs_total);
+	const applicationCount = $derived(insights?.generation.runs_total);
+	/** Small count on a tab, when the section has one. */
+	const tabCount = $derived<Partial<Record<SectionId, number>>>({
+		results: applicationCount,
+		applications: applicationCount,
+	});
 
 	// Keep ?tab= in the URL so a section can be linked and survives reload.
+	/** After a tab switch from far down the page, bring the new section's top up under the sticky tab bar. */
+	function scrollToContent() {
+		const header = document.querySelector<HTMLElement>('header.mh');
+		if (!header) return;
+		const target = header.getBoundingClientRect().bottom + window.scrollY - 48;
+		if (window.scrollY > target) window.scrollTo({ top: target, behavior: 'instant' });
+	}
+
 	function syncTabParam(tab: string) {
+		scrollToContent();
 		const url = new URL(window.location.href);
 		if (tab === 'overview') url.searchParams.delete('tab');
 		else url.searchParams.set('tab', tab);
@@ -138,7 +150,10 @@
 	<Tabs.List aria-label="Model sections">
 		{#each sections as sec (sec.id)}
 			{@const SecIcon = sec.icon}
-			<Tabs.Trigger value={sec.id}><SecIcon />{sec.label}</Tabs.Trigger>
+			<Tabs.Trigger value={sec.id}>
+				<SecIcon />{sec.label}
+				{#if tabCount[sec.id]}<span class="tab-count">{tabCount[sec.id]?.toLocaleString()}</span>{/if}
+			</Tabs.Trigger>
 		{/each}
 	</Tabs.List>
 {/snippet}
@@ -155,7 +170,16 @@
 	</div>
 {:else}
 	<Tabs.Root bind:value={activeSection} onValueChange={syncTabParam} class="min-w-0 space-y-4">
-		<ModelHeader {model} {slug} {efficiency} {refreshing} {applicationCount} onRefresh={isStaff ? handleRefresh : undefined} nav={sectionTabs} />
+		<ModelHeader
+			{model}
+			{slug}
+			{refreshing}
+			{insights}
+			{insightsError}
+			onRefresh={isStaff ? handleRefresh : undefined}
+			onOpenTab={(t) => openSection(t as SectionId)}
+			nav={sectionTabs}
+		/>
 
 		<Tabs.Content value="overview">
 			<ModelOverviewTab
@@ -176,6 +200,8 @@
 				modelId={model.id}
 				twinModelId={model.is_local ? (model.twin?.model?.model_id ?? null) : null}
 				twinSlug={model.is_local ? (model.twin?.model?.canonical_slug ?? null) : null}
+				runsTotal={insights ? insights.generation.runs_total : null}
+				{slug}
 			/>
 		</Tabs.Content>
 		<Tabs.Content value="benchmarks">
@@ -189,10 +215,22 @@
 		</Tabs.Content>
 		<Tabs.Content value="applications" class="space-y-4">
 			<ModelApplicationsSection modelId={model.model_id} {slug} />
-			<ModelUsageSection modelId={model.model_id} />
 		</Tabs.Content>
 		<Tabs.Content value="data">
 			<ModelDataTab {model} />
 		</Tabs.Content>
 	</Tabs.Root>
 {/if}
+
+<style>
+	.tab-count {
+		border-radius: 9999px;
+		background: var(--muted);
+		padding: 0 0.375rem;
+		font-family: var(--font-mono);
+		font-size: 0.625rem;
+		line-height: 1rem;
+		color: var(--muted-foreground);
+		font-variant-numeric: tabular-nums;
+	}
+</style>

@@ -1,0 +1,21 @@
+{# Frontend build stage shared by every template: frontend/ -> /app/frontend/dist. #}
+{% if has_frontend %}
+FROM {{ base.node }} AS frontend
+WORKDIR /app
+{% if level == "bare" %}
+COPY . .
+RUN mkdir -p frontend/dist \
+    && if [ -f frontend/package.json ]; then \
+         cd frontend \
+         && if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi \
+         && npm run build; \
+       fi
+{% else %}
+COPY frontend/package.json frontend/package-lock.json* frontend/
+RUN cd frontend \
+    && if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+COPY frontend/ frontend/
+RUN cd frontend && npm run build
+{% endif %}
+
+{% endif %}

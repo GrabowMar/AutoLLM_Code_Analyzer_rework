@@ -56,13 +56,16 @@ from backend.analysis.services.base import is_non_source_path
 from backend.analysis.services.serialize import iso
 from backend.analysis.services.serialize import serialize_result
 from backend.common.pagination import paginate_queryset
-from backend.generation.models import GenerationJob
-from backend.reports.services.loc import is_test_path
+from backend.generation.models import GenerationRun
+from backend.generation.runs.view import RunView
+from backend.generation.runs.view import run_view
+from backend.generation.runs.view import run_views
+from backend.reports.services.loc import is_outside_app
 from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import cluster_findings
 from backend.statistics.services.dedup import finding_record
 
-# A batch (and its preview) analyzes at most this many apps.
+# A launch of several apps (and its preview) analyzes at most this many apps.
 MAX_BATCH_APPS = 100
 
 ACTIVE_STATUSES = (AnalysisRun.Status.PENDING, AnalysisRun.Status.RUNNING)
@@ -158,10 +161,10 @@ _FACET_LIMIT = 50
 # --- Serialization -------------------------------------------------------------
 
 
-def _target(run: AnalysisRun) -> dict[str, Any]:
-    """What the run analyzed, for display: a generated app or pasted code."""
-    job = run.generation_job if run.generation_job_id else None
-    if job is None:
+def _target(run: AnalysisRun, view: RunView | None = None) -> dict[str, Any]:
+    """What the run analyzed, for display: a generated app (read through ``RunView``) or pasted code."""
+    gen = run.generation_job if run.generation_job_id else None
+    if gen is None:
         files = run.source_code if isinstance(run.source_code, dict) else {}
         if not files:  # the analyzed app was deleted since (generation_job is SET_NULL)
             return {"kind": "deleted", "label": "Deleted app"}
@@ -171,27 +174,39 @@ def _target(run: AnalysisRun) -> dict[str, Any]:
             "label": f"Pasted code ({count} file{'' if count == 1 else 's'})",
             "file_count": count,
         }
-    model = job.model if job.model_id else None
-    app = job.app_requirement if job.app_requirement_id else None
-    model_name = model.model_name if model else ""
-    app_name = app.name if app else ""
-    parts = [app_name or job.stack_slug or "App", model_name]
+    view = view if view is not None else run_view(gen)
+    model = gen.model if gen.model_id else None
+    model_name = model.model_name if model else (view.model_slug or "")
+    task = view.task
+    task_title = task.title if task else ""
+    stack_ref = view.stack.ref if view.stack else ""
+    parts = [task_title or stack_ref or "App", model_name]
     return {
-        "kind": "job",
+        "kind": "run",
         "label": " · ".join(p for p in parts if p),
-        "job_id": str(job.id),
-        "job_status": job.status,
-        "mode": job.mode,
+        "job_id": str(gen.id),
+        "job_status": gen.status,
+        "run_kind": view.kind,
+        "outcome": view.outcome,
         "model_name": model_name,
-        "model_id": model.model_id if model else "",
-        "app_name": app_name,
-        "app_slug": app.slug if app else "",
-        "stack_slug": job.stack_slug or "",
-        "experiment_id": str(job.experiment_id) if job.experiment_id else None,
+        "model_id": model.model_id if model else (view.model_slug or ""),
+        "task_title": task_title,
+        "task_slug": task.slug if task else "",
+        "task_ref": task.ref if task else "",
+        "stack_ref": stack_ref,
+        "study_id": view.study_id,
     }
 
 
-def _base(run: AnalysisRun) -> dict[str, Any]:
+def _views_of(runs: list[AnalysisRun]) -> dict[str, RunView]:
+    """``{generation run id: RunView}`` of the runs' analyzed apps (one query)."""
+    ids = {r.generation_job_id for r in runs if r.generation_job_id}
+    if not ids:
+        return {}
+    return {v.id: v for v in run_views(GenerationRun.objects.filter(pk__in=ids))}
+
+
+def _base(run: AnalysisRun, view: RunView | None = None) -> dict[str, Any]:
     return {
         "id": str(run.id),
         "name": run.name,
@@ -200,8 +215,10 @@ def _base(run: AnalysisRun) -> dict[str, Any]:
         "summary": run.summary or {},
         "error_message": run.error_message,
         "generation_job_id": str(run.generation_job_id) if run.generation_job_id else None,
-        "batch_id": str(run.batch_id) if run.batch_id else None,
-        "target": _target(run),
+        "launch_id": str(run.launch_id) if run.launch_id else None,
+        "code_scope": run.code_scope,
+        "code_scope_paths_sha": run.code_scope_paths_sha,
+        "target": _target(run, view),
         "created_at": iso(run.created_at),
         "started_at": iso(run.started_at),
         "completed_at": iso(run.completed_at),
@@ -247,8 +264,12 @@ def _fill_summary_counts(runs: list[AnalysisRun]) -> None:
         run.summary = {**run.summary, **counters[run.id]}
 
 
-def serialize_run_list(run: AnalysisRun, progress: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = _base(run)
+def serialize_run_list(
+    run: AnalysisRun,
+    progress: dict[str, Any] | None = None,
+    view: RunView | None = None,
+) -> dict[str, Any]:
+    data = _base(run, view)
     # Per-tool metrics (function lists, duplication blocks) belong to the detail view.
     data["summary"] = {k: v for k, v in data["summary"].items() if k != "metrics_by_tool"}
     return {**data, "progress": progress}
@@ -259,10 +280,21 @@ def serialize_run(run: AnalysisRun) -> dict[str, Any]:
     data = _base(run)
     data["progress"] = _progress([run]).get(str(run.id))
     data["results"] = [serialize_result(r) for r in run.results.all()]
-    # The files the tools see (pasted code, or the generated app's code), without contents.
-    files = runner._materialize(run.get_code_for_analysis())  # noqa: SLF001
-    data["source_files"] = [{"path": path, "lines": len(content.splitlines())} for path, content in files.items()]
+    # The files the tools see (pasted code, or the generated app's app-scope tree), without contents;
+    # ``origin`` is the RunFile origin of a generated app's file ("" for pasted code).
+    origins = _origins(run)
+    files = runner.analysis_files(run)
+    data["source_files"] = [
+        {"path": path, "lines": len(content.splitlines()), "origin": origins.get(path, "")}
+        for path, content in files.items()
+    ]
     return data
+
+
+def _origins(run: AnalysisRun) -> dict[str, str]:
+    if not run.generation_job_id or run.source_code:
+        return {}
+    return {entry.path: entry.origin for entry in run_view(run.generation_job).files(runner.ANALYSIS_SCOPE)}
 
 
 def code_finding_parts(findings) -> tuple[set, set]:
@@ -282,7 +314,7 @@ def code_finding_parts(findings) -> tuple[set, set]:
     for finding_id, path in rows:
         if is_non_source_path(path):
             excluded.add(finding_id)
-        elif is_test_path(path):
+        elif is_outside_app(path):
             in_tests.add(finding_id)
     return in_tests, excluded
 
@@ -310,14 +342,15 @@ def _serialize_finding(f: Finding, test_ids: set | frozenset = frozenset()) -> d
         "tool_slug": f.result.tool_slug,
         "tool_specific_data": f.tool_specific_data or {},
         "in_tests": f.id in test_ids,
+        # RunFile origin of the finding's file (runner.FILE_ORIGIN_KEY); "" when it is not a tree file.
+        "file_origin": (f.tool_specific_data or {}).get(runner.FILE_ORIGIN_KEY, "")
+        if isinstance(f.tool_specific_data, dict)
+        else "",
     }
 
 
 def _runs_qs(user):
-    return AnalysisRun.objects.filter(created_by=user).select_related(
-        "generation_job__model",
-        "generation_job__app_requirement",
-    )
+    return AnalysisRun.objects.filter(created_by=user).select_related("generation_job__model")
 
 
 def _uuid(value: str, what: str = "id") -> uuid.UUID:
@@ -350,41 +383,41 @@ def _validated_tools(slugs: list[str]) -> list[str]:
     return ordered
 
 
-def _accessible_jobs(user, job_ids: list[str]) -> list[GenerationJob]:
-    """The jobs *user* may analyze (their own; staff: any), in the given order; 404 if any is not."""
+def _accessible_runs(user, run_ids: list[str]) -> list[GenerationRun]:
+    """The generation runs *user* may analyze (their own; staff: any), in the given order; 404 if any is not."""
     ids = []
-    for job_id in dict.fromkeys(job_ids):
+    for run_id in dict.fromkeys(run_ids):
         try:
-            ids.append(uuid.UUID(str(job_id)))
+            ids.append(uuid.UUID(str(run_id)))
         except ValueError as exc:
-            raise HttpError(404, "Generation job not found.") from exc
-    jobs = GenerationJob.objects.all() if user.is_staff else GenerationJob.objects.filter(created_by=user)
-    found = {j.id: j for j in jobs.filter(id__in=ids).select_related("model", "app_requirement")}
+            raise HttpError(404, "Generation run not found.") from exc
+    runs = GenerationRun.objects.all() if user.is_staff else GenerationRun.objects.filter(created_by=user)
+    found = {r.id: r for r in runs.filter(id__in=ids).select_related("model")}
     if len(found) != len(ids):
-        raise HttpError(404, "Generation job not found.")
+        raise HttpError(404, "Generation run not found.")
     return [found[i] for i in ids]
 
 
-def _require_job_access(user, job_id: str) -> None:
-    """404 unless *user* may analyze generation job *job_id* (their own; staff: any).
+def _require_run_access(user, run_id: str) -> None:
+    """404 unless *user* may analyze generation run *run_id* (their own; staff: any).
 
-    Analyzing a job copies its code into the caller's workspace and stores the
-    findings under the caller, so another user's job must look nonexistent.
+    Analyzing a run copies its code into the caller's workspace and stores the
+    findings under the caller, so another user's run must look nonexistent.
     """
-    jobs = GenerationJob.objects.all() if user.is_staff else GenerationJob.objects.filter(created_by=user)
+    runs = GenerationRun.objects.all() if user.is_staff else GenerationRun.objects.filter(created_by=user)
     try:
-        found = jobs.filter(id=job_id).exists()
+        found = runs.filter(id=run_id).exists()
     except (ValidationError, ValueError):
         found = False
     if not found:
-        raise HttpError(404, "Generation job not found.")
+        raise HttpError(404, "Generation run not found.")
 
 
-def _default_name(job: GenerationJob | None) -> str:
-    if job is None:
+def _default_name(gen: GenerationRun | None, view: RunView | None = None) -> str:
+    if gen is None:
         return "Pasted code"
-    run = AnalysisRun(generation_job=job)
-    return _target(run)["label"] or "Analysis run"
+    run = AnalysisRun(generation_job=gen)
+    return _target(run, view)["label"] or "Analysis run"
 
 
 # --- List, stats ---------------------------------------------------------------
@@ -397,7 +430,7 @@ def list_runs(
     per_page: int = Query(20, ge=1, le=100),
     status: str = Query("", description="Comma-separated statuses; 'active' = pending + running."),
     generation_job_id: str = Query(""),
-    batch_id: str = Query(""),
+    launch_id: str = Query("", description="Runs launched together (POST runs/batch/)."),
     tool_slug: str = Query(""),
     search: str = Query(""),
     sort: str = Query("created_desc"),
@@ -412,8 +445,8 @@ def list_runs(
         qs = qs.filter(status__in=wanted)
     if generation_job_id:
         qs = qs.filter(generation_job_id=_uuid(generation_job_id, "generation_job_id"))
-    if batch_id:
-        qs = qs.filter(batch_id=_uuid(batch_id, "batch_id"))
+    if launch_id:
+        qs = qs.filter(launch_id=_uuid(launch_id, "launch_id"))
     if tool_slug:
         qs = qs.filter(tool_slugs__contains=[tool_slug])
     if search:
@@ -422,8 +455,9 @@ def list_runs(
             Q(name__icontains=term)
             | Q(generation_job__model__model_name__icontains=term)
             | Q(generation_job__model__model_id__icontains=term)
-            | Q(generation_job__app_requirement__name__icontains=term)
-            | Q(generation_job__stack_slug__icontains=term)
+            | Q(generation_job__task_version__name__icontains=term)
+            | Q(generation_job__task_version__task__slug__icontains=term)
+            | Q(generation_job__stack_profile__slug__icontains=term)
         )
         if len(term) >= 4 and all(c in "0123456789abcdef-" for c in term.lower()):
             qs = qs.annotate(id_text=Cast("id", CharField()), job_text=Cast("generation_job_id", CharField()))
@@ -446,8 +480,9 @@ def list_runs(
     runs = list(page_qs)
     _fill_summary_counts(runs)
     progress = _progress(runs)
+    views = _views_of(runs)
     return {
-        "items": [serialize_run_list(r, progress.get(str(r.id))) for r in runs],
+        "items": [serialize_run_list(r, progress.get(str(r.id)), views.get(str(r.generation_job_id))) for r in runs],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -484,18 +519,18 @@ def create_run(request, payload: RunCreateSchema):
         raise HttpError(400, "Provide source_code or a generation_job_id.")
     tool_slugs = _validated_tools(payload.tool_slugs)
 
-    job = None
+    gen = None
     if payload.generation_job_id:
-        _require_job_access(request.auth, payload.generation_job_id)
-        job = GenerationJob.objects.select_related("model", "app_requirement").get(id=payload.generation_job_id)
+        _require_run_access(request.auth, payload.generation_job_id)
+        gen = GenerationRun.objects.select_related("model").get(id=payload.generation_job_id)
 
     workspace = workspace_service.get_workspace(request.auth)
     run = AnalysisRun.objects.create(
-        name=payload.name or _default_name(job),
+        name=payload.name or _default_name(gen),
         created_by=request.auth,
         workspace=workspace,
-        generation_job=job,
-        source_code=None if job else payload.source_code,
+        generation_job=gen,
+        source_code=None if gen else payload.source_code,
         tool_slugs=tool_slugs,
     )
     if payload.auto_start:
@@ -511,22 +546,23 @@ def create_batch(request, payload: BatchCreateSchema):
     if len(payload.generation_job_ids) > MAX_BATCH_APPS:
         raise HttpError(400, f"At most {MAX_BATCH_APPS} apps per batch.")
     tool_slugs = _validated_tools(payload.tool_slugs)
-    jobs = _accessible_jobs(request.auth, payload.generation_job_ids)
+    gens = _accessible_runs(request.auth, payload.generation_job_ids)
+    views = {v.id: v for v in run_views(gens)}
     workspace = workspace_service.get_workspace(request.auth)
-    batch_id = uuid.uuid4()
+    launch_id = uuid.uuid4()
     runs = [
         AnalysisRun.objects.create(
-            name=payload.name or _default_name(job),
+            name=payload.name or _default_name(gen, views.get(str(gen.id))),
             created_by=request.auth,
             workspace=workspace,
-            generation_job=job,
+            generation_job=gen,
             tool_slugs=tool_slugs,
-            batch_id=batch_id,
+            launch_id=launch_id,
         )
-        for job in jobs
+        for gen in gens
     ]
     runner.dispatch_many([r.id for r in runs])
-    return {"batch_id": str(batch_id), "run_ids": [str(r.id) for r in runs]}
+    return {"launch_id": str(launch_id), "run_ids": [str(r.id) for r in runs]}
 
 
 @router.post("/runs/preview/", response=RunPreviewSchema)
@@ -548,17 +584,19 @@ def preview_runs(request, payload: RunPreviewRequestSchema):
     file_maps: list[dict[str, str]] = []
     running_apps: list[bool] = []
     if payload.generation_job_ids:
-        jobs = _accessible_jobs(user, payload.generation_job_ids)
-        running = runner.running_app_containers(user, [j.id for j in jobs])
-        for job in jobs:
-            files = runner._materialize(AnalysisRun(generation_job=job).get_code_for_analysis())  # noqa: SLF001
-            app_running = str(job.id) in running
+        gens = _accessible_runs(user, payload.generation_job_ids)
+        views = {v.id: v for v in run_views(gens)}
+        running = runner.running_app_containers(user, [g.id for g in gens])
+        for gen in gens:
+            probe = AnalysisRun(generation_job=gen)
+            files = runner.analysis_files(probe)
+            app_running = str(gen.id) in running
             file_maps.append(files)
             running_apps.append(app_running)
             targets.append(
                 {
-                    "job_id": str(job.id),
-                    "label": _target(AnalysisRun(generation_job=job))["label"],
+                    "job_id": str(gen.id),
+                    "label": _target(probe, views.get(str(gen.id)))["label"],
                     "files": len(files),
                     "lines": sum(len(c.splitlines()) for c in files.values()),
                     "app_running": app_running,
@@ -663,7 +701,11 @@ def cancel_run(request, run_id: str):
 
 @router.post("/runs/{run_id}/rerun/", response=AnalysisRunSchema)
 def rerun(request, run_id: str, payload: RerunSchema):
-    """Start a new run on the same code: all tools, the given ones, or only those that measured nothing."""
+    """Start a new run on the same code: all tools, the given ones, or only those that measured nothing.
+
+    ``only_unmeasured`` leaves out completed tools and not-applicable ones: the app's tree does not
+    change, so a not-applicable tool stays not measured on a re-run.
+    """
     source = _get_run(request, run_id)
     if source.generation_job_id is None and not source.source_code:
         raise HttpError(400, "This run's app was deleted; there is nothing to re-run.")
@@ -674,7 +716,10 @@ def rerun(request, run_id: str, payload: RerunSchema):
             r.tool_slug
             for r in source.results.all()
             if r.status == ToolResult.Status.COMPLETED
-            or (r.status == ToolResult.Status.SKIPPED and (r.summary or {}).get("skip_reason") == "not_applicable")
+            or (
+                r.status == ToolResult.Status.SKIPPED
+                and (r.summary or {}).get("skip_reason") == runner.SKIP_NOT_APPLICABLE
+            )
         }
         slugs = [s for s in source.tool_slugs if s not in measured]
         if not slugs:

@@ -10,12 +10,17 @@ from datetime import timedelta
 from unittest import mock
 
 import pytest
+from django.apps import apps
 from django.test import Client
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
-from backend.generation.models import Experiment
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models import Study
+from backend.generation.models.choices import RunStatus
+from backend.generation.models.choices import StudyStatus
+from backend.generation.testing.factories import GenerationRunFactory
+from backend.generation.testing.factories import StudyFactory
 from backend.inference.security import UnsafeTargetError
 from backend.integrations.models import WebhookDelivery
 from backend.integrations.models import WebhookSubscription
@@ -60,12 +65,12 @@ def make_sub(user, kind="generic", events=None, **kw) -> WebhookSubscription:
 
 def payload(status="completed") -> dict:
     return {
-        "event": f"generation.{status}",
-        "event_id": f"generation.{status}:abc:{status}",
+        "event": f"run.{status}",
+        "event_id": f"run.{status}:abc:{status}",
         "occurred_at": "2026-10-26T10:00:00+00:00",
-        "summary": "Generation completed: Todo app",
-        "object": {"type": "generation_job", "id": "abc", "title": "Todo app", "status": status},
-        "url": "https://lab.example.com/applications/abc",
+        "summary": "Run completed: Todo app",
+        "object": {"type": "generation_run", "id": "abc", "title": "Todo app", "status": status},
+        "url": "https://lab.example.com/samples/abc",
         "fields": [{"name": "Model", "value": "gpt-4o"}, {"name": "Duration", "value": "1m 2s"}],
         "data": {"model": "gpt-4o"},
     }
@@ -97,10 +102,10 @@ def test_slack_format():
     req = webhooks.build_request(sub, payload())
     body = _body(req)
     assert req.url == SLACK_URL
-    assert body["text"] == "Generation completed: Todo app"
+    assert body["text"] == "Run completed: Todo app"
     att = body["attachments"][0]
     assert att["color"] == "#22c55e"
-    assert "<https://lab.example.com/applications/abc|" in att["blocks"][0]["text"]["text"]
+    assert "<https://lab.example.com/samples/abc|" in att["blocks"][0]["text"]["text"]
     assert any(f["text"].startswith("*Model*") for f in att["blocks"][1]["fields"])
 
 
@@ -110,7 +115,7 @@ def test_discord_format_color_by_status():
     bad = _body(webhooks.build_request(sub, payload("failed")))["embeds"][0]
     assert ok["color"] == 0x22C55E
     assert bad["color"] == 0xEF4444
-    assert ok["url"] == "https://lab.example.com/applications/abc"
+    assert ok["url"] == "https://lab.example.com/samples/abc"
     assert {"name": "Model", "value": "gpt-4o", "inline": True} in ok["fields"]
     assert _body(webhooks.build_request(sub, payload()))["allowed_mentions"] == {"parse": []}
 
@@ -123,7 +128,7 @@ def test_teams_adaptive_card():
     assert card["type"] == "AdaptiveCard"
     assert card["body"][0]["color"] == "Attention"
     assert card["body"][1]["facts"][0] == {"title": "Model", "value": "gpt-4o"}
-    assert card["actions"][0]["url"] == "https://lab.example.com/applications/abc"
+    assert card["actions"][0]["url"] == "https://lab.example.com/samples/abc"
 
 
 def test_ntfy_json_publish_with_token():
@@ -135,7 +140,7 @@ def test_ntfy_json_publish_with_token():
     assert body["topic"] == "my-topic"
     assert body["priority"] == 4
     assert body["tags"] == ["x"]
-    assert body["click"] == "https://lab.example.com/applications/abc"
+    assert body["click"] == "https://lab.example.com/samples/abc"
     assert "Model: gpt-4o" in body["message"]
 
 
@@ -149,14 +154,14 @@ def test_ntfy_self_hosted_subpath():
 def test_telegram_markdown_v2():
     sub = make_sub(UserFactory(), kind="telegram", secret="123456:ABC-token_xyz", telegram_chat_id="-100123")
     p = payload()
-    p["summary"] = "Generation completed: my_app (v1.2)!"
+    p["summary"] = "Run completed: my_app (v1.2)!"
     req = webhooks.build_request(sub, p)
     body = _body(req)
     assert req.url == "https://api.telegram.org/bot123456:ABC-token_xyz/sendMessage"
     assert body["chat_id"] == "-100123"
     assert body["parse_mode"] == "MarkdownV2"
-    assert r"*Generation completed: my\_app \(v1\.2\)\!*" in body["text"]
-    assert "[Open in LLM Lab](https://lab.example.com/applications/abc)" in body["text"]
+    assert r"*Run completed: my\_app \(v1\.2\)\!*" in body["text"]
+    assert "[Open in LLM Lab](https://lab.example.com/samples/abc)" in body["text"]
 
 
 def test_generic_signature():
@@ -165,7 +170,7 @@ def test_generic_signature():
     req = webhooks.build_request(sub, payload(), delivery_id=42)
     expected = "sha256=" + hmac.new(signing_key.encode(), req.body, hashlib.sha256).hexdigest()
     assert req.headers["X-LLMLab-Signature"] == expected
-    assert req.headers["X-LLMLab-Event"] == "generation.completed"
+    assert req.headers["X-LLMLab-Event"] == "run.completed"
     assert req.headers["X-LLMLab-Delivery"] == "42"
     assert _body(req) == payload()
 
@@ -308,72 +313,121 @@ def test_task_skips_already_sent():
 # ── events: signals, dedupe, sweep ──────────────────────────────────
 
 
-def _job(user, **kw) -> GenerationJob:
-    return GenerationJob.objects.create(created_by=user, mode="custom", **kw)
+def test_every_label_resolves_through_apps_get_model():
+    """``signals.connect`` resolves every label in ``ready()``: a stale one breaks ``django.setup()``."""
+    labels = set(webhooks._STATUS_EVENTS) | set(webhooks._SWEEP_TIME_FIELDS) | set(webhooks._PAYLOAD_BUILDERS)
+    assert set(webhooks._STATUS_EVENTS) == set(webhooks._SWEEP_TIME_FIELDS) == set(webhooks._PAYLOAD_BUILDERS)
+    for label in labels:
+        model = apps.get_model(label)
+        assert webhooks.model_key(model) == label
+        status_field = model._meta.get_field("status")
+        assert set(webhooks._STATUS_EVENTS[label]) <= {value for value, _ in status_field.choices}, label
+        for name in webhooks._SWEEP_TIME_FIELDS[label]:
+            model._meta.get_field(name)
+        model._meta.get_field("created_by")
+    assert apps.get_model(webhooks.RUN_LABEL) is GenerationRun
+    assert apps.get_model(webhooks.STUDY_LABEL) is Study
+    every_event = {event for events in webhooks._STATUS_EVENTS.values() for event in events.values()}
+    assert every_event == set(webhooks.EVENT_TYPES)
+
+
+def _run(user, **kw) -> GenerationRun:
+    return GenerationRunFactory.create(created_by=user, **kw)
 
 
 def test_signal_creates_delivery_on_terminal_status(no_dispatch, django_capture_on_commit_callbacks):
     user = UserFactory()
-    sub = make_sub(user, events=["generation.completed"])
-    make_sub(user, events=["generation.completed"], enabled=False)
-    make_sub(UserFactory(), events=["generation.completed"])  # someone else's
-    job = _job(user)
+    sub = make_sub(user, events=["run.completed"])
+    make_sub(user, events=["run.completed"], enabled=False)
+    make_sub(UserFactory(), events=["run.completed"])  # someone else's
+    run = _run(user)
     assert WebhookDelivery.objects.count() == 0
     with django_capture_on_commit_callbacks(execute=True):
-        job.status = GenerationJob.Status.COMPLETED
-        job.completed_at = timezone.now()
-        job.duration_seconds = 83
-        job.save()
+        run.status = RunStatus.COMPLETED
+        run.completed_at = timezone.now()
+        run.duration_seconds = 83
+        run.metrics = {"cost_usd": 0.0123, "total_tokens": 4000}
+        run.save()
     delivery = WebhookDelivery.objects.get()
     assert delivery.subscription == sub
-    assert delivery.event_key == f"generation.completed:{job.pk}:completed"
-    assert delivery.payload["object"]["id"] == str(job.pk)
-    assert delivery.payload["url"].endswith(f"/applications/{job.pk}")
-    assert {"name": "Duration", "value": "1m 23s"} in delivery.payload["fields"]
+    assert delivery.event_key == f"run.completed:{run.pk}:completed"
+    assert delivery.payload["object"] == {
+        "type": "generation_run",
+        "id": str(run.pk),
+        "title": run.task_version.content["title"],
+        "status": "completed",
+    }
+    assert delivery.payload["url"].endswith(f"/samples/{run.pk}")
+    fields = {f["name"]: f["value"] for f in delivery.payload["fields"]}
+    assert fields["Duration"] == "1m 23s"
+    assert fields["Cost"] == "$0.0123"
+    # No evaluation yet: reported as not measured, never as a pass rate.
+    assert fields["Pass rate"] == "not measured"
+    assert delivery.payload["data"]["eval_status"] == "not_measured"
+    assert "pass_rate" not in delivery.payload["data"]
     no_dispatch.assert_called_once_with(delivery.pk)
+
+
+def test_run_pass_rate_only_when_measured(no_dispatch):
+    user = UserFactory()
+    make_sub(user, events=["run.completed"])
+    run = _run(user)
+    run.status = RunStatus.COMPLETED
+    run.metrics = {
+        "eval": {
+            "eval_suite": "suite@1",
+            "eval_level": "security",
+            "status": "measured",
+            "measured": True,
+            "agent_pass_rate": 0.75,
+        },
+    }
+    run.save()
+    fields = {f["name"]: f["value"] for f in WebhookDelivery.objects.get().payload["fields"]}
+    assert fields["Pass rate"] == "75%"
 
 
 def test_dedupe_same_event_once(no_dispatch, django_capture_on_commit_callbacks):
     user = UserFactory()
-    make_sub(user, events=["generation.failed"])
-    job = _job(user)
+    make_sub(user, events=["run.failed"])
+    run = _run(user)
     with django_capture_on_commit_callbacks(execute=True):
-        job.status = GenerationJob.Status.FAILED
-        job.save()
-        job.error_message = "boom"
-        job.save()
-        assert webhooks.emit(job) == 0
+        run.status = RunStatus.FAILED
+        run.save()
+        run.error_message = "boom"
+        run.save()
+        assert webhooks.emit(run) == 0
     assert WebhookDelivery.objects.count() == 1
     assert no_dispatch.call_count == 1
 
 
 def test_unsubscribed_event_and_non_terminal_ignored(no_dispatch):
     user = UserFactory()
-    make_sub(user, events=["generation.failed"])
-    job = _job(user)
-    job.status = GenerationJob.Status.RUNNING
-    job.save()
-    job.status = GenerationJob.Status.COMPLETED
-    job.save()
+    make_sub(user, events=["run.failed"])
+    run = _run(user)
+    run.status = RunStatus.RUNNING
+    run.save()
+    run.status = RunStatus.COMPLETED
+    run.save()
     assert WebhookDelivery.objects.count() == 0
 
 
-def test_experiment_jobs_opt_in(no_dispatch):
+def test_study_runs_opt_in(no_dispatch):
     user = UserFactory()
-    plain = make_sub(user, events=["generation.completed"])
-    opted = make_sub(user, events=["generation.completed"], include_experiment_jobs=True)
-    experiment = Experiment.objects.create(name="E", slug="e", created_by=user)
-    job = _job(user, experiment=experiment)
-    job.status = GenerationJob.Status.COMPLETED
-    job.save()
+    plain = make_sub(user, events=["run.completed"])
+    opted = make_sub(user, events=["run.completed"], include_study_runs=True)
+    study = StudyFactory(created_by=user)
+    run = _run(user, study=study)
+    run.status = RunStatus.COMPLETED
+    run.save()
     subs = set(WebhookDelivery.objects.values_list("subscription_id", flat=True))
     assert subs == {opted.pk}
     assert plain.pk not in subs
 
 
-def test_analysis_and_experiment_events(no_dispatch):
+def test_analysis_and_study_events(no_dispatch):
     user = UserFactory()
-    make_sub(user, events=["analysis.completed", "experiment.completed"])
+    make_sub(user, events=["analysis.completed", "study.completed", "study.stopped"])
     run = AnalysisRun.objects.create(created_by=user)
     run.status = AnalysisRun.Status.PARTIAL
     run.summary = {"total_findings": 7, "severity_counts": {"high": 2, "low": 5}, "tools_run": 3, "tools_completed": 2}
@@ -385,51 +439,58 @@ def test_analysis_and_experiment_events(no_dispatch):
     assert fields["Severity"] == "2 high · 5 low"
     assert "partial" in delivery.payload["summary"]
 
-    experiment = Experiment.objects.create(name="Big run", slug="big", created_by=user)
-    _job(user, experiment=experiment, status=GenerationJob.Status.COMPLETED)
-    experiment.status = Experiment.Status.COMPLETED
-    experiment.completed_at = timezone.now()
-    experiment.save()
-    exp = WebhookDelivery.objects.get(event_type="experiment.completed")
-    assert exp.payload["data"]["jobs"] == {"completed": 1}
-    assert exp.payload["url"].endswith(f"/experiments/{experiment.pk}")
+    study = StudyFactory(name="Big run", created_by=user)
+    _run(user, study=study, status=RunStatus.COMPLETED)
+    study.status = StudyStatus.COMPLETED
+    study.completed_at = timezone.now()
+    study.save()
+    done = WebhookDelivery.objects.get(event_type="study.completed")
+    assert done.payload["data"]["runs"] == {"completed": 1}
+    assert done.payload["url"].endswith(f"/studies/{study.pk}")
+    assert done.payload["object"]["type"] == "study"
+    assert done.payload["summary"] == "Study completed: Big run"
+
+    stopped = StudyFactory(created_by=user)
+    stopped.status = StudyStatus.STOPPED
+    stopped.save()
+    assert WebhookDelivery.objects.get(event_type="study.stopped").event_key == f"study.stopped:{stopped.pk}:stopped"
 
 
 def test_save_without_status_in_update_fields_is_ignored(no_dispatch):
     user = UserFactory()
-    make_sub(user, events=["generation.completed"])
-    job = _job(user, status=GenerationJob.Status.COMPLETED)
+    make_sub(user, events=["run.completed"])
+    run = _run(user, status=RunStatus.COMPLETED)
     WebhookDelivery.objects.all().delete()
-    job.save(update_fields=["metrics"])
+    run.save(update_fields=["metrics"])
     assert WebhookDelivery.objects.count() == 0
 
 
 def test_sweep_catches_queryset_updates_and_skips_older_than_subscription(no_dispatch):
     user = UserFactory()
-    old_job = _job(user)
-    GenerationJob.objects.filter(pk=old_job.pk).update(
-        status=GenerationJob.Status.COMPLETED,
+    old_run = _run(user)
+    GenerationRun.objects.filter(pk=old_run.pk).update(
+        status=RunStatus.COMPLETED,
         completed_at=timezone.now() - timedelta(minutes=5),
     )
-    sub = make_sub(user, events=["generation.completed", "experiment.completed"])
-    job = _job(user)
-    GenerationJob.objects.filter(pk=job.pk).update(status=GenerationJob.Status.COMPLETED, completed_at=timezone.now())
-    experiment = Experiment.objects.create(name="E", slug="e2", created_by=user)
-    Experiment.objects.filter(pk=experiment.pk).update(status="completed", completed_at=timezone.now())
+    sub = make_sub(user, events=["run.completed", "study.completed"])
+    run = _run(user)
+    GenerationRun.objects.filter(pk=run.pk).update(status=RunStatus.COMPLETED, completed_at=timezone.now())
+    study = StudyFactory(created_by=user)
+    Study.objects.filter(pk=study.pk).update(status="completed", completed_at=timezone.now())
     assert WebhookDelivery.objects.count() == 0
     stats = webhooks.sweep()
     assert stats["emitted"] == 2
     keys = set(WebhookDelivery.objects.filter(subscription=sub).values_list("event_key", flat=True))
-    assert keys == {f"generation.completed:{job.pk}:completed", f"experiment.completed:{experiment.pk}:completed"}
+    assert keys == {f"run.completed:{run.pk}:completed", f"study.completed:{study.pk}:completed"}
     assert webhooks.sweep()["emitted"] == 0  # idempotent
 
 
 def test_emit_never_raises():
     user = UserFactory()
-    make_sub(user, events=["generation.completed"])
-    job = _job(user, status=GenerationJob.Status.COMPLETED)
+    make_sub(user, events=["run.completed"])
+    run = _run(user, status=RunStatus.COMPLETED)
     with mock.patch.object(webhooks, "build_payload", side_effect=RuntimeError("bug")):
-        assert webhooks.emit(job) == 0
+        assert webhooks.emit(run) == 0
 
 
 # ── API ─────────────────────────────────────────────────────────────
@@ -455,14 +516,14 @@ def test_api_create_list_secrets_write_only(alice):
     c, _user = alice
     resp = c.post(
         "/api/integrations/webhooks/",
-        {"name": "Team", "kind": "slack", "url": SLACK_URL, "events": ["generation.failed", "generation.completed"]},
+        {"name": "Team", "kind": "slack", "url": SLACK_URL, "events": ["run.failed", "run.completed"]},
         content_type="application/json",
     )
     assert resp.status_code == 201, resp.content
     data = resp.json()
     assert data["url_hint"] == "https://hooks.slack.com/…1234"
     assert data["has_url"] is True
-    assert data["events"] == ["generation.completed", "generation.failed"]
+    assert data["events"] == ["run.completed", "run.failed"]
     assert SLACK_URL not in resp.content.decode()
     listed = c.get("/api/integrations/webhooks/").json()
     assert [s["id"] for s in listed] == [data["id"]]
@@ -542,8 +603,8 @@ def test_api_event_types(alice):
     c, _ = alice
     types = c.get("/api/integrations/webhooks/event-types/").json()
     ids = [t["id"] for t in types]
-    assert "generation.completed" in ids
-    assert "experiment.completed" in ids
+    assert {"run.completed", "study.completed", "study.stopped"} <= set(ids)
+    assert not [i for i in ids if i.startswith(("generation.", "experi" + "ment."))]
     assert all(t["description"] for t in types)
 
 

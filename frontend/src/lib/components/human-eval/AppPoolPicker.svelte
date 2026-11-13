@@ -1,17 +1,17 @@
 <script lang="ts">
 	/**
 	 * AppPoolPicker — choose the generated apps of a task's pool: filter the
-	 * candidate jobs (completed generations) by experiment / search, tick
-	 * individual apps, or link a whole experiment (every current attempt joins
-	 * the pool and the task can use the experiment's baseline condition).
+	 * candidate runs (completed app runs) by study / search, tick individual
+	 * apps, or link a whole study (the current run of every main-stage cell
+	 * joins the pool and the task can use the study's baseline condition).
 	 *
-	 *   <AppPoolPicker bind:selected={jobIds} bind:experimentId excludeJobIds={poolJobIds} />
+	 *   <AppPoolPicker bind:selected={runIds} bind:studyId excludeRunIds={poolRunIds} />
 	 *
 	 * Props:
-	 * - `selected` (bindable): individually picked job ids (replaced, never mutated).
-	 * - `experimentId` (bindable): the linked experiment, or null. Its current apps
-	 *   are added by the server; rows of it show as included.
-	 * - `excludeJobIds`: jobs already in the pool (shown ticked and disabled).
+	 * - `selected` (bindable): individually picked GenerationRun ids (replaced, never mutated).
+	 * - `studyId` (bindable): the linked study, or null. Its current apps are
+	 *   added by the server; rows of it show as included.
+	 * - `excludeRunIds`: runs already in the pool (shown ticked and disabled).
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
@@ -30,49 +30,52 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { TableToolbar, modelNamePrefix, shortModelName, tableFrame } from '$lib/components/table';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { listExperiments, type ExperimentListItem } from '$lib/api/experiments';
-	import { listCandidateJobs, type CandidateJob, type FunctionalSummary } from '$lib/api/human-eval';
+	import { listStudies } from '$lib/api/v3/studies';
+	import type { StudyListOut } from '$lib/api/v3/types';
+	import {
+		functionalSourceLabel,
+		functionalStatusLabel,
+		listCandidateRuns,
+		studyOptionDescription,
+		type CandidateRun,
+		type FunctionalSummary
+	} from '$lib/api/human-eval';
 	import { formatDate } from '$lib/utils/formatters';
 	import { repeatSuffix } from './format';
 
 	interface Props {
 		selected: string[];
-		experimentId?: string | null;
-		excludeJobIds?: string[];
+		studyId?: string | null;
+		excludeRunIds?: string[];
 	}
 
-	let { selected = $bindable([]), experimentId = $bindable(null), excludeJobIds = [] }: Props = $props();
+	let { selected = $bindable([]), studyId = $bindable(null), excludeRunIds = [] }: Props = $props();
 
 	const PER_PAGE = 25;
 
-	// ── experiments ───────────────────────────────────────────────────
-	let experiments = $state<ExperimentListItem[]>([]);
-	let experimentsError = $state('');
+	// ── studies ───────────────────────────────────────────────────────
+	let studies = $state<StudyListOut[]>([]);
+	let studiesError = $state('');
 	let linkedCount = $state<number | null>(null);
 	let linkedCountFor = '';
 
 	onMount(async () => {
 		try {
-			const res = await listExperiments({ per_page: 100, ordering: '-updated_at' });
-			experiments = res.items;
+			// Newest first; drafts have no runs yet.
+			const res = await listStudies({ page_size: 100 });
+			studies = res.items.filter((x) => x.status !== 'draft');
 		} catch (e) {
-			experimentsError = formatApiError(e, 'Could not load experiments.');
+			studiesError = formatApiError(e, 'Could not load experiments.');
 		}
 	});
 
-	const experimentItems = $derived(
-		experiments.map((x) => ({
-			value: x.id,
-			label: x.name,
-			description: `${x.status.replace(/_/g, ' ')} · ${x.condition_count} condition${x.condition_count === 1 ? '' : 's'} · ${x.app_count} app spec${x.app_count === 1 ? '' : 's'}`,
-		}))
+	const studyItems = $derived(
+		studies.map((x) => ({ value: x.id, label: x.name, description: studyOptionDescription(x) }))
 	);
-	const linkedName = $derived(
-		experimentId ? (experiments.find((x) => x.id === experimentId)?.name ?? 'Linked experiment') : ''
-	);
+	const linkedName = $derived(studyId ? (studies.find((x) => x.id === studyId)?.name ?? 'Linked experiment') : '');
 
 	// ── filters ───────────────────────────────────────────────────────
-	let filterExperiment = $state(untrack(() => experimentId ?? ''));
+	let filterStudy = $state(untrack(() => studyId ?? ''));
 	let searchText = $state('');
 	let search = $state('');
 	let currentOnly = $state(true);
@@ -88,28 +91,28 @@
 		}, 300);
 	}
 
-	function setFilterExperiment(value: string) {
-		filterExperiment = value;
+	function setFilterStudy(value: string) {
+		filterStudy = value;
 		pageNo = 1;
 	}
 
 	// ── candidates ────────────────────────────────────────────────────
-	let jobs = $state<CandidateJob[]>([]);
+	let runs = $state<CandidateRun[]>([]);
 	let total = $state(0);
 	let pages = $state(1);
 	let loading = $state(true);
 	let error = $state('');
 	let ctl: AbortController | null = null;
 
-	async function fetchJobs() {
+	async function fetchRuns() {
 		ctl?.abort();
 		const mine = new AbortController();
 		ctl = mine;
 		loading = true;
 		try {
-			const res = await listCandidateJobs(
+			const res = await listCandidateRuns(
 				{
-					experiment_id: filterExperiment || undefined,
+					study_id: filterStudy || undefined,
 					search: search || undefined,
 					current_only: currentOnly,
 					page: pageNo,
@@ -117,7 +120,7 @@
 				},
 				{ signal: mine.signal }
 			);
-			jobs = res.items;
+			runs = res.items;
 			total = res.total;
 			pages = res.pages;
 			error = '';
@@ -129,15 +132,15 @@
 		}
 	}
 
-	const queryKey = $derived(JSON.stringify([filterExperiment, search, currentOnly, pageNo]));
+	const queryKey = $derived(JSON.stringify([filterStudy, search, currentOnly, pageNo]));
 	$effect(() => {
 		void queryKey;
-		untrack(() => void fetchJobs());
+		untrack(() => void fetchRuns());
 	});
 
-	// Size of the linked experiment's current pool contribution.
+	// Size of the linked study's current pool contribution.
 	$effect(() => {
-		const id = experimentId;
+		const id = studyId;
 		untrack(() => {
 			if (!id) {
 				linkedCount = null;
@@ -147,7 +150,7 @@
 			if (id === linkedCountFor) return;
 			linkedCountFor = id;
 			linkedCount = null;
-			listCandidateJobs({ experiment_id: id, current_only: true, per_page: 1 })
+			listCandidateRuns({ study_id: id, current_only: true, per_page: 1 })
 				.then((res) => {
 					if (linkedCountFor === id) linkedCount = res.total;
 				})
@@ -162,20 +165,20 @@
 
 	// ── selection ─────────────────────────────────────────────────────
 	const selectedSet = $derived(new Set(selected));
-	const excluded = $derived(new Set(excludeJobIds));
+	const excluded = $derived(new Set(excludeRunIds));
 
-	/** Rows the server adds anyway through the linked experiment (current attempts). */
-	function viaExperiment(job: CandidateJob): boolean {
-		return !!experimentId && currentOnly && job.experiment?.id === experimentId;
+	/** Rows the server adds anyway through the linked study (current run per cell). */
+	function viaStudy(run: CandidateRun): boolean {
+		return !!studyId && currentOnly && run.study?.id === studyId;
 	}
 
-	function rowState(job: CandidateJob): 'pool' | 'experiment' | 'selectable' {
-		if (excluded.has(job.id)) return 'pool';
-		if (viaExperiment(job)) return 'experiment';
+	function rowState(run: CandidateRun): 'pool' | 'study' | 'selectable' {
+		if (excluded.has(run.id)) return 'pool';
+		if (viaStudy(run)) return 'study';
 		return 'selectable';
 	}
 
-	const selectable = $derived(jobs.filter((j) => rowState(j) === 'selectable'));
+	const selectable = $derived(runs.filter((j) => rowState(j) === 'selectable'));
 	const pageAllSelected = $derived(selectable.length > 0 && selectable.every((j) => selectedSet.has(j.id)));
 	const pageSomeSelected = $derived(!pageAllSelected && selectable.some((j) => selectedSet.has(j.id)));
 
@@ -195,13 +198,13 @@
 		selected = [...next];
 	}
 
-	function linkExperiment(on: boolean) {
-		experimentId = on && filterExperiment ? filterExperiment : null;
+	function linkStudy(on: boolean) {
+		studyId = on && filterStudy ? filterStudy : null;
 	}
 
-	const anyFilter = $derived(!!(filterExperiment || search || !currentOnly));
+	const anyFilter = $derived(!!(filterStudy || search || !currentOnly));
 	function clearFilters() {
-		filterExperiment = '';
+		filterStudy = '';
 		search = '';
 		searchText = '';
 		currentOnly = true;
@@ -220,43 +223,43 @@
 {#snippet functionalCell(f: FunctionalSummary)}
 	{#if f.status}
 		<span class="flex flex-wrap items-center gap-1.5">
-			<StatusBadge status={f.status} />
+			<StatusBadge status={f.status} label={functionalStatusLabel(f.status)} />
 			{#if passRate(f)}<span class="font-mono text-xs tabular-nums">{passRate(f)}</span>{/if}
 		</span>
 		<span class="cell-sub block text-[11px] text-muted-foreground">
-			{f.source === 'conformance' ? 'conformance' : f.source === 'smoke' ? 'smoke test' : ''}
-			{#if f.deployed === false}<span class="text-warning-fg"> · not deployed</span>{:else if f.deployed === true} · deployed{/if}
+			{functionalSourceLabel(f.source)}
+			{#if f.deployed === false}<span class="text-warning-fg">{f.source ? ' · ' : ''}not deployed</span>{:else if f.deployed === true}{f.source ? ' · ' : ''}deployed{/if}
 		</span>
 	{:else}
-		<span class="text-xs text-muted-foreground">Not graded</span>
+		<span class="text-xs text-muted-foreground">Not measured</span>
 	{/if}
 {/snippet}
 
-{#snippet selectBox(job: CandidateJob)}
-	{@const state = rowState(job)}
+{#snippet selectBox(run: CandidateRun)}
+	{@const state = rowState(run)}
 	{#if state === 'selectable'}
 		<Checkbox
-			checked={selectedSet.has(job.id)}
-			onCheckedChange={(v) => toggle(job.id, !!v)}
-			aria-label="Select {job.app_name} by {job.model_name}"
+			checked={selectedSet.has(run.id)}
+			onCheckedChange={(v) => toggle(run.id, !!v)}
+			aria-label="Select {run.app_name} by {run.model_name}"
 		/>
 	{:else}
 		<Checkbox
 			checked
 			disabled
-			aria-label="{job.app_name} by {job.model_name}: {state === 'pool' ? 'already in the pool' : 'included with the linked experiment'}"
+			aria-label="{run.app_name} by {run.model_name}: {state === 'pool' ? 'already in the pool' : 'included with the linked experiment'}"
 		/>
 	{/if}
 {/snippet}
 
 <div class="space-y-3">
-	{#if experimentId || selected.length > 0}
+	{#if studyId || selected.length > 0}
 		<div class="flex flex-wrap items-center gap-2 text-xs">
-			{#if experimentId}
+			{#if studyId}
 				<span class="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-primary">
 					<Link2 class="size-3.5" aria-hidden="true" />
 					{linkedName}{linkedCount != null ? ` · ${linkedCount} current app${linkedCount === 1 ? '' : 's'}` : ''}
-					<button type="button" class="cursor-pointer rounded-full hover:text-foreground" onclick={() => (experimentId = null)} aria-label="Unlink {linkedName}">
+					<button type="button" class="cursor-pointer rounded-full hover:text-foreground" onclick={() => (studyId = null)} aria-label="Unlink {linkedName}">
 						<X class="size-3" />
 					</button>
 				</span>
@@ -278,11 +281,11 @@
 				<Select.Simple
 					size="sm"
 					class="h-9"
-					value={filterExperiment}
+					value={filterStudy}
 					placeholder="All my generated apps"
 					clearLabel="All my generated apps"
-					items={experimentItems}
-					onValueChange={setFilterExperiment}
+					items={studyItems}
+					onValueChange={setFilterStudy}
 					aria-label="Experiment"
 				/>
 			</div>
@@ -297,7 +300,7 @@
 					class="h-9 pl-8"
 				/>
 			</div>
-			<label class="flex items-center gap-2 px-1 text-sm" title="Only the newest attempt of each experiment cell (condition × app × repeat)">
+			<label class="flex items-center gap-2 px-1 text-sm" title="Only the current run of each experiment cell (condition × task × repeat): its first usable attempt, else its latest">
 				<Checkbox
 					checked={currentOnly}
 					onCheckedChange={(v) => {
@@ -305,22 +308,22 @@
 						pageNo = 1;
 					}}
 				/>
-				Current attempts only
+				Current run per cell only
 			</label>
 		</div>
-		{#if experimentsError}
-			<div class="border-b border-border p-2"><ErrorAlert message={experimentsError} /></div>
+		{#if studiesError}
+			<div class="border-b border-border p-2"><ErrorAlert message={studiesError} /></div>
 		{/if}
 
-		{#if filterExperiment}
+		{#if filterStudy}
 			<label class="flex items-start gap-2.5 border-b border-border bg-surface-2 px-3 py-2 text-sm">
-				<Checkbox class="mt-0.5" checked={experimentId === filterExperiment} onCheckedChange={(v) => linkExperiment(!!v)} />
+				<Checkbox class="mt-0.5" checked={studyId === filterStudy} onCheckedChange={(v) => linkStudy(!!v)} />
 				<span>
 					<span class="font-medium">Add the whole experiment</span>
 					<span class="block text-xs text-muted-foreground">
-						Every current app of “{experiments.find((x) => x.id === filterExperiment)?.name ?? 'this experiment'}” joins the pool, and pairing and condition contrasts can use its baseline. To evaluate part of it, pick apps instead (or remove apps from the pool before opening).
+						The current run of every main-stage cell of “{studies.find((x) => x.id === filterStudy)?.name ?? 'this experiment'}” joins the pool (pilot and beyond-plan runs never do), and pairing and condition contrasts can use its baseline condition. To evaluate part of it, pick apps instead (or remove apps from the pool before opening).
 					</span>
-					{#if experimentId && experimentId !== filterExperiment}
+					{#if studyId && studyId !== filterStudy}
 						<span class="block text-xs text-warning-fg">Linking replaces the current link to “{linkedName}”.</span>
 					{/if}
 				</span>
@@ -334,10 +337,10 @@
 		</TableToolbar>
 
 		{#if error}
-			<div class="p-3"><ErrorAlert message={error} onretry={() => fetchJobs()} /></div>
-		{:else if loading && jobs.length === 0}
+			<div class="p-3"><ErrorAlert message={error} onretry={() => fetchRuns()} /></div>
+		{:else if loading && runs.length === 0}
 			<LoadingState label="loading generated apps" />
-		{:else if jobs.length === 0}
+		{:else if runs.length === 0}
 			{#if anyFilter}
 				<EmptyState compact icon={AppWindow} title="No generated apps match these filters">
 					{#snippet action()}<Button variant="outline" size="sm" onclick={clearFilters}>Clear filters</Button>{/snippet}
@@ -346,8 +349,8 @@
 				<EmptyState
 					compact
 					icon={AppWindow}
-					title="No completed generations yet"
-					description="Apps appear here once a generation job or experiment run has completed."
+					title="No completed app runs yet"
+					description="Apps appear here once an agentic or slot run of an experiment (or an ad-hoc run) has completed."
 				/>
 			{/if}
 		{:else}
@@ -374,35 +377,35 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each jobs as job (job.id)}
-								{@const state = rowState(job)}
-								<tr data-selected={state === 'selectable' ? selectedSet.has(job.id) : undefined} class={state === 'selectable' ? '' : 'opacity-75'}>
-									<td class="w-8">{@render selectBox(job)}</td>
+							{#each runs as run (run.id)}
+								{@const state = rowState(run)}
+								<tr data-selected={state === 'selectable' ? selectedSet.has(run.id) : undefined} class={state === 'selectable' ? '' : 'opacity-75'}>
+									<td class="w-8">{@render selectBox(run)}</td>
 									<td class="max-w-0 min-w-[12rem] w-[26%]">
-										<span class="block truncate font-medium" title={job.app_name}>{job.app_name || job.app_slug || 'Untitled app'}</span>
+										<span class="block truncate font-medium" title={run.app_name}>{run.app_name || run.app_slug || 'Untitled app'}</span>
 										<span class="cell-sub block truncate text-xs text-muted-foreground">
-											{job.app_slug}{state === 'pool' ? ' · in the pool' : state === 'experiment' ? ' · with the experiment' : ''}
+											{run.app_slug}{state === 'pool' ? ' · in the pool' : state === 'study' ? ' · with the experiment' : ''}
 										</span>
 									</td>
 									<td class="max-w-0 min-w-[10rem]">
-										<span class="block truncate" title={job.model_name}>{shortModelName(job.model_name) || job.model_id}</span>
-										{#if modelNamePrefix(job.model_name)}<span class="cell-sub block truncate text-xs text-muted-foreground">{modelNamePrefix(job.model_name)}</span>{/if}
+										<span class="block truncate" title={run.model_name}>{shortModelName(run.model_name) || run.model_id}</span>
+										{#if modelNamePrefix(run.model_name)}<span class="cell-sub block truncate text-xs text-muted-foreground">{modelNamePrefix(run.model_name)}</span>{/if}
 									</td>
 									<td class="max-w-0 min-w-[10rem]">
-										{#if job.condition}
-											<span class="block truncate" title={job.condition.label}>{job.condition.label}</span>
+										{#if run.condition}
+											<span class="block truncate" title={run.condition.label}>{run.condition.label}</span>
 										{:else}
 											<span class="text-muted-foreground">—</span>
 										{/if}
 										<span class="cell-sub block truncate text-xs text-muted-foreground">
-											{job.experiment?.name ?? 'No experiment'}{repeatSuffix(job.repeat_index)}
+											{run.study?.name ?? 'Ad-hoc run'}{repeatSuffix(run.repeat_index)}
 										</span>
 									</td>
-									<td>{@render functionalCell(job.functional)}</td>
+									<td>{@render functionalCell(run.functional)}</td>
 									<td>
-										{#if job.running}<StatusBadge status="running" tone="success" label="Running" />{:else}<span class="text-xs text-muted-foreground">—</span>{/if}
+										{#if run.running}<StatusBadge status="running" tone="success" label="Running" />{:else}<span class="text-xs text-muted-foreground">—</span>{/if}
 									</td>
-									<td class="whitespace-nowrap text-xs text-muted-foreground">{formatDate(job.created_at)}</td>
+									<td class="whitespace-nowrap text-xs text-muted-foreground">{formatDate(run.created_at)}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -412,18 +415,18 @@
 
 			<!-- Phones -->
 			<ul class="data-list rounded-none border-0 shadow-none md:hidden">
-				{#each jobs as job (job.id)}
+				{#each runs as run (run.id)}
 					<li>
-						<div class="data-list-row flex items-start gap-3" data-active={selectedSet.has(job.id)}>
-							<span class="mt-1">{@render selectBox(job)}</span>
+						<div class="data-list-row flex items-start gap-3" data-active={selectedSet.has(run.id)}>
+							<span class="mt-1">{@render selectBox(run)}</span>
 							<div class="min-w-0 flex-1 space-y-1">
-								<span class="block truncate text-sm font-medium">{job.app_name || job.app_slug}</span>
+								<span class="block truncate text-sm font-medium">{run.app_name || run.app_slug}</span>
 								<span class="block truncate text-xs text-muted-foreground">
-									{shortModelName(job.model_name) || job.model_id}{job.condition ? ` · ${job.condition.label}` : ''}
+									{shortModelName(run.model_name) || run.model_id}{run.condition ? ` · ${run.condition.label}` : ''}
 								</span>
 								<span class="flex flex-wrap items-center gap-2">
-									{@render functionalCell(job.functional)}
-									{#if job.running}<StatusBadge status="running" tone="success" label="Running" />{/if}
+									{@render functionalCell(run.functional)}
+									{#if run.running}<StatusBadge status="running" tone="success" label="Running" />{/if}
 								</span>
 							</div>
 						</div>

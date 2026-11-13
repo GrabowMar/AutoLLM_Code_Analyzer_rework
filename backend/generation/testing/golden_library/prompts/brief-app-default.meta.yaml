@@ -1,0 +1,4 @@
+name: App brief (default)
+role: brief
+modes: [app]
+variables: [task, stack_fragment, style_fragment, auth_contract, run_contract, network, guidance_fragment, budget_neutral]

@@ -1,33 +1,26 @@
-"""Code profile of one generated app: what was stored, what counts as source, and who wrote it.
+"""Code profile of one generated app: what was collected, what counts as source, and who wrote it.
 
-Everything here is derived on read from what the job already stores
-(``result_data.files``, the agent's workspace manifest, the evaluation's
-resolved packages and the stack scaffold), so it covers every finished job
-without a backfill and never touches a measured value.
+Everything here is derived on read from the run's collected files (``RunFile`` rows read through
+:func:`backend.generation.runs.view.run_view`), its starter and its resolved lock, so it never touches a
+measured value.
 
 Numbers and their sources:
 
-- ``loc`` is :func:`backend.reports.services.loc.loc_from_result_data`: the
-  source LOC every study table, the model page and human evaluation use as the
-  per-KLOC denominator (non-blank, non-comment lines of source files, test code
-  apart, files inside :data:`backend.analysis.services.base.NON_SOURCE_DIRS`
-  left out).
-- ``all_lines`` counts every stored line the way ``metrics.lines_of_code`` does
-  (lockfiles, docs and agent scratch folders included): shown for comparison
-  only, never as LOC.
-- Layers sort each stored file into exactly one of backend / frontend source,
-  tests, config & manifests (lockfiles, docs, Dockerfiles, minified bundles) and
-  excluded (dependency, cache and scratch directories), with the same
-  classifiers as ``loc.py``; backend + frontend source LOC adds up to
-  ``loc.total_loc`` and the tests layer to ``loc.test_loc``.
-- Origins (scaffold / added / modified) come from the agent's workspace
-  manifest; older agent runs and template-mode jobs have none (unknown, not 0).
-- Structure counts (SQLAlchemy models, route decorators, component files and
-  definitions) are static regex heuristics: approximate, never a functional
-  measure (the conformance suite is that).
-- Dependencies: declared specs from the app's manifests next to its stack
-  scaffold's, with the helpers the dependency-ownership statistics use
-  (:mod:`backend.statistics.services.dependencies`).
+- ``loc`` counts the **model** scope (authored, modified and slot files, excluded rows left out): the
+  per-KLOC denominator of the study tables. ``loc_app`` counts the whole app tree (starter included) the
+  same way. Both use ``reports/services/loc.py`` (non-blank, non-comment lines of source files, test code
+  apart, files inside :data:`backend.analysis.services.base.NON_SOURCE_DIRS` left out). A run without
+  collected files has ``None`` everywhere (not measured, never 0).
+- ``all_lines`` counts every collected line (lockfiles, docs and scratch folders included): shown for
+  comparison only, never as LOC.
+- Layers sort each app file into exactly one of backend / frontend source, tests, config & manifests
+  (lockfiles, docs, Dockerfiles, minified bundles) and excluded (dependency, cache and scratch
+  directories), with the same classifiers as ``loc.py``.
+- Origins (starter / authored / modified / deleted / slot) are the collector's ``RunFile.origin``.
+- Structure counts (ORM model classes, route decorators, component files and definitions) are static
+  regex heuristics: approximate, never a functional measure (the evaluation suite is that).
+- Dependencies: the specs declared in the app's manifests next to its starter's, and the versions the
+  platform lock step resolved (``GenerationRun.resolved_lock_blob``).
 """
 
 from __future__ import annotations
@@ -39,17 +32,18 @@ from typing import Any
 
 from backend.analysis.services.base import NON_SOURCE_DIRS
 from backend.analysis.services.base import is_non_source_path
+from backend.generation.models.choices import FileOrigin
 from backend.reports.services.loc import _FRONTEND_EXTENSIONS
 from backend.reports.services.loc import is_source_file
 from backend.reports.services.loc import is_test_path
 from backend.reports.services.loc import loc_from_files
-from backend.reports.services.loc import loc_from_result_data
 from backend.reports.services.loc import loc_of_test_files
 
 if TYPE_CHECKING:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.runs.view import RunView
 
-PROFILE_VERSION = 1
+PROFILE_VERSION = 2
 
 LAYERS = ("backend", "frontend", "tests", "config", "excluded")
 LAYER_LABELS = {
@@ -83,6 +77,11 @@ _DOC_EXTS = frozenset({".md", ".rst", ".adoc"})
 
 # Flask 1 ``@bp.route(...)`` and Flask 2 shortcut decorators ``@app.get(...)``.
 _ROUTE_DECORATOR_RE = re.compile(r"^\s*@\w+(?:\.\w+)*\.(route|get|post|put|patch|delete)\s*\(", re.MULTILINE)
+# ORM model classes: Flask-SQLAlchemy ``db.Model``, SQLAlchemy declarative ``Base``, SQLModel, Django.
+_MODEL_CLASS_RE = re.compile(
+    r"^\s*class\s+(\w+)\s*\([^)]*\b(?:db\.Model|Base|DeclarativeBase|SQLModel|models\.Model)\b",
+    re.MULTILINE,
+)
 # A capitalised function or arrow-function binding: React's component naming rule.
 _COMPONENT_DEF_RE = re.compile(
     r"^\s*(?:export\s+(?:default\s+)?)?(?:function\s+([A-Z]\w*)\s*\(|(?:const|let)\s+([A-Z]\w*)\s*=\s*"
@@ -105,7 +104,7 @@ def _ext(path: str) -> str:
 
 
 def _all_lines(text: str) -> int:
-    """Lines as ``metrics.lines_of_code`` counts them (every line, blank or not)."""
+    """Every line, blank or not."""
     return text.count("\n") + 1
 
 
@@ -144,31 +143,6 @@ def _excluded_root(path: str) -> str:
         if part in NON_SOURCE_DIRS:
             return "/".join(parts[: i + 1])
     return parts[0]
-
-
-def _file_map(data: dict[str, Any]) -> tuple[str, dict[str, str]]:
-    """``(layout, {path: text})`` of a ``result_data``.
-
-    ``files``: a per-file map (agent runs, newer template runs). ``stage_blobs``:
-    only the backend/frontend stage outputs (older template runs), given their
-    entry-point paths. ``single_blob``: one raw response without paths.
-    """
-    files = data.get("files")
-    if isinstance(files, dict) and files:
-        return "files", {str(k): v for k, v in files.items() if isinstance(v, str)}
-    backend = data.get("backend_code") or data.get("backend") or ""
-    frontend = data.get("frontend_code") or data.get("frontend") or ""
-    if backend or frontend:
-        blobs = {}
-        if isinstance(backend, str) and backend:
-            blobs[str(data.get("backend_entry") or "app.py")] = backend
-        if isinstance(frontend, str) and frontend:
-            blobs["frontend/src/App.jsx"] = frontend
-        return "stage_blobs", blobs
-    content = data.get("content") or data.get("raw_response") or ""
-    if isinstance(content, str) and content:
-        return "single_blob", {"(raw response)": content}
-    return "none", {}
 
 
 def _empty_layer(key: str) -> dict[str, Any]:
@@ -237,74 +211,45 @@ def _non_source_files(files: dict[str, str], layer_of: dict[str, str]) -> list[d
 
 
 def _origins(
-    job: GenerationJob,
-    files: dict[str, str],
+    rows: list[dict[str, Any]],
+    deleted: list[str],
     layer_of: dict[str, str],
     file_loc: dict[str, int],
 ) -> dict[str, Any]:
-    """Scaffold / added / modified per file, from the agent's workspace manifest (``known`` False without one)."""
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
-    workspace = agent.get("workspace") if isinstance(agent.get("workspace"), dict) else {}
-    manifest = workspace.get("manifest") if isinstance(workspace.get("manifest"), dict) else {}
-    if not manifest:
-        reason = "no_manifest" if agent else "not_agent"
-        return {"known": False, "reason": reason}
-
-    per_file: dict[str, str] = {}
-    for path, entry in manifest.items():
-        origin = entry.get("origin") if isinstance(entry, dict) else None
-        per_file[str(path)] = origin if isinstance(origin, str) and origin else "unknown"
-    for path in files:
-        per_file.setdefault(path, "unknown")
-
+    """Files and LOC per collector origin (``RunFile.origin``; ``parent`` for a slot variant's parent rows)."""
+    per_file = {row["path"]: row["origin"] for row in rows}
     by_origin: dict[str, dict[str, Any]] = {}
-    for path in files:
-        origin = per_file[path]
-        row = by_origin.setdefault(
+    for row in rows:
+        origin = row["origin"]
+        entry = by_origin.setdefault(
             origin,
             {"origin": origin, "files": 0, "source_files": 0, "source_loc": 0, "test_files": 0, "test_loc": 0},
         )
-        row["files"] += 1
+        entry["files"] += 1
+        path = row["path"]
         layer = layer_of.get(path)
         if layer in ("backend", "frontend"):
-            row["source_files"] += 1
-            row["source_loc"] += file_loc.get(path, 0)
+            entry["source_files"] += 1
+            entry["source_loc"] += file_loc.get(path, 0)
         elif layer == "tests" and path in file_loc:
-            row["test_files"] += 1
-            row["test_loc"] += file_loc[path]
-
-    recorded = workspace.get("origins") if isinstance(workspace.get("origins"), dict) else None
-    skipped = [
-        {
-            "path": s.get("path"),
-            "reason": s.get("reason"),
-            "size": s.get("size"),
-            "origin": s.get("origin"),
-        }
-        for s in (workspace.get("skipped") or [])
-        if isinstance(s, dict)
-    ]
+            entry["test_files"] += 1
+            entry["test_loc"] += file_loc[path]
+    excluded = Counter(row["excluded"] for row in rows if row["excluded"])
     return {
-        "known": True,
-        "counts": dict(recorded) if recorded else dict(Counter(per_file.values())),
+        "known": bool(rows),
+        "counts": dict(Counter(per_file.values())),
         "by_origin": sorted(by_origin.values(), key=lambda r: r["origin"]),
         "per_file": per_file,
-        "deleted_scaffold_files": [str(p) for p in workspace.get("deleted_scaffold_files") or []],
-        "protected_modified": [str(p) for p in workspace.get("protected_modified") or []],
-        "skipped": skipped,
+        "deleted_starter_files": sorted(deleted),
+        "excluded_by_reason": dict(sorted(excluded.items())),
     }
 
 
 def _structure(files: dict[str, str], layer_of: dict[str, str]) -> dict[str, Any]:
     """Static heuristics over source files (approximate by design)."""
-    from backend.generation.services.backend_scanner import scan_backend_code
-
     backend_py = {p: t for p, t in files.items() if layer_of.get(p) == "backend" and _ext(p) == ".py"}
     frontend = {p: t for p, t in files.items() if layer_of.get(p) == "frontend"}
-    models: list[str] = []
-    if backend_py:
-        models = [m.name for m in scan_backend_code(backend_py).models]
+    models = [name for text in backend_py.values() for name in _MODEL_CLASS_RE.findall(text)]
     route_decorators = sum(len(_ROUTE_DECORATOR_RE.findall(t)) for t in backend_py.values())
     component_files = sum(1 for p in frontend if _COMPONENT_DIR_RE.search(p.lower()))
     page_files = sum(1 for p in frontend if _PAGE_DIR_RE.search(p.lower()))
@@ -353,177 +298,167 @@ def _manifest_rows(files: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _scaffold_stack(job: GenerationJob) -> tuple[dict[str, Any] | None, Any]:
-    """The stack row the scaffold specs come from, as :func:`scaffold_specs` picks it (pinned version, else latest)."""
-    from backend.runtime.services.scaffolding import get_stack_row
+def _starter_files(run: GenerationRun) -> dict[str, str] | None:
+    """The starter's own manifest texts ``{path: text}`` (``None`` when the run has no starter)."""
+    from backend.generation import blobs
 
-    stack = (job.resolved_bundle or {}).get("stack") if isinstance(job.resolved_bundle, dict) else None
-    stack = stack if isinstance(stack, dict) else {}
-    slug = stack.get("slug") or job.stack_slug or ""
-    pinned = stack.get("version")
-    if not slug:
-        return None, None
-    row = get_stack_row(slug, pinned)
-    source = "pinned"
-    if row is None:
-        row = get_stack_row(slug)
-        source = "latest"
-    if row is None:
-        return {"slug": slug, "pinned_version": pinned, "version": None, "source": "missing"}, None
-    return {"slug": slug, "pinned_version": pinned, "version": row.version, "source": source}, row
+    starter = run.starter
+    if starter is None:
+        return None
+    files: dict[str, str] = {}
+    for path, entry in ((starter.content or {}).get("files") or {}).items():
+        if _ecosystem(path) is None or not isinstance(entry, dict) or not entry.get("blob"):
+            continue
+        try:
+            files[path] = blobs.get_text(entry["blob"])
+        except (OSError, LookupError, ValueError):
+            continue  # a missing blob leaves that manifest out; the status says "unknown", never "starter"
+    return files
 
 
-def _dependencies(job: GenerationJob) -> dict[str, Any]:
+def _resolved_lock(run: GenerationRun) -> list[dict[str, Any]] | None:
+    """The pip packages the platform lock step resolved (``None`` before the lock step ran)."""
+    from backend.generation import blobs
+
+    if not run.resolved_lock_blob:
+        return None
+    try:
+        lock = blobs.get_json(run.resolved_lock_blob)
+    except (OSError, LookupError, ValueError):
+        return None
+    pip = ((lock or {}).get("ecosystems") or {}).get("pip") if isinstance(lock, dict) else None
+    if not isinstance(pip, list):
+        return None
+    return [p for p in pip if isinstance(p, dict) and p.get("name")]
+
+
+def _dependencies(run: GenerationRun, app_files: dict[str, str]) -> dict[str, Any]:
     from backend.statistics.services.dependencies import _same_spec
-    from backend.statistics.services.dependencies import job_files
     from backend.statistics.services.dependencies import manifest_specs
-    from backend.statistics.services.dependencies import model_added_packages
     from backend.statistics.services.dependencies import normalize_package
-    from backend.statistics.services.dependencies import scaffold_specs
 
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    app_files = job_files(job)
     declared_rows = _manifest_rows(app_files)
     app_specs = manifest_specs(app_files)
-    stack, row = _scaffold_stack(job)
-    scaffold = scaffold_specs(job)
-    scaffold_rows = _manifest_rows(row.files or {}) if row is not None else []
-    scaffold_eco = {r["package"]: r["ecosystem"] for r in scaffold_rows}
-
+    starter_files = _starter_files(run)
+    starter_rows = _manifest_rows(starter_files) if starter_files is not None else []
+    starter = manifest_specs(starter_files) if starter_files is not None else {}
+    starter_eco = {r["package"]: r["ecosystem"] for r in starter_rows}
     has_manifests = bool(declared_rows)
-    added = sorted(model_added_packages(job)) if has_manifests else None
+    known_starter = starter_files is not None
+
+    added = sorted(set(app_specs) - set(starter)) if has_manifests and known_starter else None
     repinned = (
         [
-            {"package": p, "spec": app_specs[p], "scaffold_spec": scaffold[p], "ecosystem": scaffold_eco.get(p)}
+            {"package": p, "spec": app_specs[p], "starter_spec": starter[p], "ecosystem": starter_eco.get(p)}
             for p in sorted(app_specs)
-            if p in scaffold and not _same_spec(app_specs[p], scaffold[p])
+            if p in starter and not _same_spec(app_specs[p], starter[p])
         ]
-        if has_manifests
+        if has_manifests and known_starter
         else None
     )
-    dropped = sorted(set(scaffold) - set(app_specs)) if has_manifests and scaffold else None
+    dropped = sorted(set(starter) - set(app_specs)) if has_manifests and starter else None
 
     added_set = set(added or ())
     repinned_set = {r["package"] for r in repinned or ()}
     for r in declared_rows:
-        if r["package"] in added_set:
+        if not known_starter:
+            r["status"] = "unknown"
+        elif r["package"] in added_set:
             r["status"] = "added"
         elif r["package"] in repinned_set:
             r["status"] = "repinned"
-        elif r["package"] in scaffold:
-            r["status"] = "scaffold"
+        elif r["package"] in starter:
+            r["status"] = "starter"
         else:
             r["status"] = "unknown"
-        r["scaffold_spec"] = scaffold.get(r["package"])
+        r["starter_spec"] = starter.get(r["package"])
 
-    evaluation = data.get("evaluation") if isinstance(data.get("evaluation"), dict) else {}
-    build = evaluation.get("build") if isinstance(evaluation.get("build"), dict) else {}
-    healing = build.get("healing") if isinstance(build.get("healing"), dict) else {}
-    healing_added = {
-        normalize_package(_REQ_NAME_RE.split(str(req).strip(), maxsplit=1)[0])
-        for req in healing.get("added_requirements") or []
-    }
-    # The image installs the manifests it was built from: the app's own when it stores
-    # them (agent runs), the stack scaffold's for template runs (merged in at build time).
-    built_from = "app" if has_manifests else "scaffold"
-    built_rows = declared_rows if has_manifests else scaffold_rows
-    built_pypi = {r["package"] for r in built_rows if r["ecosystem"] == "pypi"}
-    resolved_raw = evaluation.get("resolved_python_deps")
-    resolved = None
-    if isinstance(resolved_raw, list):
-        resolved = []
-        for item in resolved_raw:
-            name, _, version = str(item).partition("==")
-            norm = normalize_package(name)
-            declared_by = built_from if norm in built_pypi else "healing" if norm in healing_added else None
-            resolved.append(
-                {
-                    "package": name,
-                    "version": version or None,
-                    "declared": declared_by is not None,
-                    "declared_by": declared_by,
-                },
-            )
-
-    reported_raw = data.get("backend_dependencies") or data.get("dependencies")
-    reported = [str(x) for x in reported_raw] if isinstance(reported_raw, list) else None
-
+    declared_pypi = {normalize_package(r["package"]) for r in declared_rows if r["ecosystem"] == "pypi"}
+    locked = _resolved_lock(run)
+    resolved = (
+        [
+            {
+                "package": p["name"],
+                "version": p.get("version") or None,
+                "declared": normalize_package(p["name"]) in declared_pypi,
+            }
+            for p in locked
+        ]
+        if locked is not None
+        else None
+    )
     return {
         "has_manifests": has_manifests,
         "declared": declared_rows,
-        "scaffold": [{**r, "declared_by_app": r["package"] in app_specs} for r in scaffold_rows],
-        "scaffold_stack": stack,
+        "starter": [{**r, "declared_by_app": r["package"] in app_specs} for r in starter_rows],
+        "starter_ref": f"{run.starter.slug}@{run.starter.version}" if run.starter is not None else None,
         "model_added": added,
         "repinned": repinned,
-        "dropped_scaffold": dropped,
+        "dropped_starter": dropped,
         "resolved_python": resolved,
-        "reported_by_generator": reported,
         "counts": {
             "declared": len(app_specs) if has_manifests else None,
-            "scaffold": len(scaffold) if row is not None else None,
+            "starter": len(starter) if known_starter else None,
             "model_added": len(added) if added is not None else None,
             "repinned": len(repinned) if repinned is not None else None,
-            "dropped_scaffold": len(dropped) if dropped is not None else None,
+            "dropped_starter": len(dropped) if dropped is not None else None,
             "resolved_python": len(resolved) if resolved is not None else None,
         },
     }
 
 
-def code_profile(job: GenerationJob) -> dict[str, Any]:
-    """The code profile of *job* (see the module docstring for every number's source)."""
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    layout, files = _file_map(data)
+_LOC_KEYS = ("total_loc", "backend_loc", "frontend_loc", "test_loc")
+
+
+def _loc(files: dict[str, str]) -> dict[str, int | None]:
+    if not files:
+        return dict.fromkeys(_LOC_KEYS)  # nothing collected: not measured, never 0
+    return {**loc_from_files(files), **loc_of_test_files(files)}
+
+
+def code_profile(run: GenerationRun, view: RunView | None = None) -> dict[str, Any]:
+    """The code profile of *run* (see the module docstring for every number's source)."""
+    from backend.generation.runs.view import run_view
+
+    view = view or run_view(run)
+    files = view.code_files("app")
+    model_files = view.code_files("model")
+    rows = [
+        {"path": row["path"], "origin": row["view_origin"], "excluded": row["excluded"]}
+        for row in view.file_rows("app").values("path", "view_origin", "excluded")
+    ]
+    deleted = list(run.files.filter(origin=FileOrigin.DELETED).values_list("path", flat=True))
     notes: list[str] = []
+    if not rows:
+        notes.append("No files were collected for this run (yet): every count is not measured.")
 
-    layers, layer_of, file_loc = _layers(files) if layout in ("files", "stage_blobs") else ({}, {}, {})
-    loc: dict[str, int | None] = dict(loc_from_result_data(data))
-    if layout in ("single_blob", "none"):
-        # No paths: nothing can be told apart as source, so source LOC is unmeasured (not 0).
-        loc = dict.fromkeys(loc)
-        if layout == "single_blob":
-            notes.append(
-                "This run stored one raw response without file paths: source LOC is not measured "
-                "(study tables count it as 0 and leave it out of per-KLOC rates).",
-            )
-    if layout == "stage_blobs":
-        notes.append("Only the backend/frontend stage outputs were stored; they are shown under their entry paths.")
-        layers["tests"]["source_loc"] = None  # loc.py: a stage blob cannot be told apart as test code
-
-    all_lines = sum(_all_lines(t) for t in files.values()) if files else None
-    metrics = job.metrics if isinstance(job.metrics, dict) else {}
-    recorded_lines = metrics.get("lines_of_code")
-    origins = _origins(job, files, layer_of, file_loc) if layout == "files" else {"known": False, "reason": layout}
-    if not origins["known"] and origins["reason"] == "no_manifest":
-        notes.append("This agent run predates the workspace manifest: file origins are unknown.")
-
+    layers, layer_of, file_loc = _layers(files) if files else ({}, {}, {})
+    loc = _loc(model_files)
     total_loc = loc.get("total_loc")
+    all_lines = sum(_all_lines(t) for t in files.values()) if files else None
     return {
-        "job_id": str(job.id),
+        "run_id": str(run.id),
         "version": PROFILE_VERSION,
-        "mode": job.mode,
-        "layout": layout,
+        "kind": run.kind,
         "loc": loc,
+        "loc_app": _loc(files),
         "all_lines": all_lines,
-        "all_files": len(files) if files else 0,
-        "recorded_lines_of_code": recorded_lines if isinstance(recorded_lines, int) else None,
+        "all_files": len(files),
         "all_lines_ratio": (round(all_lines / total_loc, 2) if all_lines and total_loc else None),
         "layers": [layers[k] for k in LAYERS] if layers else [],
         "languages": _languages(files, layer_of, file_loc) if layers else [],
         "excluded": _excluded_groups(files, layer_of) if layers else [],
         "non_source_files": _non_source_files(files, layer_of) if layers else [],
-        "origins": origins,
+        "origins": _origins(rows, deleted, layer_of, file_loc),
         "structure": _structure(files, layer_of) if layers else None,
-        "dependencies": _dependencies(job),
+        "dependencies": _dependencies(run, files),
         "definitions": {
             "source_loc": (
-                "Non-blank, non-comment lines of source files (.py, .js/.jsx/.ts/.tsx, .html, .css, …), "
-                "test code and dependency/cache/scratch directories left out: the per-KLOC denominator "
-                "of the study tables (reports/services/loc.py)."
+                "Non-blank, non-comment lines of source files (.py, .js/.jsx/.ts/.tsx, .html, .css, …) the model "
+                "wrote or changed, test code and dependency/cache/scratch directories left out: the per-KLOC "
+                "denominator of the study tables (reports/services/loc.py)."
             ),
-            "all_lines": (
-                "Every stored line of every file, lockfiles, docs and scratch folders included "
-                "(as metrics.lines_of_code counts it): for comparison only."
-            ),
+            "all_lines": "Every collected line of every app file, lockfiles, docs and scratch folders included.",
         },
         "notes": notes,
     }

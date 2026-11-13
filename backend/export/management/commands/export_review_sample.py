@@ -1,8 +1,10 @@
 """Export a seeded, stratified sample of apps for manual review.
 
 Usage:
-    python manage.py export_review_sample --out sample.zip [--experiment <uuid>] [--size 30]
-        [--per-stratum 3] [--stratify model,template] [--seed 0] [--no-blind]
+    python manage.py export_review_sample --out sample.zip [--study <uuid>] [--size 30]
+        [--per-stratum 3] [--stratify model,task] [--seed 0] [--no-blind]
+
+Without ``--study`` the population is every usable sample run (all users).
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
 
 from backend.export.services.review_sample import build_review_sample
-from backend.statistics.services.study import study_jobs
+from backend.export.services.review_sample import review_population
 
 
 class Command(BaseCommand):
@@ -21,19 +23,22 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--out", required=True)
-        parser.add_argument("--experiment", default=None)
-        parser.add_argument("--batch", default=None)
+        parser.add_argument("--study", default=None, help="Study id: its current runs (main stage)")
         parser.add_argument("--size", type=int, default=30)
         parser.add_argument("--per-stratum", type=int, default=None)
-        parser.add_argument("--stratify", default="model", help="'', model, template or model,template")
+        parser.add_argument("--stratify", default="model", help="'', model, task or model,task")
         parser.add_argument("--seed", type=int, default=0)
-        parser.add_argument("--no-blind", action="store_true", help="Name folders by job id, not S001…")
+        parser.add_argument("--no-blind", action="store_true", help="Name folders by run id, not S001…")
 
     def handle(self, *args, **opts):
-        jobs = study_jobs(experiment_id=opts["experiment"], batch_id=opts["batch"])
+        try:
+            # No user: the staff view (every user's runs), as on the shell.
+            runs = review_population(None, study_id=opts["study"])
+        except ValueError as exc:
+            raise CommandError(str(exc)) from exc
         try:
             data, manifest = build_review_sample(
-                jobs,
+                runs,
                 size=opts["size"],
                 per_stratum=opts["per_stratum"],
                 stratify=tuple(k for k in opts["stratify"].split(",") if k),

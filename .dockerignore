@@ -25,3 +25,7 @@ htmlcov/
 *.png
 !frontend/static/**/*.png
 !backend/static/**/*.png
+.wt/
+frontend/static/jupyterlite/
+.env
+var/

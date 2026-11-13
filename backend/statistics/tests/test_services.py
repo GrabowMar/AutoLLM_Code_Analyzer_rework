@@ -12,10 +12,12 @@ from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import FindingFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models.choices import RunStatus
+from backend.generation.testing.factories import GenerationRunFactory
+from backend.generation.testing.factories import StudyFactory
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.statistics import services
+from backend.statistics.tests.helpers import add_files
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -23,24 +25,25 @@ pytestmark = pytest.mark.django_db
 
 def _setup_data(user):
     model = LLMModelFactory(provider="OpenAI", model_name="GPT-4o")
-    jobs = GenerationJobFactory.create_batch(
+    runs = GenerationRunFactory.create_batch(
         3,
         created_by=user,
         model=model,
-        status=GenerationJob.Status.COMPLETED,
+        tested=True,
         duration_seconds=42.0,
-        metrics={"total_tokens": 1500, "cost": 0.025},
-        result_data={"backend": "x = 1\n", "frontend": "y = 2\n"},
+        metrics={"total_tokens": 1500, "cost_usd": 0.025, "loc_model": 2},
     )
-    GenerationJobFactory(
+    for run in runs:
+        add_files(run, {"backend/app.py": "x = 1\n", "frontend/src/main.js": "const y = 2\n"})
+    GenerationRunFactory(
         created_by=user,
         model=model,
-        status=GenerationJob.Status.FAILED,
+        status=RunStatus.FAILED,
     )
 
     task = AnalysisRunFactory(
         created_by=user,
-        generation_job=jobs[0],
+        generation_job=runs[0],
         status=AnalysisRun.Status.COMPLETED,
         duration_seconds=12.5,
     )
@@ -65,18 +68,21 @@ def _setup_data(user):
         result=bandit,
         severity=Finding.Severity.CRITICAL,
         rule_id="B301",
+        file_path="backend/app.py",
     )
     FindingFactory.create_batch(
         3,
         result=bandit,
         severity=Finding.Severity.HIGH,
         rule_id="B105",
+        file_path="backend/app.py",
     )
     FindingFactory.create_batch(
         4,
         result=eslint,
         severity=Finding.Severity.MEDIUM,
         rule_id="no-unused-vars",
+        file_path="frontend/src/main.js",
     )
     return model
 
@@ -157,11 +163,11 @@ def test_get_model_comparison_uses_shared_rankings_scoring():
     assert row["apps"] == 4
     assert row["apps_completed"] == 3
     assert row["success_rate"] == 75.0
-    assert 0 <= row["mss"] <= 1
+    # A model without MSS v2 evidence has no MSS (None, never 0) and therefore no composite.
+    assert row["mss"] is None or 0 <= row["mss"] <= 1
     assert row["findings"]["critical"] == 2
     assert row["ai_findings"] == {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    # LOC comes from the stored code (not metrics.lines_of_code): the analyzed
-    # job has some, so its findings yield an empirical measurement.
+    # LOC comes from the stored code: the analyzed run has some, so its findings yield an empirical measurement.
     assert row["empirical_quality"] is not None
     # the same model on /rankings must show the same numbers
     ranking = next(r for r in aggregate_rankings(user=user) if r["model_id"] == model.model_id)
@@ -173,50 +179,25 @@ def test_get_model_comparison_uses_shared_rankings_scoring():
 def test_get_model_comparison_prompt_hash_filter_scopes_apps():
     user = UserFactory()
     model = LLMModelFactory(provider="OpenAI", model_name="GPT-4o")
-    GenerationJobFactory.create_batch(
-        2,
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        prompt_hash="hash-a",
-    )
-    GenerationJobFactory.create_batch(
-        5,
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        prompt_hash="hash-b",
-    )
+    GenerationRunFactory.create_batch(2, created_by=user, model=model, tested=True, prompt_hash="a" * 64)
+    GenerationRunFactory.create_batch(5, created_by=user, model=model, tested=True, prompt_hash="b" * 64)
 
     all_rows = services.get_model_comparison(user, limit=10)
-    scoped_rows = services.get_model_comparison(user, limit=10, prompt_hash="hash-a")
+    scoped_rows = services.get_model_comparison(user, limit=10, prompt_hash="a" * 64)
 
     assert next(r for r in all_rows if r["model_id"] == model.model_id)["apps"] == 7
     assert next(r for r in scoped_rows if r["model_id"] == model.model_id)["apps"] == 2
 
 
-def test_get_model_comparison_experiment_id_filter_scopes_apps():
-    from backend.generation.tests.factories import ExperimentFactory
-
+def test_get_model_comparison_study_id_filter_scopes_apps():
     user = UserFactory()
     model = LLMModelFactory(provider="OpenAI", model_name="GPT-4o")
-    experiment = ExperimentFactory(created_by=user)
-    GenerationJobFactory.create_batch(
-        2,
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        experiment=experiment,
-    )
-    GenerationJobFactory.create_batch(
-        5,
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-    )
+    study = StudyFactory(created_by=user)
+    GenerationRunFactory.create_batch(2, created_by=user, model=model, tested=True, study=study)
+    GenerationRunFactory.create_batch(5, created_by=user, model=model, tested=True)
 
     all_rows = services.get_model_comparison(user, limit=10)
-    scoped_rows = services.get_model_comparison(user, limit=10, experiment_id=str(experiment.id))
+    scoped_rows = services.get_model_comparison(user, limit=10, study_id=str(study.id))
 
     assert next(r for r in all_rows if r["model_id"] == model.model_id)["apps"] == 7
     assert next(r for r in scoped_rows if r["model_id"] == model.model_id)["apps"] == 2
@@ -226,17 +207,15 @@ def test_get_model_comparison_excludes_ai_findings():
     user = UserFactory()
     model = LLMModelFactory(provider="OpenAI", model_name="GPT-4o")
     AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
-    job = GenerationJobFactory(
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        metrics={"lines_of_code": 1000},
+    gen = add_files(
+        GenerationRunFactory(created_by=user, model=model, tested=True),
+        {"backend/app.py": "x = 1\n" * 1000},
     )
-    run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    run = AnalysisRunFactory(created_by=user, generation_job=gen, status=AnalysisRun.Status.COMPLETED)
     static_result = ToolResultFactory(run=run, tool_slug="bandit", category="security")
     ai_result = ToolResultFactory(run=run, tool_slug="llm_review", category="ai")
-    FindingFactory.create_batch(2, result=static_result, severity=Finding.Severity.HIGH)
-    FindingFactory.create_batch(5, result=ai_result, severity=Finding.Severity.CRITICAL)
+    FindingFactory.create_batch(2, result=static_result, severity=Finding.Severity.HIGH, file_path="backend/app.py")
+    FindingFactory.create_batch(5, result=ai_result, severity=Finding.Severity.CRITICAL, file_path="backend/app.py")
 
     rows = services.get_model_comparison(user, limit=10)
 
@@ -307,7 +286,7 @@ def test_get_code_generation_stats_sums_metrics():
     assert stats["completed"] == 3
     assert stats["total_tokens"] == 1500 * 3
     assert stats["total_cost_usd"] == round(0.025 * 3, 4)
-    assert stats["total_lines_of_code"] >= 6
+    assert stats["total_lines_of_code"] == 6
 
 
 def test_get_analyzer_health_uses_catalog():

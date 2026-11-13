@@ -13,6 +13,7 @@ an absent key (or ``None``) means *unknown*, never zero::
      "error": {"status", "code", "message"},          # failed calls only
      "failed_attempts": [{"status", "kind"}],          # template calls, retried attempts
      "local": {...},                                   # proxied/local calls (LLMRequest)
+     "upstream": {"api": "anthropic_messages", "effort", ...},  # native Anthropic route
      "openrouter": {...}}                              # services.openrouter_stats
 
 Sources:
@@ -27,6 +28,12 @@ Sources:
 * ``local_from_llm_request`` / ``from_llm_request`` -- the executor proxy's
   ``LLMRequest`` row of a local/proxied call (OpenCode Go, Ollama, ...).
   :func:`link_llm_requests` pairs agent gateway calls with those rows.
+* ``agentic.runner.call_telemetry`` -- a v3 agent run's gateway call. Besides
+  the keys above it stores ``rate_wait_s`` (time in the gateway's rate
+  limiter, part of ``duration_s``), ``first_byte_ms`` (time to the first
+  upstream byte of any kind: not a time to first token) and the derived
+  ``tokens_per_s`` with ``tokens_per_s_basis: "e2e"``; the definition is in
+  :mod:`backend.generation.services.token_metrics`.
 
 ``cost`` is the billed amount the response reported (``usage.cost``: 0.0 on
 subscription/local endpoints, whose list price, when the provider reports one,
@@ -42,6 +49,8 @@ from datetime import UTC
 from datetime import datetime
 from typing import Any
 from typing import Self
+
+from backend.generation.services import token_metrics
 
 SCHEMA = 1
 # Retry slack when pairing a gateway call with its proxy request (seconds).
@@ -120,6 +129,34 @@ def _billing(out: dict[str, Any], usage: dict[str, Any]) -> None:
         # reports what the call would cost at list price.
         out["list_cost"] = _num(opencode.get("list_cost"))
         _put(out, "billing_source", opencode.get("billing_source"))
+    _anthropic(out, usage)
+
+
+# What the native Anthropic route chose for a call (``usage.anthropic.request``), kept in telemetry.
+_ANTHROPIC_REQUEST_KEYS = (
+    "effort",
+    "effort_source",
+    "effort_clamped",
+    "thinking",
+    "thinking_replay",
+    "tool_choice",
+    "cache",
+    "stripped",
+)
+
+
+def _anthropic(out: dict[str, Any], usage: dict[str, Any]) -> None:
+    """``upstream`` of a call proxied to Anthropic's native Messages API (effort, cache, stop reason)."""
+    native = usage.get("anthropic")
+    if not isinstance(native, dict):
+        return
+    request = native.get("request") if isinstance(native.get("request"), dict) else {}
+    upstream: dict[str, Any] = {"api": "anthropic_messages"}
+    for key in _ANTHROPIC_REQUEST_KEYS:
+        _put(upstream, key, request.get(key))
+    _put(upstream, "stop_reason", native.get("stop_reason"))
+    _put(upstream, "stop_details", native.get("stop_details"))
+    out["upstream"] = upstream
 
 
 def short_error(err: Any, status: int | None = None) -> dict[str, Any]:
@@ -266,6 +303,12 @@ def local_from_llm_request(row: Any) -> dict[str, Any]:
     attempt = _int(getattr(row, "attempt", None))
     if attempt is not None:
         out["relay_attempts"] = attempt + 1
+    # The pump's re-submissions of a transient upstream error (OpenCode Go ``[server_error]``, C1).
+    response = getattr(row, "response", None)
+    retried = response.get("llmlab_upstream_retries") if isinstance(response, dict) else None
+    if isinstance(retried, dict) and _int(retried.get("count")):
+        out["transient_retries"] = _int(retried.get("count"))
+        _put(out, "transient_retry_reason", retried.get("reason"))
     created, leased = getattr(row, "created_at", None), getattr(row, "leased_at", None)
     completed, delivered = getattr(row, "completed_at", None), getattr(row, "delivered_at", None)
     if created and leased:
@@ -412,27 +455,39 @@ def link_llm_requests(calls: list[dict[str, Any]], rows: list[Any]) -> dict[int,
     return links
 
 
-def proxy_requests(job: Any, attempt: int | None = None) -> list[Any]:
-    """The executor-proxy ``LLMRequest`` rows of ``job``'s agent run (``attempt`` defaults to the job's)."""
+def _response_usage(row: Any) -> dict[str, Any]:
+    """The ``usage`` of a proxy row's stored answer (``{}`` once ``purge_old`` cleared it).
+
+    The gateway's ``calls.jsonl`` keeps only the normalized token counts, so what the native Anthropic route
+    chose for a call (effort, thinking, tool_choice, stripped params, stop reason) survives only here: it is
+    copied into the call's durable telemetry at ingestion, before the row's body and answer are purged.
+    """
+    response = getattr(row, "response", None)
+    usage = response.get("usage") if isinstance(response, dict) else None
+    return usage if isinstance(usage, dict) else {}
+
+
+def proxy_requests(run: Any, attempt: int | None = None) -> list[Any]:
+    """The executor-proxy ``LLMRequest`` rows of ``run``'s agent attempt (``attempt`` defaults to the run's)."""
     from backend.inference.models import LLMRequest
 
     return list(
         LLMRequest.objects.filter(
-            job_id=job.pk,
-            job_attempt=job.attempt if attempt is None else attempt,
+            job_id=run.pk,
+            job_attempt=run.attempt if attempt is None else attempt,
             source=LLMRequest.Source.AGENT_PROXY,
         ).select_related("endpoint"),
     )
 
 
-def telemetry_for_calls(job: Any, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """C1 telemetry for each gateway call of ``job``'s run (same order as ``calls``).
+def telemetry_for_calls(run: Any, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """C1 telemetry for each gateway call of ``run`` (same order as ``calls``).
 
     Best effort: a failure here leaves the calls without telemetry, never
     fails the ingestion of the run.
     """
     try:
-        rows = proxy_requests(job)
+        rows = proxy_requests(run)
         links = link_llm_requests(calls, rows) if rows else {}
         out = []
         for call in calls:
@@ -440,9 +495,10 @@ def telemetry_for_calls(job: Any, calls: list[dict[str, Any]]) -> list[dict[str,
             row = links.get(int(call.get("seq") or 0))
             if row is not None:
                 telemetry["local"] = local_from_llm_request(row)
+                _anthropic(telemetry, _response_usage(row))
             out.append(telemetry)
     except Exception:  # noqa: BLE001 - telemetry must never break run ingestion
-        logging.getLogger(__name__).warning("Call telemetry for job %s failed", job.pk, exc_info=True)
+        logging.getLogger(__name__).warning("Call telemetry for run %s failed", run.pk, exc_info=True)
         return [{} for _ in calls]
     return out
 
@@ -529,7 +585,7 @@ _CHOICE_KEYS = ("finish_reason", "native_finish_reason")
 
 def call_values(artifacts: Any):
     """``artifacts`` as light dicts (telemetry + the few payload keys it is derived from)."""
-    fields = ["id", "job_id", "stage", "telemetry", "created_at"]
+    fields = ["id", "run_id", "stage", "telemetry", "created_at"]
     fields += [f"response_payload__{k}" for k in _PAYLOAD_KEYS]
     fields += [f"response_payload__choices__0__{k}" for k in _CHOICE_KEYS]
     return artifacts.values(*fields)
@@ -549,7 +605,7 @@ def iter_calls(artifacts: Any, *, chunk_size: int = 500):
         payload = _light_payload(row)
         yield {
             "artifact_id": row["id"],
-            "job_id": row["job_id"],
+            "run_id": row["run_id"],
             "stage": row["stage"],
             "created_at": row["created_at"],
             "response_id": payload.get("id"),
@@ -558,8 +614,8 @@ def iter_calls(artifacts: Any, *, chunk_size: int = 500):
 
 
 def call_seq(stage: str) -> int | None:
-    """The gateway seq of an agent call artifact (``agent_call_0042`` → 42)."""
-    if stage.startswith("agent_call_"):
+    """The gateway seq of a call artifact (``agent_call_0042`` / ``slot_call_0042`` → 42)."""
+    if stage.startswith(("agent_call_", "slot_call_")):
         try:
             return int(stage.rsplit("_", 1)[1])
         except ValueError:
@@ -597,16 +653,16 @@ def summarize_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
     retried = retry_known = errors = fallbacks_n = fallback_known = 0
     eligible = covered = unavailable = 0
     finish: dict[str, int] = {}
-    modes: dict[str, int] = {}
+    kinds: dict[str, int] = {}
     served: dict[str, int] = {}
     permaslugs: dict[str, int] = {}
-    jobs: set[Any] = set()
+    runs: set[Any] = set()
     for call in calls:
         t = call["telemetry"]
-        jobs.add(call["job_id"])
-        mode = call.get("mode")
-        if mode:
-            modes[mode] = modes.get(mode, 0) + 1
+        runs.add(call["run_id"])
+        kind = call.get("kind")
+        if kind:
+            kinds[kind] = kinds.get(kind, 0) + 1
         orouter = t.get("openrouter") if isinstance(t.get("openrouter"), dict) else {}
         if is_openrouter_id(call.get("response_id")):
             eligible += 1
@@ -650,13 +706,21 @@ def summarize_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
             # Retried calls are left out (their duration includes backoff sleeps),
             # and so are calls whose retry count was not recorded (older gateway).
             durations.append(duration)
-            if completion and duration > 0:
-                e2e.append(completion / duration)
+            rate = None
+            if not token_metrics.flagged_unclean(t):
+                rate = token_metrics.output_tokens_per_s(
+                    completion_tokens=completion,
+                    duration_s=duration,
+                    upstream_retries=retries,
+                    rate_wait_s=t.get("rate_wait_s"),
+                )
+            if rate is not None:
+                e2e.append(rate)
     n = len(calls)
     return {
         "n_calls": n,
-        "n_jobs": len(jobs),
-        "modes": modes,
+        "n_runs": len(runs),
+        "kinds": kinds,
         "ttft_ms": _quantiles(ttft, p90=True, digits=0),
         "generation_time_ms": _quantiles(gen_ms, digits=0),
         "decode_tps": _quantiles(decode, digits=1),
@@ -688,8 +752,9 @@ PERFORMANCE_NOTES = (
     "Call duration is measured by the platform (gateway or orchestrator) around one call; calls with "
     "upstream retries, or whose retry count was not recorded (older gateway logs), are left out of duration "
     "and end-to-end tok/s because a retried call's time includes backoff.",
-    "End-to-end output tok/s = completion tokens (reasoning included) / call duration: it includes "
-    "prefill and queueing, so it is not a decode speed.",
+    "End-to-end output tok/s = completion tokens (reasoning included) / call duration (without the time "
+    "the call waited in the platform's own rate limiter): it includes prefill and queueing, so it is not a "
+    "decode speed.",
     "Cache-hit ratio = cached prompt tokens / prompt tokens; reasoning share = reasoning tokens / "
     "completion tokens; both over calls whose response reported the breakdown.",
     "OpenCode Go and local endpoints have no OpenRouter record: their TTFT/decode values are n/a, "
@@ -697,18 +762,18 @@ PERFORMANCE_NOTES = (
 )
 
 
-def provider_performance(jobs: Any, *, mode: str | None = None) -> dict[str, Any]:
-    """Per upstream provider (and overall) call statistics over ``jobs``' LLM calls."""
+def provider_performance(runs: Any, *, kind: str | None = None) -> dict[str, Any]:
+    """Per upstream provider (and overall) call statistics over ``runs``' LLM calls (optionally one run kind)."""
     from backend.generation.models import GenerationArtifact
 
-    job_modes = dict(jobs.values_list("id", "mode"))
-    artifacts = GenerationArtifact.objects.filter(job_id__in=list(job_modes))
-    if mode:
-        artifacts = artifacts.filter(job__mode=mode)
+    if kind:
+        runs = runs.filter(kind=kind)
+    run_kinds = dict(runs.values_list("id", "kind"))
+    artifacts = GenerationArtifact.objects.filter(run_id__in=list(run_kinds))
     calls: list[dict[str, Any]] = []
     groups: dict[str, list[dict[str, Any]]] = {}
-    for call in iter_calls(artifacts.order_by("job_id", "id")):
-        call["mode"] = job_modes.get(call["job_id"])
+    for call in iter_calls(artifacts.order_by("run_id", "id")):
+        call["kind"] = run_kinds.get(call["run_id"])
         t = call["telemetry"]
         provider = t.get("provider") or (t.get("openrouter") or {}).get("provider_name") or "unknown"
         calls.append(call)
@@ -716,7 +781,7 @@ def provider_performance(jobs: Any, *, mode: str | None = None) -> dict[str, Any
     providers = [{"provider": name, **summarize_calls(group)} for name, group in groups.items()]
     providers.sort(key=lambda p: (-p["n_calls"], p["provider"]))
     return {
-        "mode": mode or None,
+        "kind": kind or None,
         "overall": summarize_calls(calls),
         "providers": providers,
         "notes": list(PERFORMANCE_NOTES),
@@ -724,12 +789,12 @@ def provider_performance(jobs: Any, *, mode: str | None = None) -> dict[str, Any
 
 
 CSV_COLUMNS = (
-    "job_id",
-    "experiment_id",
+    "run_id",
+    "study_id",
     "condition_label",
     "repeat_index",
     "model_id",
-    "mode",
+    "kind",
     "harness",
     "seq",
     "stage",
@@ -764,38 +829,47 @@ CSV_COLUMNS = (
 )
 
 
-def _job_meta(jobs: Any) -> dict[Any, dict[str, Any]]:
-    rows = jobs.values(
+_PER_MTOK = 1_000_000
+
+
+def _run_meta(runs: Any) -> dict[Any, dict[str, Any]]:
+    """Per run: the CSV identity columns and the frozen catalog prices (per token) from its manifest."""
+    rows = runs.values(
         "id",
-        "experiment_id",
+        "study_id",
         "condition__label",
         "repeat_index",
         "model__model_id",
-        "mode",
-        "resolved_bundle__harness__name",
-        "resolved_bundle__llm__input_price_per_token",
-        "resolved_bundle__llm__output_price_per_token",
+        "kind",
+        "manifest__manifest__harness__name",
+        "manifest__manifest__model__pricing__input_per_mtok",
+        "manifest__manifest__model__pricing__output_per_mtok",
     )
     return {
         r["id"]: {
-            "job_id": str(r["id"]),
-            "experiment_id": str(r["experiment_id"]) if r["experiment_id"] else None,
+            "run_id": str(r["id"]),
+            "study_id": str(r["study_id"]) if r["study_id"] else None,
             "condition_label": r["condition__label"] or None,
             "repeat_index": r["repeat_index"],
             "model_id": r["model__model_id"],
-            "mode": r["mode"],
-            "harness": r["resolved_bundle__harness__name"],
+            "kind": r["kind"],
+            "harness": r["manifest__manifest__harness__name"],
             "_prices": (
-                _num(r["resolved_bundle__llm__input_price_per_token"]),
-                _num(r["resolved_bundle__llm__output_price_per_token"]),
+                _per_token(r["manifest__manifest__model__pricing__input_per_mtok"]),
+                _per_token(r["manifest__manifest__model__pricing__output_per_mtok"]),
             ),
         }
         for r in rows
     }
 
 
+def _per_token(per_mtok: Any) -> float | None:
+    value = _num(per_mtok)
+    return None if value is None else value / _PER_MTOK
+
+
 def catalog_cost(tokens: dict[str, Any], prices: tuple[float | None, float | None]) -> float | None:
-    """Prompt/completion tokens at the catalog headline prices frozen in the job snapshot.
+    """Prompt/completion tokens at the catalog headline prices frozen in the run's manifest.
 
     ``None`` when a price is missing or 0 (local/subscription endpoints are not
     priced) or a token count is unknown. It ignores cache discounts and the
@@ -808,24 +882,24 @@ def catalog_cost(tokens: dict[str, Any], prices: tuple[float | None, float | Non
     return round(prompt * price_in + completion * price_out, 10)
 
 
-def csv_rows(jobs: Any):
-    """Yield the header, then one row per LLM call of ``jobs`` (no message content)."""
+def csv_rows(runs: Any):
+    """Yield the header, then one row per LLM call of ``runs`` (no message content)."""
     from backend.generation.models import GenerationArtifact
 
-    meta = _job_meta(jobs)
+    meta = _run_meta(runs)
     yield list(CSV_COLUMNS)
     order: dict[Any, int] = {}
-    artifacts = GenerationArtifact.objects.filter(job_id__in=list(meta)).order_by("job_id", "id")
+    artifacts = GenerationArtifact.objects.filter(run_id__in=list(meta)).order_by("run_id", "id")
     for call in iter_calls(artifacts):
-        job = meta[call["job_id"]]
+        run = meta[call["run_id"]]
         t = call["telemetry"]
         orouter = t.get("openrouter") if isinstance(t.get("openrouter"), dict) else {}
         tokens = t.get("tokens") if isinstance(t.get("tokens"), dict) else {}
-        order[call["job_id"]] = order.get(call["job_id"], 0) + 1
-        seq = call_seq(call["stage"]) or order[call["job_id"]]
+        order[call["run_id"]] = order.get(call["run_id"], 0) + 1
+        seq = call_seq(call["stage"]) or order[call["run_id"]]
         error = t.get("error") if isinstance(t.get("error"), dict) else {}
         values = {
-            **job,
+            **run,
             "seq": seq,
             "stage": call["stage"],
             "started_at": t.get("started_at"),
@@ -846,7 +920,7 @@ def csv_rows(jobs: Any):
             "cache_write_tokens": tokens.get("cache_write"),
             "cost": t.get("cost"),
             "list_cost": t.get("list_cost"),
-            "catalog_cost": catalog_cost(tokens, job["_prices"]),
+            "catalog_cost": catalog_cost(tokens, run["_prices"]),
             "billing_source": t.get("billing_source"),
             "finish_reason": t.get("finish_reason"),
             "native_finish_reason": t.get("native_finish_reason") or orouter.get("native_finish_reason"),

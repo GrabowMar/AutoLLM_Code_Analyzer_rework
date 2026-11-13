@@ -280,16 +280,16 @@ def test_cluster_membership_does_not_depend_on_input_order():
     assert all(memberships(list(order)) == expected for order in permutations(findings))
 
 
-def test_cluster_dict_names_the_job_and_the_levels_tools_printed():
+def test_cluster_dict_names_the_run_and_the_levels_tools_printed():
     clusters = cluster_findings(
         [
-            _f("bandit", "B105", 10, run="job-1", severity="low", tool_severity="LOW"),
-            _f("gitleaks", "generic-api-key", 10, run="job-1", severity="high", category="secrets"),
+            _f("bandit", "B105", 10, run="run-1", severity="low", tool_severity="LOW"),
+            _f("gitleaks", "generic-api-key", 10, run="run-1", severity="high", category="secrets"),
         ],
     )
     d = clusters[0].to_dict()
-    assert d["job_id"] == "job-1"
-    assert "run_id" not in d
+    assert d["run_id"] == "run-1"
+    assert "job_id" not in d
     assert d["reported_levels"] == ["bandit:LOW", "gitleaks:unrated"]
     assert d["severity"] == "high"  # normalized maximum
 
@@ -374,3 +374,14 @@ def test_finding_record_carries_the_installed_version_and_deptrys_declared_packa
     assert finding_record(deptry, "job")["package"] == "uvicorn"  # stored before parsers recorded ``package``
     # For an import rule ``module`` is an import name, not a declared package.
     assert finding_record({**deptry, "rule_id": "DEP001"}, "job")["package"] == ""
+
+
+def test_codeql_findings_join_the_other_tools_classes():
+    # Security rules match on their first CWE tag, like any tool that reports one.
+    assert issue_class("codeql", "py/path-injection", cwe="CWE-22") == "path-traversal"
+    assert issue_class("codeql", "py/command-line-injection", cwe="CWE-78") == "shell-injection"
+    # Rules whose CWE tag names something else are mapped by rule id, before the CWE.
+    assert issue_class("codeql", "py/empty-except", cwe="CWE-390") == "try-except-pass"
+    assert issue_class("codeql", "py/flask-debug", cwe="CWE-215") == "flask-debug"
+    assert issue_class("codeql", "js/unused-local-variable") == "unused-variable"
+    assert issue_class("codeql", "py/clear-text-logging-sensitive-data", cwe="CWE-312") == "cwe-312"

@@ -7,6 +7,7 @@ import hashlib
 import json
 import threading
 import time
+import uuid
 from datetime import timedelta
 from unittest import mock
 
@@ -16,6 +17,7 @@ from django.db import connection
 from django.test import Client
 from django.utils import timezone
 
+from backend.inference import doorbell
 from backend.inference import requests as q
 from backend.inference import tokens as relay_tokens
 from backend.inference.access import endpoint_access
@@ -132,8 +134,12 @@ class TestAuth:
         settings.RELAY_RATE_LIMIT_PER_S = 2
         _endpoint, raw, _token = relay_setup
         relay = Relay(raw)
-        codes = [relay.hello(probe=True).status_code for _ in range(4)]
-        assert 429 in codes
+        # Pin every request to one per-second window (and a key unique to this run) so a slow,
+        # parallel test host cannot spread the four hellos over a second boundary.
+        window = f"{doorbell.rate_key(_token.pk, 0)}:{uuid.uuid4().hex}"
+        with mock.patch.object(doorbell, "rate_key", return_value=window):
+            codes = [relay.hello(probe=True).status_code for _ in range(4)]
+        assert codes[2:] == [429, 429]
         assert codes[0] == 200
 
 

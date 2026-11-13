@@ -1,0 +1,13 @@
+# Free-choice allowlist (settings.SAMPLE_BUILD_ALLOWED_BASES; spec sections 6.10 and 11.4).
+# The refs are rendered into the free-choice brief (fragment run-contract-free@1) and their sha
+# (`allowed_bases_sha`) enters treatment_hash, so changing this list changes the treatment.
+# A model's FROM must name one of these refs (`image:tag`); an `@sha256:` pin, when written, must be the
+# digest recorded here. Anything else fails the build with outcome build_fail, reason base_not_allowed.
+version: 1
+bases:
+  - {ref: "python:3.13-slim", digest: "sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1"}
+  - {ref: "node:24-slim", digest: "sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c"}
+  - {ref: "golang:1.25-trixie", digest: "sha256:2c4c60ef415fbfa5e90300722293bef36c5e63fae17570ce18f580af933dbd73"}
+  - {ref: "debian:trixie-slim", digest: "sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4"}
+  - {ref: "maven:3.9-eclipse-temurin-21", digest: "sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320"}
+  - {ref: "eclipse-temurin:21-jre-noble", digest: "sha256:0eda5830ed7b669abc246a8dc520ea8a23cab06f9a8d4b6964109e2f2394e46f"}

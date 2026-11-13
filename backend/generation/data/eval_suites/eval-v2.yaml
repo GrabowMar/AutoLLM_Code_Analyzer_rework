@@ -1,0 +1,22 @@
+# EvalSuite (spec 8, 11.6). Digests: the image ids of llmlab-v3-wt/eval-tester:dev and llmlab-v3-wt/adherence-checker:dev
+# built from backend/generation/images/{eval-tester,adherence-checker} with `docker build --provenance=false
+# --sbom=false` (docs/EVALUATION.md 7). Rebuilding an image changes its id: re-pin here (a new suite version on
+# re-seed), else evaluations refuse it (image_digest_mismatch).
+# eval-v2@2 (2026-11-11): tester v2 (rules 3, probe rules 2), acceptance compiler v2, statedness rule table 3,
+# task overlays pinned by fixtures_digest (any overlay edit needs a new pin). eval-v2@1 pinned tester v1
+# (sha256:e516a965...) and compiler v1; its results stay as stored.
+# The pinned tester image 6c540a03... was built before `ruff format` re-wrapped three statements of tester.py
+# (whitespace only, no token changed): a rebuild from the committed file is functionally identical but gets a
+# new image id, which needs a new pin (and so a new suite version).
+name: EvalSuite v2
+description: Tester v2, acceptance compiler v2, adherence checker v1, the task's own probes, starter baseline. The
+  image digests pin the builds of eval-tester and adherence-checker; fixtures_digest pins the task overlays.
+content:
+  tester: {version: 2, image_digest: 'sha256:6c540a0395345d40af4fee8b4761cc27a1624e3dec525be1b6718ccded975663'}
+  acceptance_compiler_version: 2
+  adherence_checker: {version: 1, image_digest: 'sha256:b2e1af72026e2b33a69089b911ea1a8dfbec5165de0f03c1b05e37ce3b2f6aa6'}
+  probes: task
+  baseline: starter
+  tester_rules_version: 3
+  probe_rules_version: 2
+  fixtures_digest: 848e9b09d88f740c2e1a62ecf6a8aa41812a1aeb28fcdf7aa6363c24f6a4a995

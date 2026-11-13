@@ -1,7 +1,7 @@
 """Human evaluation: researcher-defined manual testing tasks graded by human participants.
 
 A researcher builds an :class:`EvalTask` over a pool of generated apps
-(:class:`EvalTaskApp`, one per ``GenerationJob``) and a *design* — the ordered
+(:class:`EvalTaskApp`, one per ``GenerationRun``) and a *design* — the ordered
 evaluation blocks (rubric ratings, requirement checklist, security testing,
 usability scenarios, questionnaires, bug log, A/B preference) validated by
 ``services/design.py``. Opening the task freezes the design (``design_hash``)
@@ -100,8 +100,9 @@ class EvalTask(models.Model):
         default=_new_seed,
         help_text="Seeds allocation order, pair sides and finding samples (reproducible)",
     )
-    experiment = models.ForeignKey(
-        "generation.Experiment",
+    # The task's study (v3 ``generation.Study``).
+    study = models.ForeignKey(
+        "generation.Study",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -153,7 +154,7 @@ class EvalTaskApp(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     task = models.ForeignKey(EvalTask, on_delete=models.CASCADE, related_name="apps")
     job = models.ForeignKey(
-        "generation.GenerationJob",
+        "generation.GenerationRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

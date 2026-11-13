@@ -1,0 +1,14 @@
+name: FastAPI + React (PostgreSQL)
+description: FastAPI (Python 3.13) API serving a Vite React (TypeScript) build, with a PostgreSQL database.
+content:
+  choice_mode: fixed
+  backend: {language: python, framework: fastapi, runtime: python3.13}
+  frontend: {framework: react, language: ts, build_tool: vite}
+  database: postgres
+  run_contract: {port: 8000, api_prefix: /api, health_path: /api/health, static_serving: backend, data_dir: ./data, start: dockerfile}
+  brief_fragment: stack-fastapi-react-postgres@1
+  adherence:
+    backend_markers: [fastapi]
+    frontend_markers: [react]
+    db_markers: [psycopg]
+  resources: {min_memory: 3g, min_cpus: 1.0}

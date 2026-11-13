@@ -1,0 +1,15 @@
+name: App brief (editor harnesses)
+description: 'Brief for non-agentic editors such as Aider: the same content without claims about running or installing
+  anything.'
+role: brief
+modes:
+- app
+variables:
+- task
+- stack
+- style
+- auth_contract
+- guidance
+- budget_neutral
+tags:
+- editor

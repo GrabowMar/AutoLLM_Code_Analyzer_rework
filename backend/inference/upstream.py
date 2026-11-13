@@ -19,12 +19,14 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import math
 import socket
 import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from backend.inference.security import Target
 from backend.inference.security import validate_direct_base_url
@@ -47,8 +49,15 @@ ALLOWED_PATHS = frozenset(
 )
 
 
+# Anthropic's native Messages API (endpoint ``api_flavor="anthropic"``): direct endpoints only, never relayed,
+# so it is not part of the relay script's allowlist.
+MESSAGES_PATH = "/v1/messages"
+DIRECT_ONLY_PATHS = frozenset({("POST", MESSAGES_PATH)})
+
+
 def path_allowed(method: str, path: str, body: Any) -> bool:
-    if (method.upper(), path) not in ALLOWED_PATHS:
+    key = (method.upper(), path)
+    if key not in ALLOWED_PATHS and key not in DIRECT_ONLY_PATHS:
         return False
     if path == "/api/generate":
         return isinstance(body, dict) and not body.get("prompt")
@@ -109,11 +118,80 @@ def _opencode_session_id(body: Any) -> str:
     return f"llmlab-{digest[:32]}"
 
 
+def is_opencode(base_url: str | None) -> bool:
+    """Whether ``base_url`` is OpenCode Zen / Go (host ``opencode.ai``)."""
+    try:
+        return (urlsplit(str(base_url or "")).hostname or "").lower() == OPENCODE_HOST
+    except ValueError:
+        return False
+
+
+def opencode_reasoning(body: Any) -> Any:
+    """The body OpenCode Go honours for the run's reasoning control (C2).
+
+    Go is OpenAI-compatible: it honours a top-level ``reasoning_effort`` and ignores OpenRouter's
+    ``reasoning`` object. The canonical ``reasoning`` object (it reaches this point only when the run's
+    frozen policy forces ``reasoning.mode=effort``, see ``proxy_server.upstream_request``) becomes
+    ``reasoning_effort``; a ``reasoning`` object without an effort (``max_tokens`` mode) is dropped, which
+    is what Go did with it anyway. A body without ``reasoning`` is returned unchanged (same object).
+    """
+    if not isinstance(body, dict) or "reasoning" not in body:
+        return body
+    out = {k: v for k, v in body.items() if k != "reasoning"}
+    reasoning = body.get("reasoning")
+    effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+    if isinstance(effort, str) and effort and "reasoning_effort" not in out:
+        out["reasoning_effort"] = effort
+    return out
+
+
+# OpenCode Go's transient upstream failure (C1): ``400 Upstream request failed: [server_error] Upstream
+# response was not valid JSON`` (or the same error inside a 200 / as an in-stream error event). Retried
+# at most OPENCODE_TRANSIENT_RETRIES times by the pump; a moderation refusal is never retried.
+OPENCODE_TRANSIENT_MARKER = "[server_error]"
+OPENCODE_NEVER_RETRY_MARKERS = ("[data_inspection_failed]",)
+OPENCODE_TRANSIENT_RETRIES = 2
+OPENCODE_RETRY_BACKOFF_S = (1.0, 3.0)
+TRANSIENT_REASON = "opencode_server_error"
+
+
+def error_text(payload: Any) -> str:
+    """The ``error`` member of an answer as text (``""`` when it has none)."""
+    if isinstance(payload, dict) and payload.get("error") is not None:
+        error = payload["error"]
+        return error if isinstance(error, str) else json.dumps(error, default=str)
+    return ""
+
+
+def transient_reason(base_url: str | None, resp: UpstreamResponse) -> str | None:
+    """Why ``resp`` is a transient upstream failure worth re-submitting (:data:`TRANSIENT_REASON`), else None.
+
+    Only host ``opencode.ai``; only a 400, an error-only body inside a 200, or an in-stream error event
+    (status 502 with ``llmlab_stream_error``), whose **error** text carries ``[server_error]`` and no
+    ``[data_inspection_failed]``. Every other endpoint and status keeps its old handling.
+    """
+    if not is_opencode(base_url):
+        return None
+    payload = resp.payload
+    if resp.status == 400:
+        text = error_text(payload) or resp.text
+    elif resp.status == 200:
+        error_only = isinstance(payload, dict) and payload.get("error") and not payload.get("choices")
+        text = error_text(payload) if error_only else ""
+    elif resp.status == 502 and isinstance(payload, dict) and payload.get("llmlab_stream_error"):
+        text = error_text(payload)
+    else:
+        return None
+    if OPENCODE_TRANSIENT_MARKER not in text or any(m in text for m in OPENCODE_NEVER_RETRY_MARKERS):
+        return None
+    return TRANSIENT_REASON
+
+
 def _provider_quirks(host: str, body: Any, headers: dict[str, str]) -> Any:
     if host == OPENCODE_HOST:
         headers["User-Agent"] = OPENCODE_USER_AGENT
         headers["x-opencode-session"] = _opencode_session_id(body)
-        return body
+        return opencode_reasoning(body)
     if host != ANTHROPIC_HOST:
         return body
     headers["anthropic-version"] = ANTHROPIC_VERSION
@@ -160,11 +238,20 @@ def call(
     timeout: float,
     api_key: str | None = None,
     on_socket: Callable[[socket.socket | None], None] | None = None,
+    stream_limits: StreamLimits | None = None,
 ) -> UpstreamResponse:
     """One request to a direct endpoint; raises :class:`UpstreamError` (``connect`` | ``timeout`` | ``http`` | ...).
 
     ``on_socket(sock)`` is called with the live socket once connected (and
     with ``None`` when done), so a canceller can ``shutdown()`` it.
+
+    With ``stream_limits``, a non-stream OpenAI chat call is made as a **stream** upstream and
+    re-assembled into the non-stream ``chat.completion`` its caller expects, cut at the per-call
+    output cap or wall clock with ``finish_reason=length`` (see :class:`StreamLimits`).
+
+    ``POST /v1/messages`` (Anthropic's native API, :mod:`backend.inference.anthropic_native`) is always
+    streamed, with ``x-api-key`` / ``anthropic-version`` auth, and answered as an OpenAI ``chat.completion``
+    (errors in the OpenAI error shape, status unchanged); the body's private metadata is never sent.
     """
     if not path_allowed(method, path, body):
         raise UpstreamError(kind="forbidden_path", message=f"{method} {path} is not allowed")
@@ -172,20 +259,61 @@ def call(
         target = validate_direct_base_url(base_url)
     except ValueError as exc:
         raise UpstreamError(kind="connect", message=str(exc)) from exc
+    messages_call = method.upper() == "POST" and path == MESSAGES_PATH and isinstance(body, dict)
+    acc: Any = None
+    if messages_call:
+        from backend.inference import anthropic_native
+
+        body = dict(body)
+        meta = body.pop(anthropic_native.META_KEY, None) or {}
+        body["stream"] = True
+        max_tokens = body.get("max_tokens")
+        acc = anthropic_native.MessageStream(meta, max_tokens=max_tokens if isinstance(max_tokens, int) else None)
+        stream_limits = stream_limits or StreamLimits(max_output_tokens=None, wall_clock_s=None)
+    streamed = messages_call or (
+        stream_limits is not None
+        and method.upper() == "POST"
+        and path == CHAT_COMPLETIONS_PATH
+        and isinstance(body, dict)
+        and not body.get("stream")
+    )
+    if streamed:
+        if not messages_call:
+            body = {**body, "stream": True, "stream_options": {"include_usage": True}}
+        if stream_limits.wall_clock_s:
+            timeout = min(timeout, stream_limits.wall_clock_s)
     started = time.monotonic()
     conn = _connect(target, timeout)
     if on_socket is not None:
         on_socket(conn.sock)
     try:
         headers = {"Host": target.host_header, "Accept": "application/json", "User-Agent": "llmlab-executor"}
-        body = _provider_quirks(target.host, body, headers)
+        if streamed:
+            headers["Accept"] = "text/event-stream"
+        if messages_call:
+            headers["anthropic-version"] = ANTHROPIC_VERSION
+            if api_key:
+                headers["x-api-key"] = api_key
+        else:
+            body = _provider_quirks(target.host, body, headers)
         data = json.dumps(body).encode() if body is not None else None
         if data is not None:
             headers["Content-Type"] = "application/json"
-        if api_key:
+        if api_key and not messages_call:
             headers["Authorization"] = f"Bearer {api_key}"
         conn.request(method.upper(), _join(target.base_path, path), body=data, headers=headers)
         resp = conn.getresponse()
+        if streamed and resp.status == 200 and "text/event-stream" in (resp.getheader("Content-Type") or ""):
+            assert stream_limits is not None
+            payload = _read_chat_stream(resp, conn.sock, stream_limits, timeout=timeout, started=started, acc=acc)
+            elapsed = int((time.monotonic() - started) * 1000)
+            status = 502 if payload.get("llmlab_stream_error") else 200
+            return UpstreamResponse(
+                status=status,
+                payload=payload,
+                text=json.dumps(payload)[:2000],
+                elapsed_ms=elapsed,
+            )
         raw = resp.read(MAX_RESPONSE_BYTES + 1)
     except TimeoutError as exc:
         raise UpstreamError(kind="timeout", message=f"no answer within {timeout:.0f}s") from exc
@@ -205,4 +333,288 @@ def call(
         payload = json.loads(text) if text else None
     except ValueError:
         payload = None
+    if messages_call:
+        from backend.inference import anthropic_native
+
+        if resp.status == 200 and isinstance(payload, dict) and payload.get("type") == "message":
+            payload = anthropic_native.to_chat_completion(payload, meta=acc.request_meta)
+        elif resp.status >= 400:
+            payload = anthropic_native.error_payload(resp.status, payload, text)
     return UpstreamResponse(status=resp.status, payload=payload, text=text[:2000], elapsed_ms=elapsed)
+
+
+# =====================================================================================
+# Streamed non-stream calls: per-call output cap and wall clock (E2E-17)
+# =====================================================================================
+
+CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+# Output tokens of a cut stream (or one without a usage chunk) are estimated like the gateway's prompt
+# estimate (``budget_rules.CHARS_PER_TOKEN``): ceil(chars / 3.6) over content, reasoning and tool-call text.
+OUTPUT_CHARS_PER_TOKEN = 3.6
+# The cap cut is only a runaway backstop (the wall clock is the main bound): a stream is cut once its
+# output text reaches ``max_output_tokens * CAP_CUT_CHARS_PER_TOKEN`` characters. Real text runs from
+# ~3 (qwen reasoning) to well over 4 chars per token (prose, long identifiers), so a cut at the 3.6
+# estimate (even with 10 % headroom) pre-empted providers that bound the answer themselves and recorded a
+# truncation that never happened (E2E-20; live: deepseek-v4.1-flash ended on its own ``length`` at 100
+# tokens after 591 chars, 5.9 chars per token). At 8 chars per token a stream still running has run past
+# its ``max_tokens``; the cut then comes at ~1.4-2.5x the cap in real tokens.
+CAP_CUT_CHARS_PER_TOKEN = 8.0
+MAX_SSE_LINE_BYTES = 4 * 1024 * 1024
+REASONING_KEYS = ("reasoning_content", "reasoning")
+CUT_MAX_OUTPUT = "max_output_tokens"
+CUT_WALL_CLOCK = "wall_clock"
+
+
+@dataclass(frozen=True)
+class StreamLimits:
+    """The per-call limits of a call whose client did not stream (spec 6.6; E2E-17).
+
+    Some providers do not bound reasoning by ``max_tokens`` (OpenCode Go's qwen3.8-flash reasons
+    on far past it), so a non-stream call could only end at the timeout chain, recorded as an infra
+    failure. Streamed upstream, the call is cut once its estimated output reaches
+    ``max_output_tokens`` (the policy-pinned ``max_tokens``: ``call.max_output_tokens`` plus the
+    reasoning budget) is clearly overrun (:data:`CAP_CUT_CHARS_PER_TOKEN`) or ``wall_clock_s`` has passed
+    with output flowing, and answered as a well-formed ``chat.completion`` with ``finish_reason=length``:
+    a model truncation. ``prompt_tokens_estimate`` is the usage a cut call (or one whose stream carried
+    no usage chunk) reports for its prompt.
+    ``call_wall_left_s`` is what was left of the policy's per-call wall clock when the limits were made
+    (the call's queue time and earlier attempts already subtracted; E2E-20), None when the call has no
+    policy wall clock; ``wall_clock_s`` is never above it.
+    """
+
+    max_output_tokens: int | None
+    wall_clock_s: float | None
+    prompt_tokens_estimate: int = 0
+    call_wall_left_s: float | None = None
+
+
+class ChatStream:
+    """Re-assembles an OpenAI ``chat.completion.chunk`` stream into one ``chat.completion``."""
+
+    def __init__(self) -> None:
+        self.meta: dict[str, Any] = {}
+        self.role = "assistant"
+        self.content: list[str] = []
+        self.reasoning: dict[str, list[str]] = {}
+        self.reasoning_details: list[Any] = []
+        self.tool_calls: dict[int, dict[str, Any]] = {}
+        self.finish_reason: str | None = None
+        self.native_finish_reason: str | None = None
+        self.usage: dict[str, Any] | None = None
+        self.error: dict[str, Any] | None = None
+        self.chars = 0
+        self.reasoning_chars = 0
+        self.done = False
+
+    @property
+    def has_output(self) -> bool:
+        return self.chars > 0
+
+    def output_tokens(self) -> int:
+        return math.ceil(self.chars / OUTPUT_CHARS_PER_TOKEN)
+
+    def reasoning_tokens(self) -> int:
+        return math.ceil(self.reasoning_chars / OUTPUT_CHARS_PER_TOKEN)
+
+    def feed(self, event: Any) -> None:
+        if not isinstance(event, dict):
+            return
+        if event.get("error") and not event.get("choices"):
+            self.error = event
+            return
+        for key in ("id", "object", "created", "model", "system_fingerprint", "provider"):
+            if event.get(key) is not None and key not in self.meta:
+                self.meta[key] = event[key]
+        if isinstance(event.get("usage"), dict) and event["usage"]:
+            self.usage = event["usage"]
+        for choice in event.get("choices") or []:
+            if not isinstance(choice, dict) or int(choice.get("index") or 0) != 0:
+                continue
+            self._delta(choice.get("delta") or {})
+            if choice.get("finish_reason"):
+                self.finish_reason = str(choice["finish_reason"])
+            if choice.get("native_finish_reason"):
+                self.native_finish_reason = str(choice["native_finish_reason"])
+
+    def _delta(self, delta: Any) -> None:
+        if not isinstance(delta, dict):
+            return
+        if delta.get("role"):
+            self.role = str(delta["role"])
+        if isinstance(delta.get("content"), str) and delta["content"]:
+            self.content.append(delta["content"])
+            self.chars += len(delta["content"])
+        for key in REASONING_KEYS:
+            text = delta.get(key)
+            if isinstance(text, str) and text:
+                self.reasoning.setdefault(key, []).append(text)
+                self.chars += len(text)
+                self.reasoning_chars += len(text)
+        if isinstance(delta.get("reasoning_details"), list):
+            self.reasoning_details.extend(delta["reasoning_details"])
+        for call in delta.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            slot = self.tool_calls.setdefault(
+                int(call.get("index") or 0),
+                {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
+            )
+            if call.get("id"):
+                slot["id"] = call["id"]
+            if call.get("type"):
+                slot["type"] = call["type"]
+            function = call.get("function") or {}
+            for part in ("name", "arguments"):
+                text = function.get(part)
+                if isinstance(text, str) and text:
+                    slot["function"][part] += text
+                    self.chars += len(text)
+
+    def completion(self, limits: StreamLimits, cut: str | None = None, elapsed_s: float = 0.0) -> dict[str, Any]:
+        """The ``chat.completion``; ``cut`` (``max_output_tokens`` | ``wall_clock``) ends it at ``length``."""
+        calls = [self.tool_calls[i] for i in sorted(self.tool_calls)]
+        dropped = 0
+        if cut:
+            # A tool call cut mid-arguments is not a call the harness could run.
+            complete = [c for c in calls if _json_object(c["function"]["arguments"] or "{}")]
+            dropped, calls = len(calls) - len(complete), complete
+        message: dict[str, Any] = {"role": self.role, "content": "".join(self.content) or (None if calls else "")}
+        for key, parts in self.reasoning.items():
+            message[key] = "".join(parts)
+        if self.reasoning_details:
+            message["reasoning_details"] = self.reasoning_details
+        if calls:
+            message["tool_calls"] = [{k: v for k, v in c.items() if v is not None} for c in calls]
+        choice: dict[str, Any] = {
+            "index": 0,
+            "message": message,
+            "finish_reason": "length" if cut else (self.finish_reason or "stop"),
+        }
+        if cut:
+            choice["native_finish_reason"] = f"llmlab_cut:{cut}"
+        elif self.native_finish_reason:
+            choice["native_finish_reason"] = self.native_finish_reason
+        payload: dict[str, Any] = {**self.meta, "object": "chat.completion", "choices": [choice]}
+        if cut:
+            # No upstream usage reaches a cut stream: the estimate is marked, never passed off as billed.
+            payload["usage"] = self.estimated_usage(limits)
+            payload["llmlab_cut"] = {
+                "reason": cut,
+                "elapsed_s": round(elapsed_s, 3),
+                "max_output_tokens": limits.max_output_tokens,
+                "wall_clock_s": limits.wall_clock_s,
+                "est_completion_tokens": payload["usage"]["completion_tokens"],
+                "output_chars": self.chars,
+                "dropped_tool_calls": dropped,
+            }
+        elif self.usage is not None:
+            payload["usage"] = self.usage
+        else:
+            # A provider that ignores ``stream_options.include_usage``: without an estimate the call would
+            # book 0 tokens and $0 and slip past the token and spend caps (E2E-20).
+            payload["usage"] = self.estimated_usage(limits)
+        return payload
+
+    def estimated_usage(self, limits: StreamLimits) -> dict[str, Any]:
+        """Usage estimated from the prompt estimate and the output text, marked ``llmlab_estimated``."""
+        completion = self.output_tokens()
+        prompt = int(limits.prompt_tokens_estimate or 0)
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+            "completion_tokens_details": {"reasoning_tokens": self.reasoning_tokens()},
+            "llmlab_estimated": True,
+        }
+
+
+def _json_object(text: str) -> bool:
+    try:
+        return isinstance(json.loads(text), dict)
+    except ValueError:
+        return False
+
+
+def _read_chat_stream(
+    resp: http.client.HTTPResponse,
+    sock: socket.socket | None,
+    limits: StreamLimits,
+    *,
+    timeout: float,
+    started: float,
+    acc: Any = None,
+) -> dict[str, Any]:
+    """Read an SSE chat stream into one ``chat.completion``, cutting it at ``limits``.
+
+    ``acc`` is the stream accumulator: an OpenAI :class:`ChatStream` by default, or an
+    ``anthropic_native.MessageStream`` for a native Messages stream (same interface, same rules).
+
+    Usage comes from the stream's own usage chunk (``stream_options.include_usage``), so a stream
+    that finishes with one is accounted exactly; a cut one, or one that never sent a usage chunk,
+    carries an estimate (``llmlab_estimated``). Once the provider has sent its own finish the answer
+    is never cut: the reader only waits for the usage chunk / ``[DONE]`` until the wall clock or a
+    read timeout, then returns the finished answer.
+    A stream silent for ``timeout`` (the endpoint's per-read timeout), or one that reaches the wall
+    clock before any output, is an upstream ``timeout`` as before; one that ends without a finish is
+    a broken connection; an in-stream error object is an HTTP 502 error answer.
+    """
+    if acc is None:
+        acc = ChatStream()
+    deadline = started + limits.wall_clock_s if limits.wall_clock_s else None
+    cut_chars = limits.max_output_tokens * CAP_CUT_CHARS_PER_TOKEN if limits.max_output_tokens else None
+    data: list[bytes] = []
+    total = 0
+    cut: str | None = None
+    while cut is None and not acc.done:
+        now = time.monotonic()
+        if deadline is not None and now >= deadline:
+            if acc.finish_reason is None:
+                cut = CUT_WALL_CLOCK
+            break
+        if sock is not None:
+            sock.settimeout(timeout if deadline is None else max(0.01, min(timeout, deadline - now)))
+        try:
+            line = resp.readline(MAX_SSE_LINE_BYTES)
+        except TimeoutError:
+            if acc.finish_reason is not None:
+                break  # finished; only the usage chunk / [DONE] did not come
+            if deadline is not None and time.monotonic() >= deadline - 0.02:
+                cut = CUT_WALL_CLOCK
+                break
+            raise
+        if not line:
+            _dispatch(acc, data)
+            break
+        total += len(line)
+        if total > MAX_RESPONSE_BYTES:
+            raise UpstreamError(kind="too_large", message="upstream stream exceeds 32 MB")
+        line = line.rstrip(b"\r\n")
+        if not line:
+            _dispatch(acc, data)
+            data = []
+        elif line.startswith(b"data:"):
+            value = line[5:]
+            data.append(value[1:] if value.startswith(b" ") else value)
+        if cut_chars is not None and acc.finish_reason is None and acc.chars >= cut_chars:
+            cut = CUT_MAX_OUTPUT
+    if acc.error is not None:
+        return {"error": acc.error.get("error"), "llmlab_stream_error": True}
+    if cut == CUT_WALL_CLOCK and not acc.has_output:
+        msg = f"no output within the {limits.wall_clock_s:.0f}s per-call wall clock"
+        raise UpstreamError(kind="timeout", message=msg)
+    if cut is None and acc.finish_reason is None and not acc.done:
+        raise UpstreamError(kind="connect", message="upstream stream ended before the answer finished")
+    return acc.completion(limits, cut, time.monotonic() - started)
+
+
+def _dispatch(acc: Any, data: list[bytes]) -> None:
+    if not data:
+        return
+    text = b"\n".join(data).strip()
+    if text == b"[DONE]":
+        acc.done = True
+        return
+    try:
+        acc.feed(json.loads(text))
+    except ValueError:
+        return

@@ -10,6 +10,11 @@ volumes:
   redis_data: {}
   apps_dind_data: {}
   apps_dind_certs: {}
+  # depcache (WP-05): storage of the pull-through caches; mounted by the cache services only, never by agents.
+  depcache_npm: {}
+  depcache_pypi: {}
+  depcache_go: {}
+  depcache_maven: {}
 
 networks:
   default: {}
@@ -22,6 +27,13 @@ networks:
     ipam:
       config:
         - subnet: "${LLMPROXY_SUBNET:-172.30.99.0/29}"
+  # depcache (WP-05): internal network between the read-only dependency caches and apps-dind, whose
+  # sandbox gateways forward agents' package requests to them (docs/STACKS.md). No default route.
+  depcache:
+    internal: true
+    ipam:
+      config:
+        - subnet: "${DEPCACHE_SUBNET:-172.30.98.0/28}"
 
 services:
   django: &django
@@ -30,6 +42,9 @@ services:
       dockerfile: ./compose/local/django/Dockerfile
     # One image for django, celery and flower (same Dockerfile).
     image: llmlab/django:local
+    # Come back after a Docker daemon restart (unattended-upgrades restarted it on 2026-11-11 and
+    # left the stack down).
+    restart: unless-stopped
     depends_on:
       - postgres
       - redis
@@ -94,6 +109,9 @@ services:
       default: {}
       llmproxy:
         ipv4_address: "${LLM_PROXY_ADDR:-172.30.99.2}"
+      # Only to health-probe the dependency caches at their sandbox-facing addresses (build/depcache.py).
+      depcache:
+        ipv4_address: "${EXECUTOR_DEPCACHE_ADDR:-172.30.98.13}"
     environment:
       <<: *django-env
       CONN_MAX_AGE: "0"
@@ -103,11 +121,19 @@ services:
       LLM_PROXY_BIND: "${LLM_PROXY_ADDR:-172.30.99.2}:8090"
       LLM_PROXY_UPSTREAM: "http://${LLM_PROXY_ADDR:-172.30.99.2}:8090/v1"
       LLM_GATEWAY_EGRESS_SUBNET: "${LLM_GATEWAY_EGRESS_SUBNET:-10.213.0.0/24}"
+      # WP-05 depcache (profile `depcache`): the caches' fixed addresses on the internal depcache network,
+      # reached by sandbox gateways on llmlab-gw-egress (apps-dind firewall). Without the profile the probe
+      # fails and runs record `depcache_unavailable` (public registries).
+      DEPCACHE_NPM_URL: "${DEPCACHE_NPM_URL:-http://172.30.98.2:4873}"
+      DEPCACHE_PYPI_URL: "${DEPCACHE_PYPI_URL:-http://172.30.98.3:3141}"
+      DEPCACHE_GOPROXY_URL: "${DEPCACHE_GOPROXY_URL:-http://172.30.98.4:3000}"
+      DEPCACHE_MAVEN_URL: "${DEPCACHE_MAVEN_URL:-http://172.30.98.5:8080/maven-central}"
     # No extra_hosts: direct endpoints (tailnet/VPN) are reached through host
     # routing + masquerade; host.docker.internal would expose every host-bound
     # service and is rejected by the SSRF validator anyway.
     stop_grace_period: 30s
-    mem_limit: 2g
+    # 2g was OOM-killed while evaluating a 30-app study (2026-11-10).
+    mem_limit: ${EXECUTOR_MEM_LIMIT:-6g}
     cpus: 2
     pids_limit: 1024
     oom_score_adj: 500
@@ -117,6 +143,9 @@ services:
       context: .
       dockerfile: ./compose/production/postgres/Dockerfile
     image: llmlab/postgres:local
+    # Come back after a Docker daemon restart (unattended-upgrades restarted it on 2026-11-11 and
+    # left the stack down).
+    restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql
       - postgres_data_backups:/backups
@@ -135,6 +164,9 @@ services:
       context: .
       dockerfile: ./compose/local/apps-dind/Dockerfile
     image: llmlab/apps-dind:local
+    # Come back after a Docker daemon restart (unattended-upgrades restarted it on 2026-11-11 and
+    # left the stack down).
+    restart: unless-stopped
     privileged: true
     hostname: apps-dind
     environment:
@@ -147,6 +179,8 @@ services:
       LLM_GATEWAY_EGRESS_SUBNET: "${LLM_GATEWAY_EGRESS_SUBNET:-10.213.0.0/24}"
       LLMPROXY_SUBNET: "${LLMPROXY_SUBNET:-172.30.99.0/29}"
       APPS_DIND_LLMPROXY_ADDR: "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}"
+      # Firewall exception for sandbox gateways -> the dependency caches (WP-05 depcache).
+      DEPCACHE_SUBNET: "${DEPCACHE_SUBNET:-172.30.98.0/28}"
     volumes:
       - apps_dind_data:/var/lib/docker
       - apps_dind_certs:/certs
@@ -155,14 +189,105 @@ services:
       llmproxy:
         # Override together with LLMPROXY_SUBNET / LLM_PROXY_ADDR (same subnet).
         ipv4_address: "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}"
+      depcache:
+        # Fixed, outside the caches' .2-.5, so a dynamic address never takes a cache's static one.
+        ipv4_address: "${APPS_DIND_DEPCACHE_ADDR:-172.30.98.14}"
     # Keep APPS_DIND_MEM_LIMIT equal to this cap (django/executor read it).
     mem_limit: ${APPS_DIND_MEM_LIMIT:-4g}
     cpus: ${APPS_DIND_CPUS:-4}
     pids_limit: 4096
     oom_score_adj: 500
 
+  # --- WP-05 depcache --- read-only pull-through dependency caches (spec 4.2; docs/STACKS.md).
+  # Opt-in: `docker compose --profile depcache up -d`. Each cache is on `default` (upstream registries) and on
+  # the internal `depcache` network at a fixed address; the backend reads DEPCACHE_*_URL (unset = the
+  # public registries, note depcache_unavailable). Nothing can be published to any of them, and their
+  # volumes are never mounted into an agent container.
+  depcache-npm:
+    image: docker.io/verdaccio/verdaccio:7.0.2@sha256:5623458a61100ff2c89526752e8ea2db58ae2d494fa202c18bf4a508ec46892c
+    profiles: [depcache]
+    restart: unless-stopped
+    volumes:
+      - ./compose/local/depcache/verdaccio/config.yaml:/verdaccio/conf/config.yaml:ro
+      - depcache_npm:/verdaccio/storage
+    environment:
+      # Tarball URLs in the metadata it serves name the public registry, so a lockfile written in a sandbox
+      # records https://registry.npmjs.org/... (npm still downloads through this cache: its default
+      # replace-registry-host=npmjs swaps the host for the configured registry). Without it every lock an
+      # agent writes pins http://<cache address>/..., which no evaluation build can reach.
+      VERDACCIO_PUBLIC_URL: https://registry.npmjs.org/
+    networks:
+      default: {}
+      depcache:
+        ipv4_address: "${DEPCACHE_NPM_ADDR:-172.30.98.2}"
+    # 512m OOM-looped under a 14-sandbox study (devpi index, verdaccio metadata), 2026-11-10.
+    mem_limit: 2g
+    cpus: 1
+    pids_limit: 256
+    oom_score_adj: 500
+
+  depcache-pypi:
+    build:
+      context: ./compose/local/depcache/devpi
+    image: llmlab/depcache-pypi:local
+    profiles: [depcache]
+    restart: unless-stopped
+    volumes:
+      - depcache_pypi:/devpi/server
+    networks:
+      default: {}
+      depcache:
+        ipv4_address: "${DEPCACHE_PYPI_ADDR:-172.30.98.3}"
+    # 512m OOM-looped under a 14-sandbox study (devpi index, verdaccio metadata), 2026-11-10.
+    mem_limit: 2g
+    cpus: 1
+    pids_limit: 256
+    oom_score_adj: 500
+
+  depcache-go:
+    image: docker.io/gomods/athens:v0.20.0@sha256:3620ce7230c723bdeac51f112541a659bf44923416b02f69cabf981fd9c0324a
+    profiles: [depcache]
+    restart: unless-stopped
+    environment:
+      ATHENS_STORAGE_TYPE: disk
+      ATHENS_DISK_STORAGE_ROOT: /var/lib/athens
+      ATHENS_DOWNLOAD_MODE: sync
+      ATHENS_GO_BINARY_ENV_VARS: "GOPROXY=https://proxy.golang.org,direct"
+    volumes:
+      - depcache_go:/var/lib/athens
+    networks:
+      default: {}
+      depcache:
+        ipv4_address: "${DEPCACHE_GO_ADDR:-172.30.98.4}"
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 512
+    oom_score_adj: 500
+
+  depcache-maven:
+    image: docker.io/dzikoysk/reposilite:3.6.6@sha256:2438ab2a01392ea53d62ba83cdca1afe963603518f4282af4712076d39e1dd22
+    profiles: [depcache]
+    restart: unless-stopped
+    environment:
+      REPOSILITE_OPTS: "--shared-configuration=/app/configuration.shared.json"
+    volumes:
+      - ./compose/local/depcache/reposilite/configuration.shared.json:/app/configuration.shared.json:ro
+      - depcache_maven:/app/data
+    networks:
+      default: {}
+      depcache:
+        ipv4_address: "${DEPCACHE_MAVEN_ADDR:-172.30.98.5}"
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 256
+    oom_score_adj: 500
+  # --- end WP-05 depcache ---
+
   mailpit:
     image: docker.io/axllent/mailpit:latest
+    # Come back after a Docker daemon restart (unattended-upgrades restarted it on 2026-11-11 and
+    # left the stack down).
+    restart: unless-stopped
     ports:
       - "8025:8025"
     mem_limit: 128m
@@ -172,6 +297,9 @@ services:
 
   redis:
     image: docker.io/redis:8.8
+    # Come back after a Docker daemon restart (unattended-upgrades restarted it on 2026-11-11 and
+    # left the stack down).
+    restart: unless-stopped
     volumes:
       - redis_data:/data
     mem_limit: 256m

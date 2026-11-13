@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
+from urllib.parse import unquote
 from urllib.parse import urlsplit
 
 from packaging.version import InvalidVersion
@@ -26,13 +27,18 @@ from backend.analysis.services.base import ParsedOutput
 from backend.analysis.services.extra_parsers import _cwe
 from backend.analysis.services.parsers import _advisory_ids
 from backend.analysis.services.parsers import _clip
+from backend.analysis.services.parsers import _clip_list
 from backend.analysis.services.parsers import _compact
 from backend.analysis.services.parsers import _cwe_field
 from backend.analysis.services.parsers import _float
+from backend.analysis.services.parsers import _int
 from backend.analysis.services.parsers import _json
 from backend.analysis.services.parsers import _label
 from backend.analysis.services.parsers import _urls
 from backend.analysis.services.parsers import register
+from backend.analysis.services.parsers import report_with
+from backend.analysis.services.parsers import section_bodies
+from backend.analysis.services.parsers import section_report
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -885,3 +891,180 @@ def parse_djlint(raw: str) -> ParsedOutput:
             warnings=marks.warnings,
         )
     return ParsedOutput(findings=findings, warnings=marks.warnings)
+
+
+# --- SARIF (CodeQL) -----------------------------------------------------------
+
+# CodeQL's ``problem.severity`` for rules without a security score.
+_SARIF_QUALITY_SEVERITY = {"error": "medium", "warning": "low", "recommendation": "info", "note": "info"}
+_SARIF_PRECISION = {"very-high": "high", "high": "high", "medium": "medium", "low": "low"}
+# "[user-provided value](1)": a link to the result's related location n.
+_SARIF_LINK_RE = re.compile(r"\[([^\]]+)\]\(\d+\)")
+_CODEQL_LANGUAGES = {"py": "python", "js": "javascript"}
+_SARIF_FLOW_STEPS = 12
+
+
+def _sarif_text(value: Any) -> str:
+    return str(value.get("text") or "") if isinstance(value, dict) else ""
+
+
+def _sarif_rules(run: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    tool = run.get("tool") if isinstance(run.get("tool"), dict) else {}
+    components = [tool.get("driver"), *(tool.get("extensions") or [])]
+    return {
+        str(rule["id"]): rule
+        for component in components
+        if isinstance(component, dict)
+        for rule in component.get("rules") or []
+        if isinstance(rule, dict) and rule.get("id")
+    }
+
+
+def _sarif_location(location: Any) -> tuple[str, dict[str, Any]]:
+    """``(path, region)`` of a SARIF location; the path is relative to the analyzed tree."""
+    physical = location.get("physicalLocation") if isinstance(location, dict) else None
+    physical = physical if isinstance(physical, dict) else {}
+    uri = str((physical.get("artifactLocation") or {}).get("uri") or "")
+    region = physical.get("region") if isinstance(physical.get("region"), dict) else {}
+    return unquote(uri.removeprefix("file://")), region
+
+
+def _sarif_flow(result: dict[str, Any]) -> list[str]:
+    """``file:line`` of each step on the first data-flow path (source first, sink last)."""
+    for flow in result.get("codeFlows") or []:
+        for thread in (flow or {}).get("threadFlows") or []:
+            steps = []
+            for step in (thread or {}).get("locations") or []:
+                path, region = _sarif_location((step or {}).get("location"))
+                if path:
+                    steps.append(f"{path}:{region.get('startLine')}" if region.get("startLine") else path)
+            if steps:
+                if len(steps) > _SARIF_FLOW_STEPS:  # keep both ends: the source and the sink
+                    half = _SARIF_FLOW_STEPS // 2
+                    steps = [*steps[:half], "...", *steps[-half:]]
+                return steps
+    return []
+
+
+def _codeql_docs_url(rule_id: str) -> str | None:
+    prefix, _, name = rule_id.partition("/")
+    language = _CODEQL_LANGUAGES.get(prefix)
+    if not language or not name:
+        return None
+    return f"https://codeql.github.com/codeql-query-help/{language}/{prefix}-{name.replace('/', '-')}/"
+
+
+def _sarif_finding(result: dict[str, Any], rules: dict[str, dict[str, Any]]) -> FindingData:
+    rule_id = str(result.get("ruleId") or (result.get("rule") or {}).get("id") or "")
+    rule = rules.get(rule_id, {})
+    props = rule.get("properties") if isinstance(rule.get("properties"), dict) else {}
+    tags = [str(t) for t in props.get("tags") or []]
+    security = "security" in tags
+    score = _float(props.get("security-severity"))
+    # CodeQL's own label is the rule's problem.severity; SARIF's level mirrors it.
+    label = str(
+        props.get("problem.severity")
+        or result.get("level")
+        or (rule.get("defaultConfiguration") or {}).get("level")
+        or "",
+    )
+    if security and score is not None:
+        severity = _cvss_severity(score)
+    elif security:
+        severity = {"error": "high", "warning": "medium"}.get(label, "low")
+    else:
+        severity = _SARIF_QUALITY_SEVERITY.get(label, "low")
+    message = _SARIF_LINK_RE.sub(r"\1", _sarif_text(result.get("message"))).strip()
+    path, region = _sarif_location((result.get("locations") or [None])[0])
+    snippet = _sarif_text(region.get("snippet"))
+    name = _sarif_text(rule.get("shortDescription")) or str(props.get("name") or "")
+    return FindingData(
+        severity=severity,
+        category="security" if security else "quality",
+        title=_clip(name or (message.splitlines() or [rule_id])[0], 200),
+        description=message,
+        file_path=path,
+        line_number=region.get("startLine"),
+        column_number=region.get("startColumn"),
+        code_snippet=snippet[:500],
+        rule_id=rule_id,
+        confidence=_SARIF_PRECISION.get(str(props.get("precision") or ""), "medium"),
+        tool_severity=_label(label),
+        tool_specific_data=_compact(
+            {
+                "rule_name": name or None,
+                "rule_description": _clip(_sarif_text(rule.get("fullDescription")), 500) or None,
+                "tool_confidence": _label(props.get("precision")),
+                "cvss_score": score,
+                "tags": [t for t in tags if not t.startswith("external/cwe/")],
+                "docs_url": _codeql_docs_url(rule_id),
+                "end_line": region.get("endLine"),
+                "end_column": region.get("endColumn"),
+                "data_flow": _sarif_flow(result),
+                **_cwe_field([t.rsplit("/", 1)[-1] for t in tags if t.startswith("external/cwe/")]),
+            },
+        ),
+    )
+
+
+def _codeql_coverage(run: dict[str, Any]) -> tuple[int, list[str]]:
+    """``(files extracted, extraction problems)`` from the run's diagnostic notifications."""
+    extracted = 0
+    problems: list[str] = []
+    for invocation in run.get("invocations") or []:
+        for note in (invocation or {}).get("toolExecutionNotifications") or []:
+            kind = str(((note or {}).get("descriptor") or {}).get("id") or "")
+            if kind.endswith("/successfully-extracted-files"):
+                extracted += 1
+            elif kind.endswith(("/extraction-errors", "/extraction-warnings")) or note.get("level") == "error":
+                path, _ = _sarif_location((note.get("locations") or [None])[0])
+                text = (_sarif_text(note.get("message")).splitlines() or [kind])[0][:160]
+                problems.append(f"{path}: {text}" if path else text)
+    return extracted, problems
+
+
+@register("codeql", sectioned=True, report=report_with("runs"))
+def parse_codeql(raw: str) -> ParsedOutput:
+    """CodeQL: one ``### <language>`` section per analyzed language, each a SARIF 2.1.0 log.
+
+    Findings carry the rule's own ``problem.severity`` as ``tool_severity``, the CVSS-style
+    ``security-severity`` score (security rules) and the first CWE tag, which cross-tool
+    deduplication matches on. ``metrics.languages`` records what each database held
+    (files extracted, lines of user code); a language whose extraction produced no file was
+    not measured: a coverage gap, and an error when that holds for every language.
+    """
+    parsed = ParsedOutput()
+    languages: dict[str, dict[str, Any]] = {}
+    empty: list[str] = []
+    for language, body in section_bodies(raw):
+        log = section_report(body, report_with("runs"))
+        if log is None:
+            continue  # reported by the registry's section check
+        files = 0
+        problems: list[str] = []
+        lines: int | None = None
+        for run in log.get("runs") or []:
+            if not isinstance(run, dict):
+                continue
+            rules = _sarif_rules(run)
+            parsed.findings.extend(
+                _sarif_finding(result, rules) for result in run.get("results") or [] if isinstance(result, dict)
+            )
+            count, found = _codeql_coverage(run)
+            files += count
+            problems.extend(found)
+            for metric in (run.get("properties") or {}).get("metricResults") or []:
+                if str((metric or {}).get("ruleId") or "").endswith("/summary/lines-of-user-code"):
+                    lines = _int(metric.get("value"))
+        languages[language] = _compact({"files_extracted": files, "lines_of_user_code": lines})
+        if problems:
+            parsed.warnings.append(f"CodeQL {language}: {len(problems)} extraction problem(s): {_clip_list(problems)}")
+        if not files:
+            empty.append(language)
+    if languages:
+        parsed.metrics["languages"] = languages
+    if empty:
+        parsed.warnings.append(f"CodeQL extracted no file for: {', '.join(empty)}")
+        if len(empty) == len(languages) and not parsed.findings:
+            parsed.error = f"CodeQL extracted no source file ({', '.join(empty)}): nothing was measured."
+    return parsed

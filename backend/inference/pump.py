@@ -21,8 +21,11 @@ import threading
 import time
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
+from datetime import timedelta
 
 from django.db import close_old_connections
+from django.utils import timezone
 
 from backend.inference import doorbell
 from backend.inference.db import close_db
@@ -37,6 +40,14 @@ MANAGER_TICK_S = 5.0
 WATCH_TICK_S = 2.0
 IDLE_WAIT_S = 2.0
 SHOW_TIMEOUT_S = 30
+# Non-stream OpenAI chat calls of these sources are streamed upstream under per-call limits (E2E-17).
+STREAMED_SOURCES = frozenset({LLMRequest.Source.AGENT_PROXY, LLMRequest.Source.SLOT_CALL})
+# The cut answer is due this long (at most 10 % of the timeout) before the gateway's per-call timeout.
+CUT_MARGIN_S = 30
+# Less than this left of a call's policy wall clock: the call fails at once, without an upstream call (E2E-20).
+MIN_CALL_WALL_S = 1.0
+# A pump lease is ``request_timeout_s`` plus this (``requests.claim``); a transient-error retry renews it.
+LEASE_MARGIN_S = 30
 
 
 @dataclass
@@ -93,49 +104,306 @@ def run_one(endpoint_id: int, owner: str, inflight: _Inflight | None = None) -> 
     row = rows[0]
     endpoint = LLMEndpoint.objects.get(pk=endpoint_id)
     rid = str(row.pk)
+    try:
+        limits = stream_limits(row, endpoint)
+    except Exception:  # never lose the claimed row over the limits lookup
+        logger.exception("Stream limits for request %s failed; calling without them", rid)
+        limits = None
+    # The policy's per-call wall clock runs from the row's creation (the gateway's call), across its
+    # queue time and every attempt; once it is spent the gateway has given up, so neither call nor requeue.
+    call_deadline = None
+    if limits is not None and limits.call_wall_left_s is not None:
+        call_deadline = time.monotonic() + limits.call_wall_left_s
+        if limits.call_wall_left_s < MIN_CALL_WALL_S:
+            llm_requests.complete(
+                row.pk,
+                row.claim_token,
+                pump_owner=owner,
+                ok=False,
+                error_kind="timeout",
+                error_message="the per-call wall clock was spent in the queue and earlier attempts",
+                requeue=False,
+            )
+            close_db()
+            return True
     close_db()
 
     def on_socket(sock):
         if inflight is not None:
             inflight.set(rid, sock)
 
+    # C1: OpenCode Go's transient ``[server_error]`` is re-submitted here, at most
+    # ``upstream.OPENCODE_TRANSIENT_RETRIES`` times. The proxy forwards nothing to the gateway before the row
+    # is complete, so a re-submission can never duplicate output the harness has already seen.
+    retries: list[dict] = []
+    reason: str | None = None
+    # Retries of an earlier attempt of this row that ended in a timeout / connect error and was requeued.
+    prior = _prior_retries(row)
     try:
-        resp = upstream.call(
-            endpoint.base_url,
-            row.method,
-            row.path,
-            row.body,
-            timeout=float(endpoint.request_timeout_s),
-            api_key=_api_key(endpoint),
-            on_socket=on_socket,
-        )
+        while True:
+            resp = upstream.call(
+                endpoint.base_url,
+                row.method,
+                row.path,
+                row.body,
+                timeout=float(endpoint.request_timeout_s),
+                api_key=_api_key(endpoint),
+                on_socket=on_socket,
+                stream_limits=limits,
+            )
+            reason = upstream.transient_reason(endpoint.base_url, resp)
+            if reason is None or not _may_retry_transient(row, endpoint, len(retries), call_deadline):
+                break
+            backoff = upstream.OPENCODE_RETRY_BACKOFF_S[min(len(retries), len(upstream.OPENCODE_RETRY_BACKOFF_S) - 1)]
+            retries.append({"status": resp.status, "error": _short_error(resp)})
+            logger.warning(
+                "Request %s on %s: transient upstream error (%s, status %s); retry %d in %.0fs",
+                rid,
+                endpoint.slug,
+                reason,
+                resp.status,
+                len(retries),
+                backoff,
+            )
+            time.sleep(backoff)
+            limits = _refreshed_limits(row, endpoint, limits)
+            close_db()
     except upstream.UpstreamError as exc:
         cancelled = LLMRequest.objects.filter(pk=row.pk, status=LLMRequest.Status.CANCELLED).exists()
-        llm_requests.complete(
+        requeue = call_deadline is None or time.monotonic() + MIN_CALL_WALL_S < call_deadline
+        message = str(exc) if requeue else f"{exc} (per-call wall clock spent; not retried)"
+        if retries:
+            message = f"{message} (after {len(retries)} transient-error retries)"
+        outcome = llm_requests.complete(
             row.pk,
             row.claim_token,
             pump_owner=owner,
             ok=False,
             status_code=exc.status,
             error_kind="cancelled" if cancelled else exc.kind,
-            error_message=str(exc),
+            error_message=message,
+            requeue=requeue,
         )
+        if (retries or prior) and outcome.accepted:
+            final = {"status": exc.status, "error": f"{exc.kind}: {exc}"[:500]}
+            _keep_retries(row.pk, _retries_info(retries, exhausted=False, final=final, prior=prior))
     else:
-        ok = 200 <= resp.status < 300
+        status, payload, text = resp.status, resp.payload, resp.text
+        if reason is not None:
+            # Still transient after the retries: a 502, so the proxy answers 503 and the gateway's own retry
+            # (``retry_on`` 5xx) re-submits it; the original status and text stay in the error.
+            status, payload, text = 502, _transient_payload(resp, retries, prior), _short_error(resp)
+        elif (retries or prior) and isinstance(payload, dict):
+            payload = {**payload, RETRIES_KEY: _retries_info(retries, exhausted=False, prior=prior)}
+        ok = 200 <= status < 300
         llm_requests.complete(
             row.pk,
             row.claim_token,
             pump_owner=owner,
-            ok=ok and resp.payload is not None,
-            status_code=resp.status,
-            payload=resp.payload if resp.payload is not None else {"error": {"message": resp.text}},
-            error_kind="" if ok and resp.payload is not None else ("http" if not ok else "bad_json"),
-            error_message="" if ok else resp.text,
+            ok=ok and payload is not None,
+            status_code=status,
+            payload=payload if payload is not None else {"error": {"message": text}},
+            error_kind="" if ok and payload is not None else ("http" if not ok else "bad_json"),
+            error_message="" if ok else text,
             upstream_ms=resp.elapsed_ms,
         )
     finally:
         close_db()
     return True
+
+
+# The key a retried request's stored answer carries (``{count, reason, attempts, exhausted}``); read by
+# ``proxy_server`` and ``services.call_telemetry.local_from_llm_request``.
+RETRIES_KEY = "llmlab_upstream_retries"
+
+
+def _may_retry_transient(
+    row: LLMRequest,
+    endpoint: LLMEndpoint,
+    done: int,
+    call_deadline: float | None,
+) -> bool:
+    """Another transient-error retry is allowed: under the bound, time left on the call and on the row's
+    ``deadline_at``, and the row still leased to this claim (not cancelled, not requeued by the reconciler).
+
+    The lease is renewed for the retry (``request_timeout_s + 30`` from now, as at the claim), so a retry of a
+    call without a per-call wall clock (``probe`` / ``analysis``) can never outlast its lease and be run a
+    second time by another pump.
+    """
+    from backend.inference import upstream
+
+    if done >= upstream.OPENCODE_TRANSIENT_RETRIES:
+        return False
+    backoff = upstream.OPENCODE_RETRY_BACKOFF_S[min(done, len(upstream.OPENCODE_RETRY_BACKOFF_S) - 1)]
+    if call_deadline is not None and time.monotonic() + backoff + MIN_CALL_WALL_S >= call_deadline:
+        return False
+    now = timezone.now()
+    if row.deadline_at is not None and (row.deadline_at - now).total_seconds() <= backoff + MIN_CALL_WALL_S:
+        return False
+    lease_until = now + timedelta(seconds=backoff + int(endpoint.request_timeout_s) + LEASE_MARGIN_S)
+    try:
+        renewed = LLMRequest.objects.filter(
+            pk=row.pk,
+            status=LLMRequest.Status.LEASED,
+            claim_token=row.claim_token,
+        ).update(lease_expires_at=lease_until)
+    finally:
+        close_db()
+    return renewed == 1
+
+
+def _prior_retries(row: LLMRequest) -> dict | None:
+    """The transient retries an earlier, requeued attempt of ``row`` recorded (see :func:`_keep_retries`)."""
+    response = row.response if isinstance(row.response, dict) else None
+    info = response.get(RETRIES_KEY) if response else None
+    return info if isinstance(info, dict) else None
+
+
+def _keep_retries(rid, info: dict) -> None:
+    """Record the retries of an attempt that ended in a timeout / connect error on the row: a failed row
+    keeps them for the telemetry; a requeued one carries them to its next attempt (whose answer replaces it)."""
+    LLMRequest.objects.filter(
+        pk=rid,
+        status__in=(LLMRequest.Status.QUEUED, LLMRequest.Status.FAILED),
+    ).update(response={RETRIES_KEY: info})
+
+
+def _refreshed_limits(row: LLMRequest, endpoint: LLMEndpoint, limits):
+    """The row's stream limits again (its wall clock shrinks with the row's age); the old ones on failure."""
+    if limits is None:
+        return None
+    try:
+        return stream_limits(row, endpoint) or limits
+    except Exception:  # keep the limits the first call used
+        logger.exception("Stream limits for request %s failed on retry; keeping the first ones", row.pk)
+        return limits
+
+
+def _short_error(resp) -> str:
+    from backend.inference.upstream import error_text
+
+    return (error_text(resp.payload) or resp.text or "")[:500]
+
+
+def _retries_info(
+    retries: list[dict],
+    *,
+    exhausted: bool,
+    final: dict | None = None,
+    prior: dict | None = None,
+) -> dict:
+    """``count`` is the number of re-submissions; ``attempts`` lists every failed answer (the last one too).
+
+    ``prior``: what earlier, requeued attempts of the same row recorded (added to both).
+    """
+    from backend.inference import upstream
+
+    before = prior or {}
+    earlier = [a for a in before.get("attempts") or [] if isinstance(a, dict)]
+    count = before.get("count")
+    return {
+        "count": (count if isinstance(count, int) and not isinstance(count, bool) else 0) + len(retries),
+        "reason": upstream.TRANSIENT_REASON,
+        "attempts": [*earlier, *retries, final] if final else [*earlier, *retries],
+        "exhausted": exhausted,
+    }
+
+
+def _transient_payload(resp, retries: list[dict], prior: dict | None = None) -> dict:
+    """The stored answer of a call still failing transiently after its retries (status 502)."""
+    original = resp.payload.get("error") if isinstance(resp.payload, dict) else None
+    message = original.get("message") if isinstance(original, dict) else original
+    message = str(message or resp.text or "upstream error")[:1000]
+    return {
+        "error": {
+            "message": (
+                f"{message} (transient upstream error: answered {resp.status}, still failing after "
+                f"{len(retries)} retries)"
+            ),
+            "code": "upstream_transient",
+            "upstream_status": resp.status,
+        },
+        RETRIES_KEY: _retries_info(
+            retries,
+            exhausted=True,
+            final={"status": resp.status, "error": _short_error(resp)},
+            prior=prior,
+        ),
+    }
+
+
+def _positive_int(value) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _policy_content(job_id) -> dict:
+    """The run's frozen effective ``ResourcePolicyContent`` (``{}`` without a run or manifest)."""
+    if job_id is None:
+        return {}
+    from backend.generation.models import RunManifest
+    from backend.inference.proxy_server import _effective_content
+
+    manifest = RunManifest._base_manager.filter(run_id=job_id).values_list("manifest", flat=True).first()  # noqa: SLF001
+    return _effective_content(manifest) if isinstance(manifest, dict) else {}
+
+
+def stream_limits(row: LLMRequest, endpoint: LLMEndpoint):
+    """The per-call limits a run's non-stream OpenAI chat call is streamed under (E2E-17), else None.
+
+    Agent-proxy and slot calls only (the sandbox path and single-shot slot calls). The output cap is
+    the body's policy-pinned ``max_tokens`` (``call.max_output_tokens`` plus the reasoning budget),
+    else the same sum from the manifest; the wall clock is the policy's ``time.llm_call_timeout_s``
+    less :data:`CUT_MARGIN_S` (so the cut answer reaches the run's gateway before its own per-call
+    timeout fires), anchored at the row's ``created_at`` (time spent queued and in earlier attempts
+    is already gone; E2E-20), never above the endpoint's ``request_timeout_s``.
+    """
+    from backend.inference import upstream
+    from backend.inference.chat import OPENAI_CHAT_PATH
+    from backend.inference.proxy_server import budget_rules
+
+    body = row.body
+    if (
+        row.source not in STREAMED_SOURCES
+        or str(row.method).upper() != "POST"
+        or row.path not in (OPENAI_CHAT_PATH, upstream.MESSAGES_PATH)
+        or not isinstance(body, dict)
+        # A native Anthropic body always says ``stream: true`` (the pump always streams it).
+        or (row.path == OPENAI_CHAT_PATH and body.get("stream"))
+    ):
+        return None
+    content = _policy_content(row.job_id)
+    call = content.get("call") or {}
+    reasoning = content.get("reasoning") or {}
+    cap = _positive_int(body.get("max_tokens"))
+    if cap is None and _positive_int(call.get("max_output_tokens")):
+        extra = _positive_int(reasoning.get("max_tokens")) if reasoning.get("mode") == "max_tokens" else None
+        cap = int(call["max_output_tokens"]) + (extra or 0)
+    wall = float(endpoint.request_timeout_s)
+    left = None
+    policy_wall = _positive_int((content.get("time") or {}).get("llm_call_timeout_s"))
+    if policy_wall:
+        left = policy_wall - min(CUT_MARGIN_S, policy_wall * 0.1) - _age_s(row)
+        wall = max(0.0, min(wall, left))
+    rules = budget_rules()
+    prompt = rules.estimate_tokens(rules.prompt_text(body))
+    return upstream.StreamLimits(
+        max_output_tokens=cap,
+        wall_clock_s=wall,
+        prompt_tokens_estimate=prompt,
+        call_wall_left_s=left,
+    )
+
+
+def _age_s(row: LLMRequest) -> float:
+    """Seconds since the row was created (its queue time plus earlier attempts); 0 when unknown."""
+    created = getattr(row, "created_at", None)
+    if not isinstance(created, datetime):
+        return 0.0
+    return max(0.0, (timezone.now() - created).total_seconds())
 
 
 def refresh_inventory(endpoint: LLMEndpoint) -> None:
@@ -173,12 +441,19 @@ def refresh_inventory(endpoint: LLMEndpoint) -> None:
                 apply_inventory(endpoint, None, payload)
         else:
             data = (get("/v1/models") or {}).get("data") or []
+            # vLLM reports ``max_model_len``; Anthropic's native /v1/models reports ``max_input_tokens``.
+            anthropic = endpoint.api_flavor == LLMEndpoint.ApiFlavor.ANTHROPIC
+            context_key = "max_input_tokens" if anthropic else "max_model_len"
             models = [
-                {"name": str(m.get("id")), "context_length": m.get("max_model_len")}
+                {"name": str(m.get("id")), "context_length": m.get(context_key)}
                 for m in data
                 if isinstance(m, dict) and m.get("id")
             ]
             apply_inventory(endpoint, None, {"models": models})
+            if anthropic:
+                from backend.inference.anthropic_prices import price_endpoint
+
+                price_endpoint(endpoint)
         LLMEndpoint.objects.filter(pk=endpoint.pk).update(last_error="")
     except Exception as exc:  # noqa: BLE001 — any failure is recorded as the endpoint's last_error
         logger.warning("Inventory of direct endpoint %s failed: %s", endpoint.slug, exc)

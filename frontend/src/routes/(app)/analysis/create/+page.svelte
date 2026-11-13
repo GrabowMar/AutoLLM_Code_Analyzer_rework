@@ -1,11 +1,11 @@
 <script lang="ts">
 	/**
-	 * New analysis: pick generated apps (one run each, queued as a batch) or
+	 * New analysis: pick generated apps (one analysis each, launched together) or
 	 * paste files, pick workspace tools, optionally name it, and start. A free
 	 * preview says, per tool, where it would actually run (files it reads, app
 	 * container running for dynamic tools) before anything is created.
 	 *
-	 * URL: `?generation_job_id=<id>` / repeated `?job=<id>` preselect apps,
+	 * URL: `?generation_job_id=<run id>` / repeated `?run=<run id>` preselect apps (GenerationRun ids),
 	 * `?tools=a,b` preselects tools. The last tool selection is remembered.
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
@@ -27,13 +27,13 @@
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-	import ComposerSection from '$lib/components/generator/composer/ComposerSection.svelte';
-	import RunFormula, { type RunFactor } from '$lib/components/generator/composer/RunFormula.svelte';
-	import StartBar from '$lib/components/generator/composer/StartBar.svelte';
-	import ComposerSectionNav, { type ComposerNavSection } from '$lib/components/experiments/ComposerSectionNav.svelte';
+	import ComposerSection from '$lib/components/studies/builder/ComposerSection.svelte';
+	import RunFormula, { type RunFactor } from '$lib/components/studies/builder/RunFormula.svelte';
+	import StartBar from '$lib/components/studies/builder/StartBar.svelte';
+	import ComposerSectionNav, { type ComposerNavSection } from '$lib/components/studies/builder/ComposerSectionNav.svelte';
 	import { formatApiError, isAbortError } from '$lib/api/core';
 	import type { AnalyzerTool } from '$lib/api/analyzers';
-	import { getGenerationJob } from '$lib/api/generation';
+	import { getSample } from '$lib/api/v3/samples';
 	import { createBatch, createRun, previewRuns, type RunPreview } from '$lib/api/runs';
 	import AppPicker, { MAX_APPS, toPicked, type PickedApp } from '$lib/components/analysis/AppPicker.svelte';
 	import ToolPicker from '$lib/components/analysis/ToolPicker.svelte';
@@ -132,9 +132,9 @@
 	// ── preselected apps ──────────────────────────────────────────────
 	async function preselect() {
 		const params = page.url.searchParams;
-		const ids = [...new Set([...params.getAll('job'), ...params.getAll('generation_job_id')])].filter(Boolean).slice(0, MAX_APPS);
+		const ids = [...new Set([...params.getAll('run'), ...params.getAll('generation_job_id')])].filter(Boolean).slice(0, MAX_APPS);
 		if (ids.length === 0) return;
-		const found = await Promise.allSettled(ids.map((id) => getGenerationJob(id)));
+		const found = await Promise.allSettled(ids.map((id) => getSample(id)));
 		const picked = found.flatMap((r) => (r.status === 'fulfilled' ? [toPicked(r.value)] : []));
 		apps = picked;
 		const missing = found.length - picked.length;
@@ -233,7 +233,7 @@
 			if (mode === 'apps' && apps.length > 1) {
 				const res = await createBatch({ name: name.trim() || undefined, tool_slugs: selectedUsable, generation_job_ids: apps.map((a) => a.id) });
 				toast.success(`${res.run_ids.length} analyses queued`);
-				await goto(`/analysis?batch=${res.batch_id}`);
+				await goto(`/analysis?launch=${res.launch_id}`);
 			} else {
 				const run = await createRun({
 					name: name.trim() || undefined,

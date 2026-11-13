@@ -9,10 +9,14 @@ caller's participant (404 otherwise); mutations of read-only assignments answer
 409 ``read_only``. Services raise ``HumanEvalServiceError`` (rendered as
 ``{detail, code, errors}``) and keep refused mutations from leaving rows behind.
 
-Participants never receive model names/ids, condition labels, job ids,
-experiment ids, task-app ids or container details: payloads are built from the
+Participants never receive model names/ids, condition labels, run ids,
+study ids, task-app ids or container details: payloads are built from the
 blinded label, the display slot, ``hosting.participant_hosting_info`` and the
 frozen context (hosting provenance withheld, see ``context.portal_context``).
+The admin login shown with ``blinding.show_admin_credentials`` is the app's real
+one from its runtime credentials record (``services.credentials``), and only when
+the hosted container the participant tests was started with that record; otherwise
+it is withheld as ``not_measured``, never replaced by a default.
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from backend.human_eval.api.schemas.portal_work import WorkSubmitResult
 from backend.human_eval.api.views._routers import portal_router
 from backend.human_eval.services import access
 from backend.human_eval.services import context as context_service
+from backend.human_eval.services import credentials as credentials_service
 from backend.human_eval.services import design as design_service
 from backend.human_eval.services import observations as observation_service
 from backend.human_eval.services import responses as response_service
@@ -60,12 +65,15 @@ __all__ = ["portal_router"]
 # ---------------------------------------------------------------------------
 
 
-def _jobs(assignment: Assignment) -> dict[Any, Any]:
-    """The assignment's jobs by id, without the (possibly multi-MB) code until the source viewer needs it."""
-    from backend.generation.models import GenerationJob
+def _runs(assignment: Assignment) -> dict[Any, Any]:
+    """The assignment's GenerationRuns by id (their code is read only by the source viewer)."""
+    from backend.generation.models import GenerationRun
 
-    job_ids = [app.job_id for _, app in context_service.slot_apps(assignment) if app.job_id is not None]
-    return {job.pk: job for job in GenerationJob.objects.filter(pk__in=job_ids).defer("result_data", "metrics")}
+    run_ids = [app.job_id for _, app in context_service.slot_apps(assignment) if app.job_id is not None]
+    return {
+        run.pk: run
+        for run in GenerationRun.objects.filter(pk__in=run_ids).select_related("task_version__task", "manifest")
+    }
 
 
 def _portal_app(
@@ -73,23 +81,25 @@ def _portal_app(
     slot: str,
     task_app: Any,
     settings: dict[str, Any],
-    jobs: dict[Any, Any],
+    runs: dict[Any, Any],
 ) -> dict[str, Any]:
-    from backend.generation.services.evaluation.contract import ADMIN_PW_DEFAULT
-    from backend.generation.services.evaluation.contract import ADMIN_USERNAME
     from backend.human_eval.services import hosting
 
     blinding = settings["blinding"]
-    job = jobs.get(task_app.job_id)
-    credentials = {"username": ADMIN_USERNAME, "password": ADMIN_PW_DEFAULT}
+    run = runs.get(task_app.job_id)
+    credentials, credentials_status = None, None
+    if blinding.get("show_admin_credentials"):
+        container = hosting.current_container(task_app)
+        credentials, credentials_status = credentials_service.admin_credentials(run, container)
     return {
         "slot": slot,
         "label": task_app.label,
         "hosting": hosting.participant_hosting_info(task_app, assignment=assignment),
-        # The spec frozen at first task open: the one the requirement items were derived from.
-        "spec": context_service.app_spec_view(task_app, job) if blinding.get("show_spec") else None,
-        "admin_credentials": credentials if blinding.get("show_admin_credentials") else None,
-        "has_source": bool(blinding.get("show_source_code")) and source_service.has_source(job),
+        # The task frozen at first task open: the one the requirement items were derived from.
+        "spec": context_service.app_spec_view(task_app, run) if blinding.get("show_spec") else None,
+        "admin_credentials": credentials,
+        "admin_credentials_status": credentials_status,
+        "has_source": bool(blinding.get("show_source_code")) and source_service.has_source(run),
     }
 
 
@@ -98,8 +108,8 @@ def assignment_payload(assignment: Assignment) -> dict[str, Any]:
     task = assignment.task
     design = task.design or {}
     settings = design_service.merged_settings(task.settings)
-    jobs = _jobs(assignment)
-    apps = [_portal_app(assignment, slot, app, settings, jobs) for slot, app in context_service.slot_apps(assignment)]
+    runs = _runs(assignment)
+    apps = [_portal_app(assignment, slot, app, settings, runs) for slot, app in context_service.slot_apps(assignment)]
     return {
         "id": str(assignment.id),
         "task": {"id": str(task.id), "title": task.title, "mode": task.mode, "instructions": task.instructions},
@@ -279,7 +289,7 @@ def put_finding_verdict(
 # ---------------------------------------------------------------------------
 
 
-def _source_job(request, assignment_id: uuid.UUID, slot: str) -> Any:
+def _source_run(request, assignment_id: uuid.UUID, slot: str) -> Any:
     assignment = access.portal_assignment(request, assignment_id)
     settings = design_service.merged_settings(assignment.task.settings)
     if not settings["blinding"].get("show_source_code"):
@@ -294,7 +304,7 @@ def _source_job(request, assignment_id: uuid.UUID, slot: str) -> Any:
     summary="The file tree of an app's generated code",
 )
 def get_source_tree(request, assignment_id: uuid.UUID, slot: str = ""):
-    return Status(200, source_service.source_tree(_source_job(request, assignment_id, slot)))
+    return Status(200, source_service.source_tree(_source_run(request, assignment_id, slot)))
 
 
 @portal_router.get(
@@ -303,4 +313,4 @@ def get_source_tree(request, assignment_id: uuid.UUID, slot: str = ""):
     summary="One file of an app's generated code (capped at 512 KB)",
 )
 def get_source_file(request, assignment_id: uuid.UUID, slot: str = "", path: str = ""):
-    return Status(200, source_service.source_file(_source_job(request, assignment_id, slot), path))
+    return Status(200, source_service.source_file(_source_run(request, assignment_id, slot), path))

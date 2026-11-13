@@ -35,19 +35,36 @@ if [ -n "${LLM_PROXY_ADDR:-}" ] && [ -n "${LLM_GATEWAY_EGRESS_SUBNET:-}" ]; then
 	iptables -A INPUT -i docker0 -d "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}" -j REJECT
 	iptables -A INPUT -i llmlab-gwegr -d "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}" -j REJECT
 fi
+# Dependency caches (WP-05, docs/STACKS.md): only sandbox gateways (llmlab-gw-egress) may reach the read-only
+# caches on the internal depcache network, on their four service ports; agents reach them through their
+# gateway's forward proxy (proxy_hosts), never directly. Everything else bound for that network is refused
+# (a separate interface: the uplink REJECTs below would not cover it), apps-dind's own address included.
+if [ -n "${DEPCACHE_SUBNET:-}" ] && [ -n "${LLM_GATEWAY_EGRESS_SUBNET:-}" ]; then
+	iptables -A DOCKER-USER -i llmlab-gwegr -s "$LLM_GATEWAY_EGRESS_SUBNET" -d "$DEPCACHE_SUBNET" -p tcp -m multiport --dports 4873,3141,3000,8080 -j RETURN
+	iptables -A DOCKER-USER -d "$DEPCACHE_SUBNET" -j REJECT --reject-with icmp-net-prohibited
+	for iface in br+ docker0 llmlab-gwegr; do
+		iptables -A INPUT -i "$iface" -d "$DEPCACHE_SUBNET" -j REJECT
+	done
+fi
 for cidr in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16; do
 	iptables -A DOCKER-USER -o "$uplink" -d "$cidr" -j REJECT --reject-with icmp-net-prohibited
 done
 iptables -A DOCKER-USER -j RETURN
 echo "apps-dind: nested containers blocked from private ranges via $uplink"
 
-# Hourly: drop images no container uses that are over a week old (removed
-# apps; base images are rebuilt on demand). Build cache is capped by
-# daemon.json's builder GC.
-(
-	while sleep 3600; do
-		docker image prune --all --force --filter until=168h >/dev/null
-	done
-) &
+# Opt-in (APPS_DIND_IMAGE_PRUNE=1): hourly, drop images no container uses that
+# are over a week old. Off by default: evaluation suites and stack bases pin
+# images by digest (eval-tester, adherence-checker, node/python bases), no
+# container holds them between runs, and a pruned one fails every later
+# evaluation with image_digest_mismatch (12 runs on 2026-11-10). Build cache is
+# capped by daemon.json's builder GC; sample artifacts have reference-aware
+# TTL/size GC in the executor.
+if [ "${APPS_DIND_IMAGE_PRUNE:-0}" = "1" ]; then
+	(
+		while sleep 3600; do
+			docker image prune --all --force --filter until=168h --filter 'label!=llmlab.sample_image=true' >/dev/null
+		done
+	) &
+fi
 
 wait "$dockerd_pid"

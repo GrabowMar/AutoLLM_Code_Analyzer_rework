@@ -5,7 +5,7 @@
 	 * Props: `id`, `block` (bindable), `mode` (pairwise counts per app),
 	 * `errors` (relative to the block), `readOnly`.
 	 */
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import type { BugsBlock, TaskMode } from '$lib/api/types/human-eval';
 	import { messageAt, messagesAt, type FieldError } from './errors';
 

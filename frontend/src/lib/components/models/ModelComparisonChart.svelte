@@ -15,6 +15,10 @@
 
 	let { provider, slug, relatedModels }: Props = $props();
 
+	const PREVIEW = 5;
+	let showAll = $state(false);
+	const shown = $derived(showAll ? relatedModels : relatedModels.slice(0, PREVIEW));
+
 	const compareHref = $derived(`/models/compare?models=${[slug, ...relatedModels.slice(0, 3).map((m) => m.canonical_slug)].join(',')}`);
 </script>
 
@@ -39,7 +43,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each relatedModels as m (m.id)}
+						{#each shown as m (m.id)}
 							{@const href = `/models/${m.canonical_slug}`}
 							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
 							<tr class="row-link" onclick={rowLink(href)}>
@@ -57,6 +61,16 @@
 					</tbody>
 				</table>
 			</div>
+			{#if relatedModels.length > PREVIEW}
+				<button
+					type="button"
+					class="w-full cursor-pointer border-t border-border py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+					aria-expanded={showAll}
+					onclick={() => (showAll = !showAll)}
+				>
+					{showAll ? 'Show fewer' : `Show all ${relatedModels.length}`}
+				</button>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 {/if}

@@ -1,0 +1,24 @@
+schema: 1
+notes: |
+  One entry (core round 3). The generic compiler v2 plan needs no other fixture for this task (date ->
+  {future_date}, per-context e-mail; all inside the limits of the exhaustive prose).
+
+  samples.time = "19:00"
+    task.yaml reservations.create request_schema: `time` {type: string, minLength 1, maxLength 5}; exhaustive
+    prose: "`time` required, a time `HH:MM` (24-hour)". No prose variant states opening hours. The task is a
+    restaurant ("Build a restaurant reservation app", first sentence of every variant) and its own hand-written
+    check `reservations.capacity.enforced` (task.yaml, frozen) books the slot "19:00". The generic sampler sends
+    `{time_hhmm}`, a half-hour slot between 09:00 and 16:00: valid under the schema, but an implementation that
+    only offers evening sittings is a reasonable reading of "restaurant" and would refuse a morning slot. "19:00"
+    is the one time of day the task itself uses as a valid time, so it is valid for every implementation the
+    task's own acceptance check can pass on (P2). Expectations unchanged.
+    The value is constant on purpose: `time` is not unique, and no two contexts share a slot because every
+    context (and every `fresh` setup step) has its own `{future_date}` (GENERATORS.md: the tester never hands
+    the same future date to two contexts of a run), so the capacity rule (20 seats per date + time) is not
+    touched by the compiled creates (party_size 1).
+
+  Removed in core round 3 (now a compiler rule for every task, acceptance.py `_default_query`):
+  `endpoints.availability.get.query.date`. A query parameter whose default only some prose variants state is
+  sent explicitly by every compiled request; `GET /api/availability` now carries `date: {future_date}`.
+samples:
+  time: "19:00"

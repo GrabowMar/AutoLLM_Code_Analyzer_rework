@@ -1,0 +1,266 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Quiz app
+summary: Take short random multiple-choice quizzes, review the answers and keep a history of attempts.
+category: education
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Question
+  fields:
+  - {name: text, type: string, required: true, max_length: 500}
+  - {name: option_a, type: string, required: true, max_length: 200}
+  - {name: option_b, type: string, required: true, max_length: 200}
+  - {name: option_c, type: string, required: true, max_length: 200}
+  - {name: option_d, type: string, required: true, max_length: 200}
+  - name: correct_option
+    type: enum
+    required: true
+    enum: [A, B, C, D]
+- name: Attempt
+  fields:
+  - {name: score, type: int, min: 0, max: 100}
+  - {name: correct, type: int}
+  - {name: total_questions, type: int}
+  - {name: submitted_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: quiz.draw
+  method: GET
+  path: /api/quiz
+  auth: public
+  query:
+  - {name: count, type: int, semantics: page_size, default: 5, max: 10}
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            id: [integer, string]
+            text: {type: string}
+            option_a: {type: string}
+            option_b: {type: string}
+            option_c: {type: string}
+            option_d: {type: string}
+          required: [id, text, option_a, option_b, option_c, option_d]
+  errors: [400]
+- id: attempts.submit
+  method: POST
+  path: /api/attempts
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      answers:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          required: [question_id, selected]
+          properties:
+            question_id:
+              type: [integer, string]
+            selected:
+              type: string
+              enum: [A, B, C, D]
+    required: [answers]
+  response_schema:
+    type: object
+    properties:
+      id: [integer, string, 'null']
+      score: {type: integer}
+      correct: {type: integer}
+      total_questions: {type: integer}
+      answers: {type: array}
+    required: [id, score, correct, total_questions, answers]
+  errors: [400]
+- id: attempts.list
+  method: GET
+  path: /api/attempts
+  auth: user
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, answers]
+          properties:
+            id:
+              type: [integer, string]
+            score:
+              type: [integer, 'null']
+              minimum: 0
+              maximum: 100
+            correct:
+              type: [integer, 'null']
+            total_questions:
+              type: [integer, 'null']
+            submitted_at:
+              type: [string, 'null']
+              format: date-time
+            answers: {type: array}
+- id: attempts.get
+  method: GET
+  path: /api/attempts/{id}
+  auth: owner
+  owner_entity: Attempt
+  response_schema:
+    type: object
+    required: [id, answers]
+    properties:
+      id:
+        type: [integer, string]
+      score:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 100
+      correct:
+        type: [integer, 'null']
+      total_questions:
+        type: [integer, 'null']
+      submitted_at:
+        type: [string, 'null']
+        format: date-time
+      answers: {type: array}
+  errors: [404]
+- id: admin.questions.create
+  method: POST
+  path: /api/admin/questions
+  auth: admin
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      text: {type: string, maxLength: 500, minLength: 1}
+      option_a: {type: string, maxLength: 200, minLength: 1}
+      option_b: {type: string, maxLength: 200, minLength: 1}
+      option_c: {type: string, maxLength: 200, minLength: 1}
+      option_d: {type: string, maxLength: 200, minLength: 1}
+      correct_option:
+        type: string
+        enum: [A, B, C, D]
+    required: [text, option_a, option_b, option_c, option_d, correct_option]
+  response_schema:
+    type: object
+    required: [id, text, option_a, option_b, option_c, option_d, correct_option]
+    properties:
+      id:
+        type: [integer, string]
+      text: {type: string, maxLength: 500, minLength: 1}
+      option_a: {type: string, maxLength: 200, minLength: 1}
+      option_b: {type: string, maxLength: 200, minLength: 1}
+      option_c: {type: string, maxLength: 200, minLength: 1}
+      option_d: {type: string, maxLength: 200, minLength: 1}
+      correct_option:
+        type: string
+        enum: [A, B, C, D]
+  errors: [400]
+- id: admin.questions.list
+  method: GET
+  path: /api/admin/questions
+  auth: admin
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, text, option_a, option_b, option_c, option_d, correct_option]
+          properties:
+            id:
+              type: [integer, string]
+            text: {type: string, maxLength: 500, minLength: 1}
+            option_a: {type: string, maxLength: 200, minLength: 1}
+            option_b: {type: string, maxLength: 200, minLength: 1}
+            option_c: {type: string, maxLength: 200, minLength: 1}
+            option_d: {type: string, maxLength: 200, minLength: 1}
+            correct_option:
+              type: string
+              enum: [A, B, C, D]
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.quiz
+  text: One question at a time with its options as radio buttons, a progress indicator ('Question 2 of 5'), 'Next'
+    and, on the last question, 'Submit'.
+  endpoints: [quiz.draw, attempts.submit]
+- id: ui.result
+  text: A result view with the score, the number correct and every question with the chosen and the correct option
+    marked; visitors see a 'Sign in to save your results' prompt.
+  endpoints: [attempts.submit]
+- id: ui.history
+  text: 'For signed-in users: the saved attempts (date, score, number of questions); opening one shows its review.'
+  endpoints: [attempts.list, attempts.get]
+- id: ui.admin
+  text: 'For the admin: an ''Add question'' form showing the API''s validation messages and the question list.'
+  endpoints: [admin.questions.create, admin.questions.list]
+features: [auth, ownership, admin]
+surfaces: [cwe-200, cwe-639, cwe-862, cwe-20, cwe-840, cwe-798]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: quiz.draw.hides_answer
+  category: functional
+  endpoint: quiz.draw
+  request:
+    method: GET
+    path: /api/quiz
+    query: {count: 3}
+  expect:
+    status: 200
+    json_schema:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            not:
+              required: [correct_option]
+  stated_in: [standard, exhaustive]
+probes:
+- {id: probe.attempts.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: attempts.get}
+- {id: probe.quiz.default_admin, cwe: cwe-798, kind: default_credential}

@@ -11,7 +11,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import type { Scale } from '$lib/api/types/human-eval';
 	import { messageAt, messagesUnder, type FieldError } from './errors';
 	import { SCALE_PRESETS, cloneScale, labelsForGrid, rememberLabels, scaleIssues, scaleStep, scaleValues } from './scale';

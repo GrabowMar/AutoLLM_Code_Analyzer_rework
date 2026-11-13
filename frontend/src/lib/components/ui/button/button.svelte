@@ -44,6 +44,7 @@
 {#if href}
 	<a
 		{href}
+		data-slot="button"
 		class={cn(baseClasses, variantClasses[variant], sizeClasses[size], className)}
 		{...restProps}
 	>
@@ -51,6 +52,7 @@
 	</a>
 {:else}
 	<button
+		data-slot="button"
 		class={cn(baseClasses, variantClasses[variant], sizeClasses[size], className)}
 		{...restProps}
 	>

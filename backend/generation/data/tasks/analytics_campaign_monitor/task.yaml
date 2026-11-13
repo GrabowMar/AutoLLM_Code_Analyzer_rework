@@ -1,0 +1,358 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Campaign monitor
+summary: Track marketing campaigns, their daily performance and budget pacing.
+category: analytics
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Campaign
+  fields:
+  - {name: name, type: string, required: true, max_length: 120}
+  - name: channel
+    type: enum
+    required: true
+    enum: [search, social, email, video]
+  - name: status
+    type: enum
+    enum: [draft, active, paused, completed]
+    default: draft
+  - {name: daily_budget, type: float, required: true, min: 0.01, max: 1000000}
+  - {name: launch_at, type: datetime, required: true}
+  - {name: end_at, type: datetime}
+  - {name: notes, type: text, max_length: 2000}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+- name: PerformanceSnapshot
+  fields:
+  - {name: campaign_id, type: ref, ref: Campaign}
+  - {name: date, type: date, required: true}
+  - {name: impressions, type: int, required: true, min: 0}
+  - {name: clicks, type: int, required: true, min: 0}
+  - {name: conversions, type: int, required: true, min: 0}
+  - {name: spend, type: float, required: true, min: 0}
+  - {name: revenue, type: float, required: true, min: 0}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: campaigns.list
+  method: GET
+  path: /api/campaigns
+  auth: public
+  query:
+  - {name: q, type: string, semantics: search}
+  - name: status
+    type: enum
+    semantics: filter
+    enum: [draft, active, paused, completed]
+  - name: channel
+    type: enum
+    semantics: filter
+    enum: [search, social, email, video]
+  - name: sort
+    type: enum
+    semantics: sort
+    enum: [-created_at, name, launch_at, -spend_to_date]
+    default: -created_at
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, name, channel, daily_budget, launch_at, owner, spend_to_date, conversions, pacing, pacing_status]
+          properties:
+            id:
+              type: [integer, string]
+            name: {type: string, maxLength: 120, minLength: 1}
+            channel:
+              type: string
+              enum: [search, social, email, video]
+            status:
+              type: [string, 'null']
+              enum: [draft, active, paused, completed, null]
+            daily_budget: {type: number, minimum: 0.01, maximum: 1000000}
+            launch_at: {type: string, format: date-time}
+            end_at:
+              type: [string, 'null']
+              format: date-time
+            notes:
+              type: [string, 'null']
+              maxLength: 2000
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            owner: {type: string}
+            spend_to_date: {type: number}
+            conversions: {type: integer}
+            pacing: &id001 [number, 'null']
+            pacing_status: {type: string}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: campaigns.create
+  method: POST
+  path: /api/campaigns
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 120, minLength: 1}
+      channel:
+        type: string
+        enum: [search, social, email, video]
+      daily_budget: {type: number, minimum: 0.01, maximum: 1000000}
+      launch_at: {type: string, format: date-time}
+      end_at:
+        type: [string, 'null']
+        format: date-time
+      notes:
+        type: [string, 'null']
+        maxLength: 2000
+    required: [name, channel, daily_budget, launch_at]
+  response_schema:
+    type: object
+    required: [id, name, channel, daily_budget, launch_at, owner, spend_to_date, conversions, pacing, pacing_status]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 120, minLength: 1}
+      channel:
+        type: string
+        enum: [search, social, email, video]
+      status:
+        type: [string, 'null']
+        enum: [draft, active, paused, completed, null]
+      daily_budget: {type: number, minimum: 0.01, maximum: 1000000}
+      launch_at: {type: string, format: date-time}
+      end_at:
+        type: [string, 'null']
+        format: date-time
+      notes:
+        type: [string, 'null']
+        maxLength: 2000
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      owner: {type: string}
+      spend_to_date: {type: number}
+      conversions: {type: integer}
+      pacing: *id001
+      pacing_status: {type: string}
+  errors: [400]
+- id: campaigns.get
+  method: GET
+  path: /api/campaigns/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, name, channel, daily_budget, launch_at, owner, spend_to_date, conversions, pacing, pacing_status]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 120, minLength: 1}
+      channel:
+        type: string
+        enum: [search, social, email, video]
+      status:
+        type: [string, 'null']
+        enum: [draft, active, paused, completed, null]
+      daily_budget: {type: number, minimum: 0.01, maximum: 1000000}
+      launch_at: {type: string, format: date-time}
+      end_at:
+        type: [string, 'null']
+        format: date-time
+      notes:
+        type: [string, 'null']
+        maxLength: 2000
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      owner: {type: string}
+      spend_to_date: {type: number}
+      conversions: {type: integer}
+      pacing: *id001
+      pacing_status: {type: string}
+  errors: [404]
+- id: campaigns.update
+  method: PATCH
+  path: /api/campaigns/{id}
+  auth: owner
+  owner_entity: Campaign
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, minLength: 1, maxLength: 120}
+      status:
+        type: string
+        enum: [draft, active, paused, completed]
+      daily_budget: {type: number, exclusiveMinimum: 0, maximum: 1000000}
+      end_at:
+        type: [string, 'null']
+      notes:
+        type: [string, 'null']
+        maxLength: 2000
+  response_schema:
+    type: object
+    required: [id, name, channel, daily_budget, launch_at, owner, spend_to_date, conversions, pacing, pacing_status]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 120, minLength: 1}
+      channel:
+        type: string
+        enum: [search, social, email, video]
+      status:
+        type: [string, 'null']
+        enum: [draft, active, paused, completed, null]
+      daily_budget: {type: number, minimum: 0.01, maximum: 1000000}
+      launch_at: {type: string, format: date-time}
+      end_at:
+        type: [string, 'null']
+        format: date-time
+      notes:
+        type: [string, 'null']
+        maxLength: 2000
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      owner: {type: string}
+      spend_to_date: {type: number}
+      conversions: {type: integer}
+      pacing: *id001
+      pacing_status: {type: string}
+  errors: [400, 403, 404, 409]
+- id: performance.list
+  method: GET
+  path: /api/campaigns/{id}/performance
+  auth: public
+  response_schema:
+    type: object
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, date, impressions, clicks, conversions, spend, revenue]
+          properties:
+            id:
+              type: [integer, string]
+            campaign_id:
+              type: [integer, 'null']
+            date: {type: string, format: date}
+            impressions: {type: integer, minimum: 0}
+            clicks: {type: integer, minimum: 0}
+            conversions: {type: integer, minimum: 0}
+            spend: {type: number, minimum: 0}
+            revenue: {type: number, minimum: 0}
+      totals: {type: object}
+      ctr: [number, 'null']
+      conversion_rate: [number, 'null']
+      cost_per_conversion: [number, 'null']
+    required: [items, totals, ctr, conversion_rate, cost_per_conversion]
+  errors: [404]
+- id: performance.record
+  method: POST
+  path: /api/campaigns/{id}/performance
+  auth: owner
+  owner_entity: Campaign
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      date: {type: string, format: date}
+      impressions: {type: integer, minimum: 0}
+      clicks: {type: integer, minimum: 0}
+      conversions: {type: integer, minimum: 0}
+      spend: {type: number, minimum: 0}
+      revenue: {type: number, minimum: 0}
+    required: [date, impressions, clicks, conversions, spend, revenue]
+  response_schema:
+    type: object
+    required: [id, date, impressions, clicks, conversions, spend, revenue]
+    properties:
+      id:
+        type: [integer, string]
+      campaign_id:
+        type: [integer, 'null']
+      date: {type: string, format: date}
+      impressions: {type: integer, minimum: 0}
+      clicks: {type: integer, minimum: 0}
+      conversions: {type: integer, minimum: 0}
+      spend: {type: number, minimum: 0}
+      revenue: {type: number, minimum: 0}
+  errors: [400, 403, 404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.browse
+  text: A campaign table with name, channel, status, owner, daily budget, spend to date and a pacing badge, with
+    a name search, status and channel filters, sort controls and paging.
+  endpoints: [campaigns.list]
+- id: ui.detail
+  text: A campaign page with key figures, a chart of daily spend and conversions and the table of snapshots.
+  endpoints: [campaigns.get, performance.list]
+- id: ui.manage
+  text: 'For the owner: create and edit forms, status buttons offering only the allowed changes, and a form to record
+    a day''s figures, each showing the API''s validation messages.'
+  endpoints: [campaigns.create, campaigns.update, performance.record]
+features: [auth, ownership, search, filter, sort, pagination, money]
+surfaces: [cwe-89, cwe-639, cwe-862, cwe-285, cwe-20, cwe-79, cwe-915, cwe-369]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: campaigns.pacing.computed
+  category: functional
+  endpoint: campaigns.get
+  setup:
+  - request:
+      method: POST
+      path: /api/campaigns
+      json: {name: Spring, channel: email, daily_budget: 100, launch_at: '2026-03-01T00:00:00Z'}
+    expect_status: 201
+    capture: {cid: $.id}
+  - request:
+      method: POST
+      path: /api/campaigns/{cid}/performance
+      json: {date: '2026-03-01', impressions: 1000, clicks: 50, conversions: 5, spend: 150, revenue: 300}
+    expect_status: 201
+  request: {method: GET, path: '/api/campaigns/{cid}'}
+  expect:
+    status: 200
+    json_contains: {spend_to_date: 150, conversions: 5, pacing: 1.5, pacing_status: over}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.campaigns.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: campaigns.list
+  params: {param: q}
+- {id: probe.campaigns.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: campaigns.update}

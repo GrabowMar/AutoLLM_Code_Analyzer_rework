@@ -23,7 +23,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Label } from '$lib/components/ui/label';
 	import { Segmented } from '$lib/components/ui/segmented';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import Lock from '@lucide/svelte/icons/lock';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type {
@@ -237,7 +237,7 @@
 		<Card.Root class="gap-3">
 			<Card.Header>
 				<Card.Title class="flex items-center gap-2">What participants see {@render frozenMark(frozen && !readOnly)}</Card.Title>
-				<Card.Description>Model, condition, job and experiment names are never shown; apps appear as “App 07”.</Card.Description>
+				<Card.Description>Model, condition, experiment and run names are never shown; apps appear as “App 07”.</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-3">
 				<label class="flex items-start gap-2.5 text-sm">

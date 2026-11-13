@@ -10,7 +10,6 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { Button } from '$lib/components/ui/button';
-	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import type { LLMModelDetail, LLMModelSummary, ModelInsights } from '$lib/api/client';
 	import ModelComparisonChart from './ModelComparisonChart.svelte';
@@ -131,6 +130,19 @@
 	const pos = $derived(insights?.ranking?.positions);
 	const cat = $derived(insights?.catalog);
 
+	function fmtDuration(sec: number | null | undefined): string {
+		if (sec == null) return '—';
+		if (sec < 60) return `${Math.round(sec)}s`;
+		const m = Math.floor(sec / 60);
+		return m < 60 ? `${m}m ${Math.round(sec % 60)}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+	}
+
+	function fmtUsd(v: number | null | undefined): string {
+		if (v == null) return '—';
+		if (v === 0) return '$0';
+		return v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+	}
+
 	function percentileHint(p: number | null, n: number, more: string, less: string): string {
 		if (p == null) return '';
 		const share = Math.round(p * 100);
@@ -145,6 +157,67 @@
 			<span>OpenRouter retires this model on <b class="font-mono">{expiration}</b>. Experiments that pin it will stop running after that date.</span>
 		</div>
 	{/if}
+
+	<!-- How it did here first: the platform's own measurements are why this page exists. -->
+	<section class="snap" aria-labelledby="snap-title">
+		<div class="snap-head">
+			<h2 id="snap-title" class="snap-title">On this platform</h2>
+			<span class="text-xs text-muted-foreground">
+				{#if gen && gen.runs_total > 0 && gen.first_run_at}Your runs · {isoDay(gen.first_run_at)} – {isoDay(gen.last_run_at)}{:else}Your generations with this model{/if}
+			</span>
+			{#if gen && gen.runs_total > 0}
+				<button type="button" class="snap-link" onclick={() => onOpenTab('results')}>All results →</button>
+			{/if}
+		</div>
+		{#if insightsError}
+			<div class="p-4"><ErrorAlert message={insightsError} onretry={onRetryInsights} /></div>
+		{:else if !insights || !gen}
+			<div class="snap-grid" aria-busy="true" aria-label="Loading measurements">
+				{#each Array(6) as _, i (i)}
+					<div class="snap-kpi"><span class="skel h-2.5 w-16"></span><span class="skel mt-1 h-6 w-14"></span><span class="skel h-2.5 w-20"></span></div>
+				{/each}
+			</div>
+		{:else if gen.runs_total === 0}
+			<div class="flex flex-wrap items-center justify-between gap-3 px-4 py-4">
+				<p class="text-sm text-muted-foreground">Not generated with yet. Run it on a task to measure build success, conformance and code findings.</p>
+				<Button size="sm" href="/generate?model={encodeURIComponent(slug)}"><Sparkles class="size-3.5" />Generate an app</Button>
+			</div>
+		{:else}
+			{@const res = gen.resources}
+			<dl class="snap-grid">
+				<div class="snap-kpi">
+					<dt class="snap-label">Apps</dt>
+					<dd class="snap-val">{gen.runs_total.toLocaleString()}</dd>
+					<dd class="snap-sub">{gen.completed.toLocaleString()} completed</dd>
+				</div>
+				<div class="snap-kpi" title="Built and started (Wilson 95% interval)">
+					<dt class="snap-label">Build success</dt>
+					<dd class="snap-val">{fmtRate(gen.success.rate)}</dd>
+					<dd class="snap-sub">{fmtCI(gen.success.ci_low, gen.success.ci_high) || '—'} · n={gen.success.n}</dd>
+				</div>
+				<div class="snap-kpi" title="Passed the hidden API conformance suite (Wilson 95% interval)">
+					<dt class="snap-label">Conformance</dt>
+					<dd class="snap-val">{fmtRate(gen.functional.rate)}</dd>
+					<dd class="snap-sub">{gen.functional.n ? `${fmtCI(gen.functional.ci_low, gen.functional.ci_high)} · n=${gen.functional.n}` : 'not evaluated'}</dd>
+				</div>
+				<div class="snap-kpi">
+					<dt class="snap-label">Rank</dt>
+					<dd class="snap-val">{pos?.empirical ? `#${pos.empirical.rank}` : '—'}</dd>
+					<dd class="snap-sub">{pos?.empirical ? `of ${pos.empirical.of} measured` : 'no measured quality yet'}</dd>
+				</div>
+				<div class="snap-kpi">
+					<dt class="snap-label">Cost / app</dt>
+					<dd class="snap-val">{fmtUsd(res.mean_cost)}</dd>
+					<dd class="snap-sub">{fmtUsd(res.total_cost)} total</dd>
+				</div>
+				<div class="snap-kpi">
+					<dt class="snap-label">Duration</dt>
+					<dd class="snap-val">{fmtDuration(res.median_duration)}</dd>
+					<dd class="snap-sub">median per app</dd>
+				</div>
+			</dl>
+		{/if}
+	</section>
 
 	<div class="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
 		<div class="min-w-0 space-y-4">
@@ -213,57 +286,9 @@
 				</Card.Content>
 			</Card.Root>
 
-			{#if hf}
-				<ModelHfEcosystem {hf} inheritedFrom={view.inheritedFrom} inheritedSlug={view.inheritedSlug} />
-			{/if}
 		</div>
 
 		<div class="min-w-0 space-y-4">
-			<Card.Root>
-				<Card.Header class="pb-0">
-					<Card.Title class="text-base">On this platform</Card.Title>
-					<Card.Description class="text-xs">Your generations with this model</Card.Description>
-				</Card.Header>
-				<Card.Content>
-					{#if insightsError}
-						<ErrorAlert message={insightsError} onretry={onRetryInsights} />
-					{:else if !insights || !gen}
-						<LoadingState label="loading measurements" class="py-6" />
-					{:else if gen.jobs_total === 0}
-						<p class="text-sm text-muted-foreground">Not generated with yet. Run it on a template to measure build success, conformance and code findings.</p>
-						<Button size="sm" variant="outline" class="mt-3" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}">
-							<Sparkles class="size-3.5" />Generate an app
-						</Button>
-					{:else}
-						<dl class="grid grid-cols-2 gap-x-4 gap-y-3">
-							<div>
-								<dt class="kpi-label">Apps</dt>
-								<dd class="font-mono text-xl font-medium tabular-nums">{gen.jobs_total}</dd>
-								<dd class="text-[11px] text-muted-foreground">{gen.completed} completed</dd>
-							</div>
-							<div>
-								<dt class="kpi-label">Build success</dt>
-								<dd class="font-mono text-xl font-medium tabular-nums">{fmtRate(gen.success.rate)}</dd>
-								<dd class="text-[11px] text-muted-foreground">{fmtCI(gen.success.ci_low, gen.success.ci_high) || '—'} · n={gen.success.n}</dd>
-							</div>
-							<div>
-								<dt class="kpi-label">Conformance</dt>
-								<dd class="font-mono text-xl font-medium tabular-nums">{fmtRate(gen.functional.rate)}</dd>
-								<dd class="text-[11px] text-muted-foreground">{gen.functional.n ? `${fmtCI(gen.functional.ci_low, gen.functional.ci_high)} · n=${gen.functional.n}` : 'not evaluated'}</dd>
-							</div>
-							<div>
-								<dt class="kpi-label">Rank</dt>
-								<dd class="font-mono text-xl font-medium tabular-nums">{pos?.empirical ? `#${pos.empirical.rank}` : '—'}</dd>
-								<dd class="text-[11px] text-muted-foreground">{pos?.empirical ? `of ${pos.empirical.of} measured models` : 'no measured quality yet'}</dd>
-							</div>
-						</dl>
-						<button type="button" class="mt-3 cursor-pointer text-xs font-medium text-primary hover:underline" onclick={() => onOpenTab('results')}>
-							All results →
-						</button>
-					{/if}
-				</Card.Content>
-			</Card.Root>
-
 			<Card.Root>
 				<Card.Header class="pb-0">
 					<Card.Title class="text-base">Catalog position</Card.Title>
@@ -271,7 +296,11 @@
 				</Card.Header>
 				<Card.Content class="space-y-3.5">
 					{#if !cat}
-						{#if !insightsError}<LoadingState label="loading catalog" class="py-6" />{/if}
+						{#if !insightsError}
+							{#each Array(4) as _, i (i)}
+								<div class="space-y-1.5" aria-hidden="true"><span class="skel h-2.5 w-24"></span><span class="skel h-1.5 w-full"></span></div>
+							{/each}
+						{/if}
 					{:else}
 						{#if !model.is_free}
 							<PercentileMeter
@@ -323,8 +352,97 @@
 					{/if}
 				</Card.Content>
 			</Card.Root>
+			{#if hf}
+				<ModelHfEcosystem {hf} inheritedFrom={view.inheritedFrom} inheritedSlug={view.inheritedSlug} />
+			{/if}
 		</div>
 	</div>
 
 	<ModelComparisonChart provider={model.provider} {slug} {relatedModels} />
 </div>
+
+<style>
+	.snap {
+		overflow: hidden;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--card);
+		box-shadow: var(--shadow-card);
+	}
+	.snap-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.25rem 0.75rem;
+		padding: 0.875rem 1.25rem 0.625rem;
+		border-bottom: 1px solid var(--border);
+	}
+	.snap-title {
+		font-family: var(--font-display);
+		font-size: 1rem;
+		font-weight: 600;
+	}
+	.snap-link {
+		margin-left: auto;
+		cursor: pointer;
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: var(--primary);
+	}
+	.snap-link:hover {
+		text-decoration: underline;
+	}
+	.snap-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+	}
+	.snap-kpi {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.2rem;
+		padding: 0.875rem 1.25rem 1rem;
+		border-right: 1px solid var(--border);
+	}
+	.snap-kpi:last-child {
+		border-right: 0;
+	}
+	.snap-label {
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--muted-foreground);
+	}
+	.snap-val {
+		font-family: var(--font-mono);
+		font-size: 1.5rem;
+		font-weight: 500;
+		line-height: 1.1;
+		letter-spacing: -0.02em;
+		font-variant-numeric: tabular-nums;
+	}
+	.snap-sub {
+		font-size: 0.6875rem;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.skel {
+		display: block;
+		border-radius: 0.25rem;
+		background: color-mix(in oklab, var(--muted-foreground) 18%, transparent);
+		animation: skel-pulse 1.4s ease-in-out infinite;
+	}
+	@keyframes skel-pulse {
+		50% {
+			opacity: 0.45;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.skel {
+			animation: none;
+		}
+	}
+</style>

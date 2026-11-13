@@ -173,17 +173,17 @@ def test_update_user(client: Client):
 
 def test_current_user_activity(client: Client, user: User):
     from backend.analysis.tests.factories import AnalysisRunFactory
-    from backend.generation.tests.factories import ExperimentFactory
-    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.generation.tests.factories import GenerationRunFactory
+    from backend.generation.tests.factories import StudyFactory
     from backend.reports.models import Report
 
-    GenerationJobFactory.create(created_by=user, status="completed")
-    GenerationJobFactory.create(created_by=user)
+    GenerationRunFactory.create(created_by=user, tested=True)
+    GenerationRunFactory.create(created_by=user)
     AnalysisRunFactory.create(created_by=user, name="Security sweep")
-    ExperimentFactory.create(created_by=user, name="Temperature study")
+    StudyFactory.create(created_by=user, name="Temperature study")
     Report.objects.create(report_type="comprehensive", title="Q3 summary", created_by=user)
     # Another user's work is excluded.
-    GenerationJobFactory.create()
+    GenerationRunFactory.create()
     client.force_login(user)
 
     response = client.get(reverse("api:current_user_activity"))
@@ -194,13 +194,15 @@ def test_current_user_activity(client: Client, user: User):
         "applications": 2,
         "applications_completed": 1,
         "analyses": 1,
-        "experiments": 1,
+        "studies": 1,
         "reports": 1,
     }
     assert len(body["recent"]) == 5
     assert body["recent"][0]["title"] == "Q3 summary"
     assert body["recent"][0]["href"].startswith("/reports/")
-    assert {item["kind"] for item in body["recent"]} == {"application", "analysis", "experiment", "report"}
+    assert {item["kind"] for item in body["recent"]} == {"application", "analysis", "study", "report"}
+    sample = next(item for item in body["recent"] if item["kind"] == "application")
+    assert sample["href"] == f"/samples/{sample['id']}"
 
 
 def test_current_user_activity_requires_auth(client: Client):

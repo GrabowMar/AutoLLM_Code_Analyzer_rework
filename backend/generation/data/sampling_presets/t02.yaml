@@ -1,0 +1,5 @@
+name: Temperature 0.2
+description: Explicit temperature 0.2; top_p unset.
+content:
+  policy: explicit
+  params: {temperature: 0.2}

@@ -65,6 +65,7 @@ function app(
     hosting: hosting(),
     spec: null,
     admin_credentials: null,
+    admin_credentials_status: null,
     has_source: false,
     ...over,
   };
@@ -471,9 +472,8 @@ describe("panes and chrome", () => {
           spec: {
             name: "Todo",
             description: "A <i>todo</i> app",
-            backend_requirements: ["Store todos"],
-            frontend_requirements: [],
-            admin_requirements: [],
+            prose: "Build a todo app that stores todos.",
+            frontend_requirements: ["Store todos"],
             api_endpoints: [
               {
                 method: "GET",
@@ -485,6 +485,7 @@ describe("panes and chrome", () => {
             admin_api_endpoints: [],
           },
           admin_credentials: { username: "admin", password: "admin" },
+          admin_credentials_status: "available",
         }),
       },
     });

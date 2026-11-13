@@ -1,0 +1,4 @@
+name: Stack fragment, FastAPI + Vue
+role: fragment
+modes: [app, slot]
+variables: []

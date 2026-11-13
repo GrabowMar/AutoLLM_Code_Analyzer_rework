@@ -4,11 +4,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as Select from '$lib/components/ui/select';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Input } from '$lib/components/ui/input';
-	import { Segmented } from '$lib/components/ui/segmented';
 	import { toast } from 'svelte-sonner';
 	import Download from '@lucide/svelte/icons/download';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -29,6 +26,13 @@
 	import PackageOpen from '@lucide/svelte/icons/package-open';
 	import Globe from '@lucide/svelte/icons/globe';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import FilterMenu from '$lib/components/FilterMenu.svelte';
+	import Target from '@lucide/svelte/icons/target';
+	import CircleCheck from '@lucide/svelte/icons/circle-check';
+	import Tags from '@lucide/svelte/icons/tags';
+	import Cpu from '@lucide/svelte/icons/cpu';
+	import Radar from '@lucide/svelte/icons/radar';
+	import X from '@lucide/svelte/icons/x';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
@@ -163,7 +167,7 @@
 	// before and after the update are not directly comparable (each result
 	// records the tool version it ran with).
 	const comparabilityNote =
-		'A new version can find more, fewer or different issues. Runs analyzed before and after the update are not directly comparable, so finish a study on one version first. Each result records the tool version it ran with.';
+		'A new version can find more, fewer or different issues. Runs analyzed before and after the update are not directly comparable, so finish an experiment on one version first. Each result records the tool version it ran with.';
 
 	function confirmUpdate(it: InstalledTool) {
 		if (!it.update_available) {
@@ -302,6 +306,26 @@
 			.sort((a, b) => categoryRank(a.t.category) - categoryRank(b.t.category) || a.i - b.i)
 			.map(({ t }) => t);
 	});
+
+	// FilterMenu options (counts in the hint) — same filters as before, one menu each.
+	const stateMenu = $derived([
+		{ value: 'installed', label: 'Installed', hint: String(installed.length) },
+		{ value: 'available', label: 'Not installed', hint: String(Math.max(0, catalog.length - installed.length)) },
+		{ value: 'updates', label: 'Update available', hint: String(outdated.length) },
+	]);
+	const categoryMenu = $derived(
+		Array.from(new Set(catalog.map((t) => t.category))).map((c) => ({
+			value: c,
+			label: categoryLabels[c] ?? c,
+			hint: String(catalog.filter((t) => t.category === c).length),
+		})),
+	);
+	const techMenu = $derived(techItems.filter((t) => t.value).map((t) => ({ value: t.value, label: t.label.replace(/ \((\d+|no specific tool)\)$/, ''), hint: t.label.match(/\((\d+|no specific tool)\)$/)?.[1] ?? '' })));
+	const modeMenu = $derived([
+		{ value: 'static', label: 'Static', hint: String(catalog.length - dynamicCount) },
+		{ value: 'dynamic', label: 'Dynamic (needs the app running)', hint: String(dynamicCount) },
+	]);
+	const categoryCount = $derived(new Set(catalog.map((t) => t.category)).size);
 
 	const installableVisible = $derived(visibleCatalog.filter((t) => !installedBySlug.has(t.slug)));
 
@@ -552,34 +576,45 @@
 </script>
 
 {#snippet shopToolbar()}
-	<!-- Filters, count and bulk install in one strip at the top of the catalogue. -->
-	<div class="table-toolbar">
-		<div class="flex min-w-0 flex-wrap items-center gap-2">
+	<!-- Same toolbar as the other lists: search, then one menu per filter (with counts). -->
+	<div class="tb-bar" role="search" aria-label="Search and filter tools">
+		<div class="tb-search">
+			<Search class="tb-search-icon" aria-hidden="true" />
+			<input type="search" placeholder="Search tools…" aria-label="Search tools" bind:value={searchQuery} autocomplete="off" />
+		</div>
+		<div class="tb-menus">
 			{#if appsTotal > 0}
-				<Segmented aria-label="Filter by fit to your apps" size="sm" value={fitFilter} onValueChange={(v) => (fitFilter = v as FitFilter)} items={fitItems} />
+				<button
+					type="button"
+					class="fm-trigger {fitFilter === 'fits' ? 'fm-trigger-on' : ''}"
+					aria-pressed={fitFilter === 'fits'}
+					title="Tools that scan something your generated apps contain"
+					onclick={() => (fitFilter = fitFilter === 'fits' ? 'all' : 'fits')}
+				>
+					<Target class="size-3.5" aria-hidden="true" />Fits my apps <span class="font-mono text-[11px] opacity-70">{fittingCount}</span>
+				</button>
 			{/if}
-			<Segmented aria-label="Filter by install state" size="sm" value={stateFilter} onValueChange={(v) => (stateFilter = v as StateFilter)} items={stateItems} />
+			<FilterMenu label="Status" icon={CircleCheck} value={stateFilter === 'all' ? '' : stateFilter} options={stateMenu} onChange={(v) => (stateFilter = (v || 'all') as StateFilter)} anyLabel="Any status" />
+			<FilterMenu label="Category" icon={Tags} value={categoryFilter === 'all' ? '' : categoryFilter} options={categoryMenu} onChange={(v) => (categoryFilter = v || 'all')} anyLabel="All categories" />
+			{#if techMenu.length}
+				<FilterMenu label="Technology" icon={Cpu} value={techFilter} options={techMenu} onChange={(v) => (techFilter = v)} searchable anyLabel="All technologies" />
+			{/if}
 			{#if dynamicCount > 0}
-				<Segmented aria-label="Filter by analysis mode" size="sm" value={modeFilter} onValueChange={(v) => (modeFilter = v as ModeFilter)} items={modeItems} />
+				<FilterMenu label="Mode" icon={Radar} value={modeFilter === 'all' ? '' : modeFilter} options={modeMenu} onChange={(v) => (modeFilter = (v || 'all') as ModeFilter)} anyLabel="Static or dynamic" />
 			{/if}
-			<Select.Simple aria-label="Filter by category" size="sm" class="w-44" bind:value={categoryFilter} items={categoryItems} />
-			{#if techItems.length > 1}
-				<Select.Simple aria-label="Filter by technology" size="sm" class="w-48" bind:value={techFilter} items={techItems} />
-			{/if}
-			<div class="relative w-full sm:w-56">
-				<Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-				<Input type="search" placeholder="Search tools…" aria-label="Search tools" class="h-8 pl-8 text-xs" bind:value={searchQuery} />
-			</div>
-		</div>
-		<div class="flex items-center gap-3">
-			<span class="tabular-nums">{visibleCatalog.length} shown · {installableVisible.length} not installed</span>
-			{#if installableVisible.length > 1}
-				<Button size="sm" variant="outline" class="h-7 text-xs" disabled={busy.bulk} onclick={handleInstallVisible}>
-					{#if busy.bulk}<Loader class="size-3.5 animate-spin motion-reduce:animate-none" />{:else}<Download class="size-3.5" />{/if}
-					Install {installableVisible.length} shown
-				</Button>
+			{#if searchQuery || stateFilter !== 'all' || categoryFilter !== 'all' || modeFilter !== 'all' || techFilter || fitFilter !== 'all'}
+				<button type="button" class="fm-trigger" onclick={clearFilters}><X class="size-3" />Clear</button>
 			{/if}
 		</div>
+	</div>
+	<div class="table-toolbar">
+		<span class="tabular-nums">{visibleCatalog.length} shown · {installableVisible.length} not installed</span>
+		{#if installableVisible.length > 1}
+			<Button size="sm" variant="outline" class="h-7 text-xs" disabled={busy.bulk} onclick={handleInstallVisible}>
+				{#if busy.bulk}<Loader class="size-3.5 animate-spin motion-reduce:animate-none" />{:else}<Download class="size-3.5" />{/if}
+				Install {installableVisible.length} shown
+			</Button>
+		{/if}
 	</div>
 {/snippet}
 
@@ -659,6 +694,18 @@
 				</Button>
 			{/if}
 		{/snippet}
+		<div class="header-stats">
+			{#if !loading}
+				<span class="header-stat"><b>{readySlugs.size}</b> installed</span>
+				<span class="header-stat"><b>{catalog.length}</b> in the catalog</span>
+				<span class="header-stat"><b class={outdated.length ? 'text-info-fg' : ''}>{outdated.length}</b> update{outdated.length === 1 ? '' : 's'}</span>
+				<span class="header-stat"><b>{categoryCount}</b> categories</span>
+				{#if dynamicCount}<span class="header-stat" title="Dynamic scanners probe the running app"><b>{dynamicCount}</b> dynamic</span>{/if}
+				{#if inFlight.length}<span class="header-stat"><b>{inFlight.length}</b> installing</span>{/if}
+			{:else}
+				<span class="header-stat text-muted-foreground">loading…</span>
+			{/if}
+		</div>
 		{#snippet nav()}
 			<Tabs.List aria-label="Analyzer sections">
 				<Tabs.Trigger value="shop">Shop</Tabs.Trigger>

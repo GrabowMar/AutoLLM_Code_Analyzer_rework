@@ -1,0 +1,4 @@
+name: Slot agent (default)
+content:
+  mode: slot
+  roles: {slot_agent_brief: slot-agent-brief@1}

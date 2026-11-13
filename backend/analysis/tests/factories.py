@@ -74,3 +74,29 @@ class FindingFactory(DjangoModelFactory):
     severity = "high"
     category = "security"
     title = factory.Sequence(lambda n: f"Finding {n}")
+
+
+def generation_run(created_by=None, files: dict[str, str] | None = None, origins: dict[str, str] | None = None, **kw):
+    """A tested ``GenerationRun`` whose collected tree is *files* (``{path: text}``, real blobs).
+
+    *origins* maps a path to its ``RunFile.origin`` (default ``authored``); extra keyword arguments go to
+    ``GenerationRunFactory``.
+    """
+    from backend.generation import blobs
+    from backend.generation.runs.view import source_loc
+    from backend.generation.testing import factories as gen_factories
+
+    if created_by is not None:
+        kw["created_by"] = created_by
+    kw.setdefault("tested", True)
+    run = gen_factories.GenerationRunFactory(**kw)
+    for path, text in (files or {}).items():
+        gen_factories.RunFileFactory(
+            run=run,
+            path=path,
+            blob=blobs.put_text(text),
+            size=len(text.encode()),
+            origin=(origins or {}).get(path, "authored"),
+            loc=source_loc(path, text),
+        )
+    return run

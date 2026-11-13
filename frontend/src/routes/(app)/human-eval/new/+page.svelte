@@ -37,12 +37,12 @@
 	import SquareDashed from '@lucide/svelte/icons/square-dashed';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { getExperiment } from '$lib/api/experiments';
+	import { getStudy, getStudyResults } from '$lib/api/v3/studies';
 	import {
 		createTask,
 		getEnvironment,
 		humanEvalErrorBody,
-		listCandidateJobs,
+		listCandidateRuns,
 		listPresets,
 		validateDesign,
 		type HumanEvalEnvironment,
@@ -169,34 +169,41 @@
 		draft.mode = (value === 'pairwise' ? 'pairwise' : 'single') as TaskMode;
 	}
 
-	// ── linked experiment ─────────────────────────────────────────────
-	let experimentName = $state('');
+	// ── linked study ──────────────────────────────────────────────────
+	let studyName = $state('');
 	let baselineOptions = $state<{ id: number; label: string }[]>([]);
-	let experimentApps = $state<number | null>(null);
-	let experimentFor = '';
+	let studyApps = $state<number | null>(null);
+	let studyFor = '';
 
 	$effect(() => {
-		const id = draft.experimentId;
+		const id = draft.studyId;
 		untrack(() => {
-			if ((id ?? '') === experimentFor) return;
-			experimentFor = id ?? '';
-			experimentName = '';
+			if ((id ?? '') === studyFor) return;
+			studyFor = id ?? '';
+			studyName = '';
 			baselineOptions = [];
-			experimentApps = null;
+			studyApps = null;
 			if (!id) return;
-			getExperiment(id)
-				.then((exp) => {
-					if (experimentFor !== id) return;
-					experimentName = exp.name;
-					baselineOptions = exp.conditions.map((c) => ({
-						id: c.id,
-						label: `${c.display_label || c.label || `Condition ${c.id}`}${c.id === exp.baseline_condition_id ? ' (baseline)' : ''}`,
-					}));
+			getStudy(id)
+				.then((study) => {
+					if (studyFor === id) studyName = study.name;
 				})
 				.catch(() => {});
-			listCandidateJobs({ experiment_id: id, current_only: true, per_page: 1 })
+			// The StudyConditions of the active plan, with the pre-registered baseline marked.
+			getStudyResults(id)
 				.then((res) => {
-					if (experimentFor === id) experimentApps = res.total;
+					if (studyFor !== id) return;
+					baselineOptions = [...res.leaderboard]
+						.sort((x, y) => x.index - y.index)
+						.map((c) => ({
+							id: c.condition_id,
+							label: `${c.label || `Condition ${c.condition_id}`}${c.is_baseline ? ' (baseline)' : ''}`,
+						}));
+				})
+				.catch(() => {});
+			listCandidateRuns({ study_id: id, current_only: true, per_page: 1 })
+				.then((res) => {
+					if (studyFor === id) studyApps = res.total;
 				})
 				.catch(() => {});
 		});
@@ -267,10 +274,10 @@
 	const notes = $derived(draftNotes(draft));
 	const appCountText = $derived.by(() => {
 		const parts: string[] = [];
-		if (draft.experimentId) {
-			parts.push(`${experimentApps != null ? experimentApps : 'all'} current app${experimentApps === 1 ? '' : 's'} of ${experimentName ? `“${experimentName}”` : 'the linked experiment'}`);
+		if (draft.studyId) {
+			parts.push(`${studyApps != null ? studyApps : 'all'} current app${studyApps === 1 ? '' : 's'} of ${studyName ? `“${studyName}”` : 'the linked experiment'}`);
 		}
-		if (draft.jobIds.length) parts.push(`${draft.jobIds.length} picked app${draft.jobIds.length === 1 ? '' : 's'}`);
+		if (draft.runIds.length) parts.push(`${draft.runIds.length} picked app${draft.runIds.length === 1 ? '' : 's'}`);
 		return parts.length ? parts.join(' + ') : 'None yet';
 	});
 
@@ -343,7 +350,7 @@
 		<div class="header-stats">
 			<span class="header-stat">{draft.mode === 'pairwise' ? 'Pairwise' : 'Single app'}</span>
 			<span class="header-stat"><b>{draft.design.blocks.length}</b>block{draft.design.blocks.length === 1 ? '' : 's'}</span>
-			<span class="header-stat"><b>{draft.jobIds.length}</b>picked app{draft.jobIds.length === 1 ? '' : 's'}{draft.experimentId ? ' + linked experiment' : ''}</span>
+			<span class="header-stat"><b>{draft.runIds.length}</b>picked app{draft.runIds.length === 1 ? '' : 's'}{draft.studyId ? ' + linked experiment' : ''}</span>
 			{#if restored}<span class="header-stat text-muted-foreground">Restored from this browser session</span>{/if}
 		</div>
 	</PageHeader>
@@ -454,11 +461,11 @@
 					count={appCountText}
 					lead={draft.mode === 'pairwise'
 						? 'Pairs are formed between apps built from the same spec. Participants only ever see blinded labels such as “App 07”.'
-						: 'Completed generations to evaluate. Participants only ever see blinded labels such as “App 07”.'}
+						: 'Completed app runs to evaluate. Participants only ever see blinded labels such as “App 07”.'}
 				/>
-				<AppPoolPicker bind:selected={draft.jobIds} bind:experimentId={draft.experimentId} />
-				{#if generalError('job_ids') || generalError('experiment_id')}
-					<p class="text-[11px] text-danger-fg">{generalError('job_ids') || generalError('experiment_id')}</p>
+				<AppPoolPicker bind:selected={draft.runIds} bind:studyId={draft.studyId} />
+				{#if generalError('run_ids') || generalError('study_id')}
+					<p class="text-[11px] text-danger-fg">{generalError('run_ids') || generalError('study_id')}</p>
 				{/if}
 			</section>
 

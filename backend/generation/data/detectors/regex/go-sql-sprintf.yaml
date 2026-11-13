@@ -1,0 +1,11 @@
+name: 'SQL built with fmt.Sprintf (Go)'
+description: 'An SQL statement is formatted with fmt.Sprintf (string interpolation) instead of query placeholders.'
+content:
+  engine: regex
+  languages: [go]
+  rule: '\bfmt\.Sprintf\(\s*"(?i:\s*(?:SELECT|INSERT|UPDATE|DELETE)\b)[^"\n]*%[sdvq]|\.(?:Query|QueryRow|Exec)(?:Context)?\([^)\n]*fmt\.Sprintf\('
+  tool: {name: re, version: py3.13}
+  feature_key: go-sql-sprintf
+  polarity: insecure
+  cwe: [cwe-89]
+  description: 'fmt.Sprintf formats an SQL statement with %s/%d/%v/%q, or its result is passed to Query/Exec.'

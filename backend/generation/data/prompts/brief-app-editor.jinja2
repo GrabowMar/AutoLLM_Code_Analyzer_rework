@@ -1,0 +1,33 @@
+# {{ task.title }}
+
+{{ task.prose }}
+
+{% if not task.has_frontend %}This app has no user interface: only the API is needed.
+
+{% endif %}## Stack
+
+{{ stack.fragment_text }}
+{% if style.fragment_text and task.has_frontend %}
+
+## Styling
+
+{{ style.fragment_text }}
+{% endif %}
+{% if auth_contract %}
+
+## Accounts
+
+{{ auth_contract }}
+{% endif %}
+
+## Project contract
+
+Write the code so that the `Dockerfile` in the workspace root builds the app and the app listens on port {{ stack.run_contract.port }}, serves its API under `{{ stack.run_contract.api_prefix }}` and answers `GET {{ stack.run_contract.health_path }}` with `{"status": "ok"}`.{% if stack.run_contract.static_serving == "backend" and task.has_frontend %} The same server serves the web frontend.{% endif %} Persistent data lives under `{{ stack.run_contract.data_dir }}` and survives a restart. Add every file the app needs, including its dependency manifest.
+{% if guidance.fragment_text %}
+
+{{ guidance.fragment_text }}
+{% endif %}
+{% if budget_neutral %}
+
+{{ budget_neutral }}
+{% endif %}

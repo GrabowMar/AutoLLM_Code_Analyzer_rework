@@ -1,0 +1,3 @@
+# Tone catalogue entry (not a library entity). A style with this tone copies `tone` (the slug) and `tone_text`.
+{name: Brutalist, description: 'Visual tone preset: brutalist.', tone_text: 'Brutalist: raw high-contrast blocks,
+    heavy borders, monospace type and no rounded corners or gradients.'}

@@ -22,11 +22,17 @@ from backend.analysis.tests.factories import ToolResultFactory
 from backend.export.services.csv_safe import safe_cell
 from backend.export.services.findings import FINDING_HEADERS
 from backend.export.services.findings import sarif_level
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import ExperimentConditionFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models import choices
+from backend.generation.testing import factories
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.reports.models import Report
+from backend.reports.tests.helpers import add_file
+from backend.reports.tests.helpers import cell_run
+from backend.reports.tests.helpers import make_cell
+from backend.reports.tests.helpers import make_condition
+from backend.reports.tests.helpers import make_run
+from backend.reports.tests.helpers import make_study
+from backend.reports.tests.helpers import make_unit
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -61,25 +67,39 @@ def _csv_dicts(content: str) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(content)))
 
 
+def _study_cell(user, *, label="baseline", model_id="acme/coder-1", repeat_index=1):
+    _study, plan = make_study(user, repeats=2)
+    condition = make_condition(plan, LLMModelFactory(model_id=model_id), label=label)
+    return make_cell(condition, make_unit(plan), repeat_index=repeat_index)
+
+
+def _analysis(user, run):
+    return AnalysisRunFactory(created_by=user, generation_job=run, source_code={}, status=AnalysisRun.Status.COMPLETED)
+
+
 @pytest.fixture
 def job_runs(user):
     """One app analyzed twice: bandit + semgrep, then a re-run of bandit only."""
-    model = LLMModelFactory(model_id="acme/coder-1")
-    condition = ExperimentConditionFactory(model=model, label="baseline")
-    job = GenerationJobFactory(
-        created_by=user,
-        model=model,
-        app_requirement=AppRequirementTemplateFactory(slug="todo"),
-        experiment=condition.experiment,
-        condition=condition,
-        repeat_index=1,
+    run = cell_run(_study_cell(user), user)
+    add_file(run, "backend/starter.py", "a = 1\n", origin=choices.FileOrigin.STARTER)
+    first = _analysis(user, run)
+    old_bandit = FindingFactory(
+        result=ToolResultFactory(run=first, tool_slug="bandit"),
+        title="old bandit",
+        file_path="app.py",
     )
-    first = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-    old_bandit = FindingFactory(result=ToolResultFactory(run=first, tool_slug="bandit"), title="old bandit")
-    semgrep = FindingFactory(result=ToolResultFactory(run=first, tool_slug="semgrep"), title="semgrep")
-    rerun = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-    new_bandit = FindingFactory(result=ToolResultFactory(run=rerun, tool_slug="bandit"), title="new bandit")
-    return job, old_bandit, semgrep, new_bandit
+    semgrep = FindingFactory(
+        result=ToolResultFactory(run=first, tool_slug="semgrep"),
+        title="semgrep",
+        file_path="backend/starter.py",
+    )
+    rerun = _analysis(user, run)
+    new_bandit = FindingFactory(
+        result=ToolResultFactory(run=rerun, tool_slug="bandit"),
+        title="new bandit",
+        file_path="app.py",
+    )
+    return run, old_bandit, semgrep, new_bandit
 
 
 # ── Auth required ─────────────────────────────────────────────────────────────
@@ -94,8 +114,8 @@ class TestAuthRequired:
         resp = client.get("/api/export/findings.json")
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    def test_jobs_csv_requires_auth(self, client):
-        resp = client.get("/api/export/generation-jobs.csv")
+    def test_runs_csv_requires_auth(self, client):
+        resp = client.get("/api/export/generation-runs.csv")
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
     def test_analysis_tasks_csv_requires_auth(self, client):
@@ -125,12 +145,14 @@ class TestFindingsCsv:
             "task_id",
             "result_id",
             "result_status",
-            "generation_job_id",
-            "experiment_id",
+            "generation_run_id",
+            "study_id",
             "condition_id",
             "condition_label",
             "model",
-            "app",
+            "task",
+            "unit",
+            "kind",
             "stack",
             "repeat_index",
             "analyzer",
@@ -139,6 +161,7 @@ class TestFindingsCsv:
             "normalized_severity",
             "category",
             "file_path",
+            "file_origin",
             "line",
             "column",
             "rule_id",
@@ -229,16 +252,21 @@ class TestFindingsCsv:
         assert len(rows) == 2
 
     def test_rows_name_the_app_and_whether_they_are_counted(self, auth_client, job_runs):
-        job, old_bandit, semgrep, new_bandit = job_runs
+        run, old_bandit, semgrep, new_bandit = job_runs
         rows = {r["id"]: r for r in _csv_dicts(auth_client.get("/api/export/findings.csv").content.decode())}
         row = rows[str(semgrep.id)]
-        assert row["generation_job_id"] == str(job.id)
+        assert row["generation_run_id"] == str(run.id)
         assert row["model"] == "acme/coder-1"
-        assert row["app"] == "todo"
+        assert row["task"] == run.task_version.ref
+        assert row["unit"] == run.cell.unit.unit_key
+        assert row["kind"] == "app_agentic"
         assert row["repeat_index"] == "1"
-        assert row["experiment_id"] == str(job.experiment_id)
-        assert row["condition_id"] == str(job.condition_id)
+        assert row["study_id"] == str(run.study_id)
+        assert row["condition_id"] == str(run.condition_id)
         assert row["condition_label"] == "baseline"
+        # Each finding names the origin of its file: the starter's code is not the model's.
+        assert row["file_origin"] == "starter"
+        assert rows[str(new_bandit.id)]["file_origin"] == "authored"
         assert row["result_id"] == str(semgrep.result_id)
         assert row["result_status"] == "completed"
         # Per-tool latest: re-running bandit supersedes only the old bandit result.
@@ -247,19 +275,13 @@ class TestFindingsCsv:
         assert rows[str(old_bandit.id)]["is_latest"] == "false"
 
     def test_unlabelled_condition_is_named_as_in_the_study_tables(self, auth_client, user):
-        from backend.statistics.services.study import condition_label
+        from backend.statistics.services.runs import condition_label
 
-        condition = ExperimentConditionFactory(label="", model=LLMModelFactory(model_id="acme/x"))
-        job = GenerationJobFactory(
-            created_by=user,
-            model=condition.model,
-            experiment=condition.experiment,
-            condition=condition,
-        )
-        run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-        FindingFactory(result=ToolResultFactory(run=run, tool_slug="bandit"))
-        expected = condition_label(condition)
-        assert " / " in expected  # "<model> / <method>", never blank
+        cell = _study_cell(user, label="", model_id="acme/x")
+        run = cell_run(cell, user)
+        FindingFactory(result=ToolResultFactory(run=_analysis(user, run), tool_slug="bandit"))
+        expected = condition_label(cell.condition)
+        assert expected == "acme/x"  # the model id, never blank
 
         (row,) = _csv_dicts(auth_client.get("/api/export/findings.csv").content.decode())
         assert row["condition_label"] == expected
@@ -267,10 +289,20 @@ class TestFindingsCsv:
         assert item["condition_label"] == expected
         (sarif_run,) = json.loads(auth_client.get("/api/export/findings.sarif").content)["runs"]
         assert sarif_run["properties"]["condition_label"] == expected
-        (job_row,) = json.loads(auth_client.get("/api/export/generation-jobs.json").content)
-        assert job_row["condition_label"] == expected
-        (job_csv,) = _csv_dicts(auth_client.get("/api/export/generation-jobs.csv").content.decode())
-        assert job_csv["condition_label"] == expected
+        (run_row,) = json.loads(auth_client.get("/api/export/generation-runs.json").content)
+        assert run_row["condition_label"] == expected
+        (run_csv,) = _csv_dicts(auth_client.get("/api/export/generation-runs.csv").content.decode())
+        assert run_csv["condition_label"] == expected
+
+    def test_the_origin_tagged_by_the_analysis_wins(self, auth_client, user, job_runs):
+        run, *_ = job_runs
+        tagged = FindingFactory(
+            result=ToolResultFactory(run=_analysis(user, run), tool_slug="ruff"),
+            file_path="backend/starter.py",
+            tool_specific_data={"file_origin": "modified"},
+        )
+        rows = {r["id"]: r for r in _csv_dicts(auth_client.get("/api/export/findings.csv").content.decode())}
+        assert rows[str(tagged.id)]["file_origin"] == "modified"
 
     def test_latest_only(self, auth_client, job_runs):
         _job, old_bandit, semgrep, new_bandit = job_runs
@@ -278,22 +310,21 @@ class TestFindingsCsv:
         assert {r["id"] for r in rows} == {str(semgrep.id), str(new_bandit.id)}
         assert str(old_bandit.id) not in {r["id"] for r in rows}
 
-    def test_filter_by_experiment_and_job(self, auth_client, user, job_runs):
-        job, *_ = job_runs
+    def test_filter_by_study_and_run(self, auth_client, user, job_runs):
+        run, *_ = job_runs
         other = FindingFactory(result=ToolResultFactory(run=AnalysisRunFactory(created_by=user)))
-        rows = _csv_dicts(auth_client.get(f"/api/export/findings.csv?generation_job_id={job.id}").content.decode())
+        rows = _csv_dicts(auth_client.get(f"/api/export/findings.csv?generation_run_id={run.id}").content.decode())
         assert len(rows) == 3
         assert str(other.id) not in {r["id"] for r in rows}
-        rows = _csv_dicts(
-            auth_client.get(f"/api/export/findings.csv?experiment_id={job.experiment_id}").content.decode(),
-        )
+        rows = _csv_dicts(auth_client.get(f"/api/export/findings.csv?study_id={run.study_id}").content.decode())
         assert len(rows) == 3
 
     def test_ad_hoc_run_has_no_latest_flag(self, auth_client, user):
         FindingFactory(result=ToolResultFactory(run=AnalysisRunFactory(created_by=user)))
         (row,) = _csv_dicts(auth_client.get("/api/export/findings.csv").content.decode())
         assert row["is_latest"] == ""
-        assert row["generation_job_id"] == ""
+        assert row["generation_run_id"] == ""
+        assert row["file_origin"] == ""
 
     def test_streaming_path_matches_buffered(self, auth_client, user):
         result = ToolResultFactory(run=AnalysisRunFactory(created_by=user))
@@ -314,7 +345,7 @@ class TestFindingsCsv:
 
 
 class TestExportCost:
-    """Rows read their app from one per-export job map, never from a joined job per finding."""
+    """Rows read their app from one per-export run map, never from a joined run per finding."""
 
     def _sql(self, auth_client, url: str) -> tuple[str, int]:
         with CaptureQueriesContext(connection) as ctx:
@@ -331,17 +362,20 @@ class TestExportCost:
             "/api/export/findings.csv",
             "/api/export/findings.csv?limit=20000",  # streaming path
             "/api/export/findings.sarif",
-            "/api/export/generation-jobs.json",
+            "/api/export/generation-runs.json",
         ],
     )
-    def test_heavy_columns_are_never_loaded(self, auth_client, job_runs, url):
-        job, *_ = job_runs
-        job.result_data = {"files": {"app.py": "x = 1\n" * 1000}}
-        job.save(update_fields=["result_data"])
+    def test_heavy_columns_and_code_are_never_loaded(self, auth_client, job_runs, url, monkeypatch):
+        from backend.generation import blobs
+
+        def no_code(sha):
+            msg = f"an export read blob {sha}"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(blobs, "get_bytes", no_code)
         sql, _ = self._sql(auth_client, url)
-        # The generated code and bundle (~0.25 MB per job) and the tools' raw output.
-        for column in ("result_data", "resolved_bundle", "raw_output", "custom_system_prompt"):
-            assert column not in sql, column
+        # The tools' raw output is never parsed per row; the code (blobs) is never read.
+        assert "raw_output" not in sql
 
     @pytest.mark.parametrize(
         "url",
@@ -350,17 +384,23 @@ class TestExportCost:
             "/api/export/findings.csv",
             "/api/export/findings.csv?limit=20000",
             "/api/export/findings.sarif",
-            "/api/export/generation-jobs.csv",
         ],
     )
-    def test_query_count_does_not_grow_with_rows(self, auth_client, user, job_runs, url):
+    def test_query_count_does_not_grow_with_findings(self, auth_client, user, job_runs, url):
+        run, *_ = job_runs
         _, before = self._sql(auth_client, url)
-        for i in range(3):
-            condition = ExperimentConditionFactory(label=f"arm {i}")
-            job = GenerationJobFactory(created_by=user, experiment=condition.experiment, condition=condition)
-            run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-            FindingFactory.create_batch(4, result=ToolResultFactory(run=run, tool_slug="bandit"))
+        analysis = _analysis(user, run)
+        for slug in ("ruff", "eslint", "semgrep"):
+            FindingFactory.create_batch(4, result=ToolResultFactory(run=analysis, tool_slug=slug), file_path="app.py")
         _, after = self._sql(auth_client, url)
+        assert after == before
+
+    def test_run_exports_take_a_fixed_number_of_queries(self, auth_client, user):
+        make_run(user, LLMModelFactory())
+        _, before = self._sql(auth_client, "/api/export/generation-runs.csv")
+        for _ in range(3):
+            make_run(user, LLMModelFactory())
+        _, after = self._sql(auth_client, "/api/export/generation-runs.csv")
         assert after == before
 
     def test_truncation_is_signalled(self, auth_client, user):
@@ -399,10 +439,11 @@ class TestMalformedParams:
         [
             "/api/export/findings.json?task_id=notauuid",
             "/api/export/findings.csv?limit=-1",
-            "/api/export/findings.json?experiment_id=bad",
+            "/api/export/findings.json?study_id=bad",
             "/api/export/reports.json?limit=-1",
-            "/api/export/generation-jobs.csv?limit=-5",
-            "/api/export/review-sample.zip?experiment_id=bad",
+            "/api/export/generation-runs.csv?limit=-5",
+            "/api/export/review-sample.zip?study_id=bad",
+            "/api/export/runs/bad/bundle.zip",
         ],
     )
     def test_bad_params_are_422_not_500(self, auth_client, url):
@@ -439,8 +480,8 @@ class TestFindingsJson:
         assert item["tool_severity"] == "unrated"
         assert item["normalized_severity"] == "high"
         assert "severity" not in item
-        # An ad-hoc run (no generation job) has no app and no latest flag.
-        assert item["generation_job_id"] is None
+        # An ad-hoc analysis (no generation run) has no app and no latest flag.
+        assert item["generation_run_id"] is None
         assert item["is_latest"] is None
 
     def test_limit_cap(self, auth_client, user):
@@ -529,9 +570,9 @@ class TestFindingsSarif:
         assert sarif_level(label) == level
 
     def test_one_run_per_tool_result_with_recorded_version(self, auth_client, user):
-        job = GenerationJobFactory(created_by=user, model=LLMModelFactory(model_id="acme/m"))
+        job = make_run(user, LLMModelFactory(model_id="acme/m"))
         for version in ("1.7.10", None):
-            run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+            run = _analysis(user, job)
             summary = {"tool_version": version} if version else {}
             FindingFactory(
                 result=ToolResultFactory(run=run, tool_slug="bandit", summary=summary),
@@ -545,7 +586,7 @@ class TestFindingsSarif:
         assert versions == {"1.7.10", None}
         ids = {r["automationDetails"]["id"] for r in data["runs"]}
         assert len(ids) == 2
-        assert all(r["properties"]["generation_job_id"] == str(job.id) for r in data["runs"])
+        assert all(r["properties"]["generation_run_id"] == str(job.id) for r in data["runs"])
         assert all(r["properties"]["model"] == "acme/m" for r in data["runs"])
         latest = [r["properties"]["is_latest"] for r in data["runs"]]
         assert sorted(latest) == [False, True]
@@ -579,62 +620,143 @@ class TestFindingsSarif:
         assert names == {"bandit", "eslint"}
 
 
-# ── Generation jobs ───────────────────────────────────────────────────────────
+# ── Generation runs ───────────────────────────────────────────────────────────
 
 
-class TestGenerationJobsExport:
+class TestGenerationRunsExport:
     def test_csv_headers(self, auth_client, user):
-        GenerationJobFactory(created_by=user)
-        resp = auth_client.get("/api/export/generation-jobs.csv")
+        from backend.export.services.runs import RUN_HEADERS
+
+        make_run(user, LLMModelFactory())
+        resp = auth_client.get("/api/export/generation-runs.csv")
         assert resp.status_code == HTTPStatus.OK
         headers, rows = _parse_csv(resp.content.decode())
-        assert "id" in headers
-        assert "status" in headers
+        assert headers == RUN_HEADERS
+        assert {"id", "status", "outcome", "usable", "config_fingerprint"} <= set(headers)
         assert len(rows) == 1
 
     def test_json_structure(self, auth_client, user):
-        GenerationJobFactory(created_by=user, status="completed")
-        resp = auth_client.get("/api/export/generation-jobs.json")
+        make_run(user, LLMModelFactory())
+        resp = auth_client.get("/api/export/generation-runs.json")
         data = json.loads(resp.content)
         assert isinstance(data, list)
-        assert data[0]["status"] == "completed"
+        assert (data[0]["status"], data[0]["outcome"], data[0]["usable"]) == ("completed", "tested", True)
+        # No usage recorded: unknown, never 0.
+        assert (data[0]["tokens_used"], data[0]["cost_usd"]) == (None, None)
 
-    def test_rows_name_model_slug_app_and_cell(self, auth_client, user):
-        GenerationJobFactory(
-            created_by=user,
-            model=LLMModelFactory(model_id="acme/coder-1", model_name="Coder One"),
-            app_requirement=AppRequirementTemplateFactory(slug="todo"),
-            stack_slug="flask-react",
-            repeat_index=2,
-        )
-        (row,) = _csv_dicts(auth_client.get("/api/export/generation-jobs.csv").content.decode())
+    def test_rows_name_model_slug_task_and_cell(self, auth_client, user):
+        cell = _study_cell(user, model_id="acme/coder-1", repeat_index=1)
+        cell.condition.model.model_name = "Coder One"
+        cell.condition.model.save(update_fields=["model_name"])
+        stack = factories.StackProfileFactory.create()
+        run = cell_run(cell, user, stack_profile=stack, metrics={"cost_usd": 0.25, "total_tokens": 1200})
+        (row,) = _csv_dicts(auth_client.get("/api/export/generation-runs.csv").content.decode())
         assert row["model"] == "Coder One"
         assert row["model_id"] == "acme/coder-1"
-        assert row["app"] == "todo"
-        assert row["stack"] == "flask-react"
-        assert row["repeat_index"] == "2"
+        assert row["task"] == run.task_version.ref
+        assert row["unit"] == cell.unit.unit_key
+        assert row["stack"] == stack.ref
+        assert row["study_id"] == str(cell.study_id)
+        assert row["cell_id"] == str(cell.id)
+        assert row["repeat_index"] == "1"
+        assert (row["cost_usd"], row["tokens_used"]) == ("0.25", "1200")
 
-    def test_filter_by_model_slug(self, auth_client, user):
-        GenerationJobFactory(created_by=user, model=LLMModelFactory(model_id="deepseek/deepseek-v4.1-flash"))
-        GenerationJobFactory(created_by=user, model=LLMModelFactory(model_id="other/model"))
-        resp = auth_client.get("/api/export/generation-jobs.json?model_id=deepseek/deepseek-v4.1-flash")
-        assert resp.status_code == HTTPStatus.OK
-        data = json.loads(resp.content)
+    def test_filters(self, auth_client, user):
+        make_run(user, LLMModelFactory(model_id="deepseek/deepseek-v4.1-flash"))
+        make_run(user, LLMModelFactory(model_id="other/model"), status=choices.RunStatus.PENDING, code=None)
+        cell = _study_cell(user)
+        cell_run(cell, user, status=choices.RunStatus.FAILED)
+        data = json.loads(
+            auth_client.get("/api/export/generation-runs.json?model_id=deepseek/deepseek-v4.1-flash").content,
+        )
         assert [d["model_id"] for d in data] == ["deepseek/deepseek-v4.1-flash"]
-
-    def test_filter_by_status(self, auth_client, user):
-        GenerationJobFactory(created_by=user, status="completed")
-        GenerationJobFactory(created_by=user, status="pending")
-        resp = auth_client.get("/api/export/generation-jobs.csv?status=completed")
-        _, rows = _parse_csv(resp.content.decode())
+        _, rows = _parse_csv(auth_client.get("/api/export/generation-runs.csv?status=completed").content.decode())
         assert len(rows) == 1
+        data = json.loads(auth_client.get(f"/api/export/generation-runs.json?study_id={cell.study_id}").content)
+        assert [d["outcome"] for d in data] == ["infra_error"]
+        assert (
+            json.loads(auth_client.get("/api/export/generation-runs.json?outcome=infra_error").content)[0]["usable"]
+            is False
+        )
 
     def test_user_scoping(self, auth_client, user, other_user):
-        GenerationJobFactory(created_by=user)
-        GenerationJobFactory(created_by=other_user)
-        resp = auth_client.get("/api/export/generation-jobs.json")
-        data = json.loads(resp.content)
+        make_run(user, LLMModelFactory())
+        make_run(other_user, LLMModelFactory())
+        data = json.loads(auth_client.get("/api/export/generation-runs.json").content)
         assert len(data) == 1
+
+
+# ── Run bundle ────────────────────────────────────────────────────────────────
+
+
+def _zip(resp):
+    import zipfile
+
+    return zipfile.ZipFile(io.BytesIO(resp.content))
+
+
+class TestRunBundle:
+    def test_bundle_holds_manifest_files_lock_task_and_code(self, auth_client, user):
+        from backend.generation import blobs
+
+        run = make_run(user, LLMModelFactory(model_id="acme/m"))
+        add_file(run, "backend/starter.py", "a = 1\n", origin=choices.FileOrigin.STARTER)
+        add_file(run, "frontend/package-lock.json", "{}\n", excluded="lockfile")
+        add_file(run, "frontend/dist/app.js", "x\n", origin=choices.FileOrigin.ARTIFACT)
+        factories.RunManifestFactory.create(run=run)
+        lock = {"lock_version": 1, "files": {}}
+        run.resolved_lock_blob = blobs.put_json(lock)
+        run.lock_source = "platform"
+        run.save(update_fields=["resolved_lock_blob", "lock_source"])
+
+        resp = auth_client.get(f"/api/export/runs/{run.id}/bundle.zip")
+        assert resp.status_code == HTTPStatus.OK
+        assert resp["Content-Type"] == "application/zip"
+        zf = _zip(resp)
+        names = set(zf.namelist())
+        assert {"manifest.json", "files.csv", "resolved_lock.json", "task.json", "run.json"} <= names
+        assert {"code/app.py", "code/backend/starter.py", "code/frontend/package-lock.json"} <= names
+        assert "code/frontend/dist/app.js" not in names  # artifacts are not the app tree
+
+        manifest = json.loads(zf.read("manifest.json"))
+        assert manifest["protocol"] == "app@1"
+        files = {r["path"]: r for r in csv.DictReader(io.StringIO(zf.read("files.csv").decode()))}
+        assert list(next(iter(files.values())))[:4] == ["path", "origin", "sha", "loc"]
+        assert (files["app.py"]["origin"], files["app.py"]["loc"]) == ("authored", "1000")
+        assert files["backend/starter.py"]["origin"] == "starter"
+        assert files["frontend/package-lock.json"]["excluded"] == "lockfile"
+        assert files["app.py"]["sha"] == run.files.get(path="app.py").blob
+        recorded = json.loads(zf.read("resolved_lock.json"))
+        assert (recorded["recorded"], recorded["lock_source"], recorded["lock"]) == (True, "platform", lock)
+        facts = json.loads(zf.read("run.json"))
+        assert (facts["loc_model"], facts["model_id"]) == (1000, "acme/m")
+        assert json.loads(zf.read("task.json"))["ref"] == run.task_version.ref
+
+    def test_a_run_without_a_lock_or_manifest_says_so(self, auth_client, user):
+        run = make_run(user, LLMModelFactory())
+        zf = _zip(auth_client.get(f"/api/export/runs/{run.id}/bundle.zip"))
+        assert json.loads(zf.read("manifest.json")) is None
+        lock = json.loads(zf.read("resolved_lock.json"))
+        assert (lock["recorded"], lock["lock"]) == (False, None)
+
+    def test_a_slot_variant_bundles_the_parent_tree_with_its_own_files(self, auth_client, user):
+        variant = factories.GenerationRunFactory.create(slot_single_shot=True, tested=True, created_by=user)
+        parent = variant.parent_run
+        add_file(parent, "backend/routes.py", "def a():\n    return 1\n")
+        add_file(parent, "backend/app.py", "app = 1\n", origin=choices.FileOrigin.STARTER)
+        add_file(variant, "backend/routes.py", "def a():\n    return 2\n", origin=choices.FileOrigin.SLOT)
+
+        zf = _zip(auth_client.get(f"/api/export/runs/{variant.id}/bundle.zip"))
+        files = {r["path"]: r for r in csv.DictReader(io.StringIO(zf.read("files.csv").decode()))}
+        assert (files["backend/routes.py"]["origin"], files["backend/app.py"]["origin"]) == ("slot", "parent")
+        assert zf.read("code/backend/routes.py").decode() == "def a():\n    return 2\n"
+        assert json.loads(zf.read("resolved_lock.json"))["from_parent_run"] == str(parent.id)
+
+    def test_another_users_run_is_not_found(self, auth_client, other_user, client):
+        run = make_run(other_user, LLMModelFactory())
+        assert auth_client.get(f"/api/export/runs/{run.id}/bundle.zip").status_code == HTTPStatus.NOT_FOUND
+        client.logout()
+        assert client.get(f"/api/export/runs/{run.id}/bundle.zip").status_code == HTTPStatus.UNAUTHORIZED
 
 
 # ── Analysis tasks ────────────────────────────────────────────────────────────

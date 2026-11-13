@@ -40,6 +40,7 @@ def test_build_action_completes():
             "backend.runtime.services.docker_manager.client",
             return_value=mock_client,
         ),
+        patch("backend.execution.api.wake_preview_build") as wake,
     ):
         user = UserFactory()
         container = ContainerInstanceFactory(
@@ -51,6 +52,10 @@ def test_build_action_completes():
             ContainerAction.ActionType.BUILD,
             user,
         )
+        assert action.status == ContainerAction.Status.PENDING
+        wake.assert_called_once_with(action.id)
+        # The executor, rather than an unbounded web thread, owns cache misses.
+        container_service._execute(action.id)
 
         deadline = time.time() + 10
         while time.time() < deadline:
@@ -273,3 +278,70 @@ def test_remove_action_keeps_shared_image():
 
     assert action.status == ContainerAction.Status.COMPLETED
     mock_client.images.remove.assert_not_called()
+
+
+# -- hosted-app credentials (spec 8.6; U1 human_eval ask) ---------------------------------------------
+
+
+def _host_run(monkeypatch, credentials):
+    """Run ``_do_build`` for a run-backed container with a cached image; returns (container, env passed)."""
+    from types import SimpleNamespace
+
+    from backend.generation import evaluation
+    from backend.generation.testing import factories as gen_factories
+
+    if isinstance(credentials, BaseException):
+
+        def fake_credentials(run):
+            raise credentials
+    else:
+
+        def fake_credentials(run):
+            return credentials
+
+    monkeypatch.setattr(evaluation, "credentials", fake_credentials)
+    run = gen_factories.GenerationRunFactory()
+    container = ContainerInstanceFactory(
+        status=ContainerInstance.Status.PENDING,
+        generation_job=run,
+        metadata={"runtime_env": {"source": "evaluation.credentials", "admin_password_sha256": "stale"}},
+    )
+    action = ContainerActionFactory(container=container, action_type=ContainerAction.ActionType.BUILD)
+    started = {}
+
+    def run_container(image, name, ports, env, *args, **kwargs):
+        started["env"] = dict(env)
+        return "cid-1"
+
+    cached = SimpleNamespace(image_tag="llmlab/sample:t", image_id="sha256:x", log="", metrics=dict)
+    monkeypatch.setattr(container_service.docker_manager, "ping", lambda: True)
+    monkeypatch.setattr(container_service.docker_manager, "run_container", run_container)
+    monkeypatch.setattr(container_service, "_verify_running", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(container_service, "publish_container_status", lambda *a, **k: None)
+    monkeypatch.setattr(container_service.traefik_router, "write_route", lambda *a, **k: None)
+    monkeypatch.setattr("backend.runtime.services.smoke.run_smoke", lambda *a, **k: {"passed": True})
+    container_service._do_build(action, container, cached_build=cached)
+    container.refresh_from_db()
+    return container, started.get("env")
+
+
+@pytest.mark.django_db
+def test_hosted_run_gets_record_credentials_and_a_hash_stamp(monkeypatch):
+    from backend.human_eval.services.credentials import container_env_matches
+
+    record = {"admin_username": "admin", "admin_password": "pw-123", "secret_key": "sk-456"}
+    container, env = _host_run(monkeypatch, record)
+    assert env == {"ADMIN_PASSWORD": "pw-123", "SECRET_KEY": "sk-456"}
+    stamp = container.metadata["runtime_env"]
+    assert stamp["source"] == "evaluation.credentials"
+    assert "pw-123" not in str(container.metadata)
+    assert "sk-456" not in str(container.metadata)
+    assert container_env_matches(container, "pw-123")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("error", [NotImplementedError("stub"), LookupError("no record"), RuntimeError("boom")])
+def test_hosted_run_without_a_record_starts_without_credentials_or_stamp(monkeypatch, error):
+    container, env = _host_run(monkeypatch, error)
+    assert env == {}
+    assert "runtime_env" not in container.metadata  # a stale stamp never vouches for the new env

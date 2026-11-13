@@ -1,0 +1,2793 @@
+{
+  "_fixture_note": "In-memory MSS v2 preview on the 2026-11-09 catalog with recorded 7-day popularity and models.dev prices, OpenRouter budget $100, capped sensitivity draws (not the final selection). Test fixture only.",
+  "version": "mss-2.0",
+  "as_of": "2026-11-09",
+  "params": {
+    "n": 10,
+    "tier_quotas": { "frontier": 3, "mid": 3, "budget": 4 },
+    "tier_cuts": null,
+    "vendor_max": 2,
+    "vendors_min": 6,
+    "open_min": 3,
+    "closed_min": 3,
+    "claude_min": 1,
+    "origin_us_min": 0,
+    "origin_cn_min": 0,
+    "quality_floor": true,
+    "floor_percentiles": [50.0, 40.0, 33.0],
+    "missing_capability_popularity_pct": 75.0,
+    "contingency": 0.15,
+    "anthropic_budget": 200.0,
+    "openrouter_budget": null,
+    "study_months": 1,
+    "version": "mss-2.0",
+    "weights": {
+      "popularity": 0.4,
+      "price": 0.3,
+      "capability": 0.2,
+      "recency": 0.1
+    },
+    "tier_weights": {
+      "popularity": 0.45,
+      "capability": 0.3,
+      "price": 0.15,
+      "recency": 0.1
+    },
+    "reference_basket": {
+      "prompt_mtok": 0.9,
+      "output_mtok": 0.036,
+      "cache_hit": 0.8
+    },
+    "planning_basket": {
+      "prompt_mtok": 1.1,
+      "output_mtok": 0.045,
+      "cache_hit": 0.8
+    },
+    "retry_factor": 1.25,
+    "runs_per_model": 30,
+    "include_previews": false,
+    "exclude": [],
+    "force": [],
+    "seed": 20261109,
+    "draws": { "S1": 2000, "S2": 500, "S3": 300 },
+    "dirichlet_concentration": 50.0
+  },
+  "constraints": {
+    "n": 10,
+    "tier_quotas": { "frontier": 3, "mid": 3, "budget": 4 },
+    "vendor_max": 2,
+    "vendors_min": 6,
+    "open_min": 3,
+    "closed_min": 3,
+    "claude_min": 1,
+    "origin_us_min": 0,
+    "origin_cn_min": 0,
+    "anthropic_budget_effective": 170.0,
+    "openrouter_budget_effective": 85.0
+  },
+  "budgets": {
+    "contingency": 0.15,
+    "anthropic_usd": 200.0,
+    "anthropic_effective": 170.0,
+    "openrouter_available_usd": 100.0,
+    "openrouter_source": "explicit --openrouter-budget / parameter",
+    "openrouter_credit": null,
+    "openrouter_effective": 85.0
+  },
+  "flow": [
+    {
+      "step": "K0",
+      "label": "LLMModel rows",
+      "remaining": 512,
+      "excluded": []
+    },
+    {
+      "step": "K1",
+      "label": "Routers, aliases and :batch rows dropped",
+      "remaining": 410,
+      "excluded": [
+        { "id": "anthropic/claude-fable-5.1:batch", "code": "batch_api" },
+        { "id": "anthropic/claude-fable-5:batch", "code": "batch_api" },
+        { "id": "~anthropic/claude-fable-latest", "code": "alias" }
+      ]
+    },
+    {
+      "step": "K2-K3",
+      "label": "Variants (17 rows) and dated snapshots (13 rows) merged",
+      "remaining": 346,
+      "excluded": []
+    },
+    {
+      "step": "K5",
+      "label": "Local route rows mapped to their canonical model",
+      "remaining": 348,
+      "excluded": [
+        {
+          "id": "local-opencode-go/crouton-alpha-free",
+          "code": "unlinked_local"
+        },
+        {
+          "id": "local-opencode-go/iceman-contributor-free",
+          "code": "unlinked_local"
+        }
+      ]
+    },
+    {
+      "step": "K4",
+      "label": "Prerelease builds merged into their GA model",
+      "remaining": 339,
+      "excluded": [
+        {
+          "id": "deepseek/deepseek-v3.2-exp",
+          "code": "merged_into:deepseek/deepseek-v3.2"
+        },
+        {
+          "id": "google/gemini-2.5-pro-preview",
+          "code": "merged_into:google/gemini-2.5-pro"
+        },
+        {
+          "id": "google/gemini-3-pro-image-preview",
+          "code": "merged_into:google/gemini-3-pro-image"
+        }
+      ]
+    },
+    {
+      "step": "K6",
+      "label": "Canonical models with their routes",
+      "remaining": 339,
+      "excluded": []
+    },
+    {
+      "step": "E1",
+      "label": "Reachable on a study route now",
+      "remaining": 339,
+      "excluded": []
+    },
+    {
+      "step": "E2",
+      "label": "Tool calling",
+      "remaining": 275,
+      "excluded": [
+        { "id": "aion-labs/aion-rp-llama-3.1-8b", "code": "no_tool_calling" },
+        { "id": "anthracite-org/magnum-v4-72b", "code": "no_tool_calling" },
+        { "id": "bytedance/ui-tars-1.5-7b", "code": "no_tool_calling" }
+      ]
+    },
+    {
+      "step": "E3",
+      "label": "Context window >= 128k tokens",
+      "remaining": 260,
+      "excluded": [
+        { "id": "google/gemini-nano-banana-2.1", "code": "context_too_small" },
+        { "id": "liquid/lfm-2.5-2.6b", "code": "context_too_small" },
+        { "id": "mistralai/mistral-saba", "code": "context_too_small" }
+      ]
+    },
+    {
+      "step": "E4",
+      "label": "Text input and text output",
+      "remaining": 260,
+      "excluded": []
+    },
+    {
+      "step": "E5",
+      "label": "Generally available (not free-only, deprecated or prerelease)",
+      "remaining": 237,
+      "excluded": [
+        { "id": "amazon/nova-premier-v1", "code": "deprecated" },
+        { "id": "bytedance-seed/seed-1.6", "code": "deprecated" },
+        { "id": "bytedance-seed/seed-1.6-flash", "code": "deprecated" }
+      ]
+    },
+    {
+      "step": "E6",
+      "label": "Released within 365 days",
+      "remaining": 168,
+      "excluded": [
+        { "id": "amazon/nova-lite-v1", "code": "too_old" },
+        { "id": "amazon/nova-micro-v1", "code": "too_old" },
+        { "id": "amazon/nova-pro-v1", "code": "too_old" }
+      ]
+    },
+    {
+      "step": "E7",
+      "label": "Newest model of its product line",
+      "remaining": 104,
+      "excluded": [
+        {
+          "id": "aion-labs/aion-3.0",
+          "code": "superseded_by:aion-labs/aion-3.5"
+        },
+        {
+          "id": "aion-labs/aion-2.0",
+          "code": "superseded_by:aion-labs/aion-3.5"
+        },
+        {
+          "id": "aion-labs/aion-3.0-mini",
+          "code": "superseded_by:aion-labs/aion-3.5-mini"
+        }
+      ]
+    },
+    {
+      "step": "E8",
+      "label": "Popularity and price evidence present",
+      "remaining": 51,
+      "excluded": [
+        { "id": "aion-labs/aion-3.5", "code": "insufficient_evidence" },
+        { "id": "aion-labs/aion-3.5-mini", "code": "insufficient_evidence" },
+        { "id": "amazon/nova-2-lite-v1", "code": "insufficient_evidence" }
+      ]
+    }
+  ],
+  "tiers": {
+    "rule": "tertiles of the reference run cost over the eligible frame",
+    "budget_max_usd_per_run": 0.1224,
+    "frontier_min_usd_per_run_exclusive": 0.5976,
+    "scale": [1.0, 1.0],
+    "counts": { "frontier": 17, "mid": 17, "budget": 17 },
+    "bands_usd": {
+      "budget": [0.01, 0.1224],
+      "mid": [0.1224, 0.5976],
+      "frontier": [0.5976, 10.0]
+    },
+    "capability_by_tier": {
+      "frontier": [0.46865, 0.515975, 0.554725, 0.573025, 0.61145],
+      "mid": [0.05885, 0.083275, 0.32965, 0.42515, 0.432025],
+      "budget": [
+        0.3235, 0.33115, 0.347075, 0.391625, 0.4229, 0.43855, 0.4458, 0.467925
+      ]
+    }
+  },
+  "floor": {
+    "levels": { "frontier": 50.0, "mid": 50.0, "budget": 50.0 },
+    "relaxations": [],
+    "popularity_cut_for_missing_capability": 0.6785295
+  },
+  "sources": [
+    {
+      "name": "OpenRouter Data API rankings-daily (popularity)",
+      "url": "https://openrouter.ai/api/v1/datasets/rankings-daily",
+      "license": "CC BY 4.0",
+      "citation": "Source: OpenRouter (openrouter.ai/rankings), as of 2026-11-09T09:22:19.743Z",
+      "as_of": "2026-11-09T09:22:19.743Z",
+      "fetched_at": "2026-11-09T09:22:19+00:00",
+      "window": { "start": "2026-11-02", "end": "2026-11-08", "days": 7 },
+      "snapshot_id": null
+    },
+    {
+      "name": "First-party list prices (models.dev provider records; OpenRouter endpoints as fallback)",
+      "url": "https://models.dev/api.json",
+      "license": "MIT (models.dev)",
+      "as_of": "2026-11-09",
+      "fetched_at": ["2026-11-09"]
+    },
+    {
+      "name": "LMArena WebDev leaderboard (capability)",
+      "url": "https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset",
+      "license": "CC BY 4.0",
+      "as_of": "2026-10-28",
+      "publish_dates": ["2026-10-28"]
+    },
+    {
+      "name": "OpenCode Go monthly limits",
+      "url": "https://opencode.ai/docs/go",
+      "as_of": "2026-11-09",
+      "plan": "Go ($10)"
+    },
+    {
+      "name": "OpenRouter credit (B-openrouter)",
+      "url": "https://openrouter.ai/api/v1/credits",
+      "as_of": null,
+      "value_usd": 100.0,
+      "source": "explicit --openrouter-budget / parameter"
+    }
+  ],
+  "validity": {
+    "spearman_popularity_vs_lmarena_interactions": { "rho": 0.4439, "n": 19 },
+    "spearman_popularity_vs_hf_downloads_open_weight": {
+      "rho": 0.4377,
+      "n": 21
+    },
+    "in_code_tag_top10": [
+      "anthropic/claude-haiku-5.5",
+      "deepseek/deepseek-v4.1-flash",
+      "meta/muse-spark-1.3",
+      "minimax/minimax-m3.1-flash",
+      "moonshotai/kimi-k3.1-pro",
+      "openai/gpt-6-luna",
+      "openai/gpt-6.1-sol",
+      "tencent/hy4",
+      "xiaomi/mimo-v2.6-flash",
+      "z-ai/glm-5.3",
+      "z-ai/glm-5.3-flash"
+    ]
+  },
+  "candidates": [
+    {
+      "canonical_id": "anthropic/claude-fable-5.1",
+      "anchor_model_id": "anthropic/claude-fable-5.1",
+      "display_name": "Anthropic: Claude Fable 5.1",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "anthropic",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.532131,
+        "price": 0.124553,
+        "capability": null,
+        "recency": 0.810959
+      },
+      "mss": 0.414143,
+      "mss_tier": 0.523374,
+      "tier": "frontier",
+      "route": "anthropic",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "anthropic/claude-haiku-5.5",
+      "anchor_model_id": "anthropic/claude-haiku-5.5",
+      "display_name": "Anthropic: Claude Haiku 5.5",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "anthropic",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.592018,
+        "price": 0.773827,
+        "capability": 0.347075,
+        "recency": 0.909589
+      },
+      "mss": 0.629329,
+      "mss_tier": 0.517925,
+      "tier": "budget",
+      "route": "anthropic",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.347 < 0.407)"
+    },
+    {
+      "canonical_id": "anthropic/claude-opus-5.5",
+      "anchor_model_id": "anthropic/claude-opus-5.5",
+      "display_name": "Anthropic: Claude Opus 5.5",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "anthropic",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.987792,
+        "price": 0.251167,
+        "capability": null,
+        "recency": 0.868493
+      },
+      "mss": 0.696645,
+      "mss_tier": 0.891039,
+      "tier": "frontier",
+      "route": "anthropic",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "anthropic/claude-sonnet-5.5",
+      "anchor_model_id": "anthropic/claude-sonnet-5.5",
+      "display_name": "Anthropic: Claude Sonnet 5.5",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "anthropic",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.785014,
+        "price": 0.35151,
+        "capability": null,
+        "recency": 0.884932
+      },
+      "mss": 0.63494,
+      "mss_tier": 0.81575,
+      "tier": "frontier",
+      "route": "anthropic",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "deepseek/deepseek-v4-pro",
+      "anchor_model_id": "deepseek/deepseek-v4-pro",
+      "display_name": "DeepSeek: DeepSeek V4 Pro 0423",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "deepseek",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.599321,
+        "price": 0.5621,
+        "capability": 0.32965,
+        "recency": 0.758904
+      },
+      "mss": 0.550179,
+      "mss_tier": 0.54527,
+      "tier": "mid",
+      "route": "go",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "deepseek/deepseek-v4.1-flash",
+      "anchor_model_id": "deepseek/deepseek-v4.1-flash",
+      "display_name": "DeepSeek: DeepSeek V4.1 Flash",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "deepseek",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 1.0,
+        "price": 0.764826,
+        "capability": 0.4229,
+        "recency": 0.936986
+      },
+      "mss": 0.807726,
+      "mss_tier": 0.72328,
+      "tier": "budget",
+      "route": "go",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "google/gemini-3-pro-image",
+      "anchor_model_id": "google/gemini-3-pro-image",
+      "display_name": "Google: Nano Banana Pro (Gemini 3 Pro Image)",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "google",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.558866,
+        "price": 0.071083,
+        "capability": null,
+        "recency": 0.547945
+      },
+      "mss": 0.374582,
+      "mss_tier": 0.474895,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "google/gemini-3.5-flash-lite",
+      "anchor_model_id": "google/gemini-3.5-flash-lite",
+      "display_name": "Google: Gemini 3.5 Flash Lite",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "google",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.297584,
+        "price": 0.593647,
+        "capability": null,
+        "recency": 0.69589
+      },
+      "mss": 0.458396,
+      "mss_tier": 0.464152,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "google/gemini-3.8-flash",
+      "anchor_model_id": "google/gemini-3.8-flash",
+      "display_name": "Google: Gemini 3.8 Flash",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "google",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.654663,
+        "price": 0.496485,
+        "capability": null,
+        "recency": 0.813699
+      },
+      "mss": 0.615226,
+      "mss_tier": 0.619829,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "google/gemini-4-argon",
+      "anchor_model_id": "google/gemini-4-argon",
+      "display_name": "Google: Gemini 4 Argon",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "google",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.675187,
+        "price": 0.367092,
+        "capability": 0.573025,
+        "recency": 0.926027
+      },
+      "mss": 0.58741,
+      "mss_tier": 0.70335,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "meituan/longcat-2.0",
+      "anchor_model_id": "meituan/longcat-2.0",
+      "display_name": "Meituan: LongCat 2.0",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "meituan",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.262166,
+        "price": 0.664483,
+        "capability": null,
+        "recency": 0.638356
+      },
+      "mss": 0.460059,
+      "mss_tier": 0.275731,
+      "tier": "budget",
+      "route": "go",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "meta/muse-spark-1.3",
+      "anchor_model_id": "meta/muse-spark-1.3",
+      "display_name": "Meta: Muse Spark 1.3",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "meta",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.770384,
+        "price": 0.437788,
+        "capability": 0.42515,
+        "recency": 0.813699
+      },
+      "mss": 0.60589,
+      "mss_tier": 0.575143,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "minimax/minimax-m3",
+      "anchor_model_id": "minimax/minimax-m3",
+      "display_name": "MiniMax: MiniMax M3",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "minimax",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.471298,
+        "price": 0.617544,
+        "capability": 0.083275,
+        "recency": 0.558904
+      },
+      "mss": 0.446328,
+      "mss_tier": 0.429978,
+      "tier": "mid",
+      "route": "go",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.083 < 0.330)"
+    },
+    {
+      "canonical_id": "minimax/minimax-m3.1-flash",
+      "anchor_model_id": "minimax/minimax-m3.1-flash:free",
+      "display_name": "MiniMax: MiniMax M3.1 Flash (free)",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "minimax",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.69916,
+        "price": 0.742071,
+        "capability": 0.33115,
+        "recency": 0.942466
+      },
+      "mss": 0.662762,
+      "mss_tier": 0.551512,
+      "tier": "budget",
+      "route": "go",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.331 < 0.407)"
+    },
+    {
+      "canonical_id": "mistralai/devstral-2512",
+      "anchor_model_id": "mistralai/devstral-2512",
+      "display_name": "Mistral: Devstral 2 2512",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "mistralai",
+      "origin": "EU",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.366988,
+        "price": 0.454839,
+        "capability": null,
+        "recency": 0.082192
+      },
+      "mss": 0.364333,
+      "mss_tier": 0.291516,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "mistralai/ministral-14b-2512",
+      "anchor_model_id": "mistralai/ministral-14b-2512",
+      "display_name": "Mistral: Ministral 3 14B 2512",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "mistralai",
+      "origin": "EU",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.221145,
+        "price": 0.746526,
+        "capability": null,
+        "recency": 0.063014
+      },
+      "mss": 0.398396,
+      "mss_tier": 0.215654,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "mistralai/ministral-3b-2512",
+      "anchor_model_id": "mistralai/ministral-3b-2512",
+      "display_name": "Mistral: Ministral 3 3B 2512",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "mistralai",
+      "origin": "EU",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.170973,
+        "price": 0.846869,
+        "capability": null,
+        "recency": 0.063014
+      },
+      "mss": 0.410939,
+      "mss_tier": 0.242702,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "mistralai/ministral-8b-2512",
+      "anchor_model_id": "mistralai/ministral-8b-2512",
+      "display_name": "Mistral: Ministral 3 8B 2512",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "mistralai",
+      "origin": "EU",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.200322,
+        "price": 0.788172,
+        "capability": null,
+        "recency": 0.063014
+      },
+      "mss": 0.403602,
+      "mss_tier": 0.22688,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "mistralai/mistral-small-2603",
+      "anchor_model_id": "mistralai/mistral-small-2603",
+      "display_name": "Mistral: Mistral Small 4",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "mistralai",
+      "origin": "EU",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.223372,
+        "price": 0.742071,
+        "capability": null,
+        "recency": 0.347945
+      },
+      "mss": 0.433456,
+      "mss_tier": 0.255158,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "moonshotai/kimi-k2.7-code",
+      "anchor_model_id": "moonshotai/kimi-k2.7-code",
+      "display_name": "MoonshotAI: Kimi K2.7 Code",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "moonshotai",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.370232,
+        "price": 0.448351,
+        "capability": 0.05885,
+        "recency": 0.589041
+      },
+      "mss": 0.353272,
+      "mss_tier": 0.269621,
+      "tier": "mid",
+      "route": "go",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.059 < 0.330)"
+    },
+    {
+      "canonical_id": "moonshotai/kimi-k3",
+      "anchor_model_id": "moonshotai/kimi-k3",
+      "display_name": "MoonshotAI: Kimi K3",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "moonshotai",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.777344,
+        "price": 0.295798,
+        "capability": 0.515975,
+        "recency": 0.682192
+      },
+      "mss": 0.571091,
+      "mss_tier": 0.681602,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.516 < 0.555)"
+    },
+    {
+      "canonical_id": "moonshotai/kimi-k3.1-pro",
+      "anchor_model_id": "local-opencode-go/kimi-k3.1-pro",
+      "display_name": "kimi-k3.1-pro",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "moonshotai",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.878782,
+        "price": 0.354495,
+        "capability": 0.61145,
+        "recency": 0.953425
+      },
+      "mss": 0.675494,
+      "mss_tier": 0.804602,
+      "tier": "frontier",
+      "route": null,
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "openai/gpt-5.3-codex",
+      "anchor_model_id": "openai/gpt-5.3-codex",
+      "display_name": "OpenAI: GPT-5.3-Codex",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.423646,
+        "price": 0.341523,
+        "capability": null,
+        "recency": 0.241096
+      },
+      "mss": 0.370031,
+      "mss_tier": 0.486218,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "openai/gpt-5.4-mini",
+      "anchor_model_id": "openai/gpt-5.4-mini",
+      "display_name": "OpenAI: GPT-5.4 Mini",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.351959,
+        "price": 0.484898,
+        "capability": null,
+        "recency": 0.350685
+      },
+      "mss": 0.401652,
+      "mss_tier": 0.348271,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "openai/gpt-5.4-nano",
+      "anchor_model_id": "openai/gpt-5.4-nano",
+      "display_name": "OpenAI: GPT-5.4 Nano",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.257666,
+        "price": 0.673484,
+        "capability": null,
+        "recency": 0.350685
+      },
+      "mss": 0.425225,
+      "mss_tier": 0.237061,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "openai/gpt-5.5",
+      "anchor_model_id": "openai/gpt-5.5",
+      "display_name": "OpenAI: GPT-5.5",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.489277,
+        "price": 0.210261,
+        "capability": null,
+        "recency": 0.452055
+      },
+      "mss": 0.379993,
+      "mss_tier": 0.489583,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "openai/gpt-5.5-pro",
+      "anchor_model_id": "openai/gpt-5.5-pro",
+      "display_name": "OpenAI: GPT-5.5 Pro",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.681872,
+        "price": 0.0,
+        "capability": null,
+        "recency": 0.452055
+      },
+      "mss": 0.397443,
+      "mss_tier": 0.502926,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "openai/gpt-5.6-terra",
+      "anchor_model_id": "openai/gpt-5.6-terra",
+      "display_name": "OpenAI: GPT-5.6 Terra",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.429599,
+        "price": 0.329618,
+        "capability": null,
+        "recency": 0.663014
+      },
+      "mss": 0.421283,
+      "mss_tier": 0.544064,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "openai/gpt-6-astra",
+      "anchor_model_id": "openai/gpt-6-astra",
+      "display_name": "OpenAI: GPT-6 Astra",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.597716,
+        "price": 0.107161,
+        "capability": null,
+        "recency": 0.819178
+      },
+      "mss": 0.44144,
+      "mss_tier": 0.557572,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "openai/gpt-6-luna",
+      "anchor_model_id": "openai/gpt-6-luna",
+      "display_name": "OpenAI: GPT-6 Luna",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.735835,
+        "price": 0.773827,
+        "capability": 0.3235,
+        "recency": 0.868493
+      },
+      "mss": 0.678032,
+      "mss_tier": 0.571461,
+      "tier": "budget",
+      "route": "go",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.324 < 0.407)"
+    },
+    {
+      "canonical_id": "openai/gpt-6.1-sol",
+      "anchor_model_id": "openai/gpt-6.1-sol",
+      "display_name": "OpenAI: GPT-6.1 Sol",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "openai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.862973,
+        "price": 0.35151,
+        "capability": null,
+        "recency": 0.887671
+      },
+      "mss": 0.674262,
+      "mss_tier": 0.866257,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "qwen/qwen3.5-122b-a10b",
+      "anchor_model_id": "qwen/qwen3.5-122b-a10b",
+      "display_name": "Qwen: Qwen3.5-122B-A10B",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "qwen",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.373887,
+        "price": 0.441041,
+        "capability": null,
+        "recency": 0.290411
+      },
+      "mss": 0.388635,
+      "mss_tier": 0.312816,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "qwen/qwen3.5-397b-a17b",
+      "anchor_model_id": "qwen/qwen3.5-397b-a17b",
+      "display_name": "Qwen: Qwen3.5 397B A17B",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "qwen",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.39871,
+        "price": 0.391395,
+        "capability": null,
+        "recency": 0.268493
+      },
+      "mss": 0.37969,
+      "mss_tier": 0.500303,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "qwen/qwen3.6-35b-a3b",
+      "anchor_model_id": "qwen/qwen3.6-35b-a3b",
+      "display_name": "Qwen: Qwen3.6 35B A3B",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "qwen",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.36469,
+        "price": 0.459435,
+        "capability": null,
+        "recency": 0.435616
+      },
+      "mss": 0.409085,
+      "mss_tier": 0.344818,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "qwen/qwen3.7-plus",
+      "anchor_model_id": "qwen/qwen3.7-plus",
+      "display_name": "Qwen: Qwen3.7 Plus",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "qwen",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.313104,
+        "price": 0.562608,
+        "capability": null,
+        "recency": 0.561644
+      },
+      "mss": 0.437735,
+      "mss_tier": 0.425975,
+      "tier": "mid",
+      "route": "go",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "qwen/qwen3.8-flash",
+      "anchor_model_id": "qwen/qwen3.8-flash",
+      "display_name": "Qwen: Qwen3.8 Flash",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "qwen",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.448969,
+        "price": 0.730281,
+        "capability": 0.4458,
+        "recency": 0.794521
+      },
+      "mss": 0.567284,
+      "mss_tier": 0.453649,
+      "tier": "budget",
+      "route": "go",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "qwen/qwen3.8-max",
+      "anchor_model_id": "qwen/qwen3.8-max-0902",
+      "display_name": "Qwen: Qwen3.8 Max (0902)",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "qwen",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.415636,
+        "price": 0.357543,
+        "capability": 0.554725,
+        "recency": 0.813699
+      },
+      "mss": 0.465832,
+      "mss_tier": 0.566317,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "qwen/qwen3.8-omni-flash",
+      "anchor_model_id": "qwen/qwen3.8-omni-flash",
+      "display_name": "Qwen: Qwen3.8 Omni Flash",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "qwen",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.218378,
+        "price": 0.752059,
+        "capability": null,
+        "recency": 0.854795
+      },
+      "mss": 0.498061,
+      "mss_tier": 0.330257,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "stepfun/step-3.7-flash",
+      "anchor_model_id": "stepfun/step-3.7-flash",
+      "display_name": "StepFun: Step 3.7 Flash",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "stepfun",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.326847,
+        "price": 0.654263,
+        "capability": null,
+        "recency": 0.550685
+      },
+      "mss": 0.477608,
+      "mss_tier": 0.298747,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "tencent/hy4",
+      "anchor_model_id": "tencent/hy4-preview",
+      "display_name": "Tencent: Hy4 preview",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "tencent",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.984468,
+        "price": 0.522667,
+        "capability": null,
+        "recency": 0.986301
+      },
+      "mss": 0.811522,
+      "mss_tier": 0.880945,
+      "tier": "mid",
+      "route": "go",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "x-ai/grok-4.7",
+      "anchor_model_id": "x-ai/grok-4.7",
+      "display_name": "SpaceXAI: Grok 4.7",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "x-ai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.422954,
+        "price": 0.342908,
+        "capability": 0.46865,
+        "recency": 0.865753
+      },
+      "mss": 0.452359,
+      "mss_tier": 0.543611,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.469 < 0.555)"
+    },
+    {
+      "canonical_id": "x-ai/grok-build-0.1",
+      "anchor_model_id": "x-ai/grok-build-0.1",
+      "display_name": "SpaceXAI: Grok Build 0.1",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "x-ai",
+      "origin": "US",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.36069,
+        "price": 0.467435,
+        "capability": null,
+        "recency": 0.432877
+      },
+      "mss": 0.409743,
+      "mss_tier": 0.349324,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "xiaomi/mimo-v2.6-flash",
+      "anchor_model_id": "xiaomi/mimo-v2.6-flash",
+      "display_name": "Xiaomi: MiMo-V2.6-Flash",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "xiaomi",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.551551,
+        "price": 0.809446,
+        "capability": 0.467925,
+        "recency": 0.868493
+      },
+      "mss": 0.643888,
+      "mss_tier": 0.546595,
+      "tier": "budget",
+      "route": "go",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "xiaomi/mimo-v2.6-pro",
+      "anchor_model_id": "xiaomi/mimo-v2.6-pro",
+      "display_name": "Xiaomi: MiMo-V2.6-Pro",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "xiaomi",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.534168,
+        "price": 0.649987,
+        "capability": 0.43855,
+        "recency": 0.868493
+      },
+      "mss": 0.583222,
+      "mss_tier": 0.463994,
+      "tier": "budget",
+      "route": "go",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "xiaomi/mimo-v2.6-pro-ultraspeed",
+      "anchor_model_id": "xiaomi/mimo-v2.6-pro-ultraspeed",
+      "display_name": "Xiaomi: MiMo-V2.6-Pro-UltraSpeed",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "xiaomi",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.436081,
+        "price": 0.316654,
+        "capability": null,
+        "recency": 0.865753
+      },
+      "mss": 0.445005,
+      "mss_tier": 0.570382,
+      "tier": "frontier",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "z-ai/glm-4.6v",
+      "anchor_model_id": "z-ai/glm-4.6v",
+      "display_name": "Z.ai: GLM 4.6V",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "z-ai",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.275705,
+        "price": 0.637406,
+        "capability": null,
+        "recency": 0.079452
+      },
+      "mss": 0.386811,
+      "mss_tier": 0.188589,
+      "tier": "budget",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "z-ai/glm-5-turbo",
+      "anchor_model_id": "z-ai/glm-5-turbo",
+      "display_name": "Z.ai: GLM 5 Turbo",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "z-ai",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.382168,
+        "price": 0.424479,
+        "capability": null,
+        "recency": 0.347945
+      },
+      "mss": 0.393757,
+      "mss_tier": 0.310897,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "z-ai/glm-5.3",
+      "anchor_model_id": "z-ai/glm-5.3",
+      "display_name": "Z.ai: GLM 5.3",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "z-ai",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.820385,
+        "price": 0.407863,
+        "capability": 0.432025,
+        "recency": 0.761644
+      },
+      "mss": 0.613082,
+      "mss_tier": 0.574945,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": true,
+      "floor_reason": null
+    },
+    {
+      "canonical_id": "z-ai/glm-5.3-flash",
+      "anchor_model_id": "z-ai/glm-5.3-flash",
+      "display_name": "Z.ai: GLM 5.3 Flash",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "z-ai",
+      "origin": "CN",
+      "open_weights": true,
+      "scores": {
+        "popularity": 0.846407,
+        "price": 0.725509,
+        "capability": 0.391625,
+        "recency": 0.794521
+      },
+      "mss": 0.713992,
+      "mss_tier": 0.614269,
+      "tier": "budget",
+      "route": "go",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability 0.392 < 0.407)"
+    },
+    {
+      "canonical_id": "z-ai/glm-5.3-flashx",
+      "anchor_model_id": "z-ai/glm-5.3-flashx",
+      "display_name": "Z.ai: GLM 5.3 FlashX",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "z-ai",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.297584,
+        "price": 0.593647,
+        "capability": null,
+        "recency": 0.857534
+      },
+      "mss": 0.478601,
+      "mss_tier": 0.487244,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "z-ai/glm-5v-turbo",
+      "anchor_model_id": "z-ai/glm-5v-turbo",
+      "display_name": "Z.ai: GLM 5V Turbo",
+      "eligible": true,
+      "exclusion": null,
+      "vendor": "z-ai",
+      "origin": "CN",
+      "open_weights": false,
+      "scores": {
+        "popularity": 0.382168,
+        "price": 0.424479,
+        "capability": null,
+        "recency": 0.391781
+      },
+      "mss": 0.399236,
+      "mss_tier": 0.317159,
+      "tier": "mid",
+      "route": "openrouter",
+      "admissible": false,
+      "floor_reason": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    }
+  ],
+  "selection": {
+    "picks": [
+      {
+        "position": 1,
+        "canonical_id": "anthropic/claude-opus-5.5",
+        "display_name": "Anthropic: Claude Opus 5.5",
+        "tier": "frontier",
+        "tier_rank": 1,
+        "mss_rank": 4,
+        "mss": 0.696645,
+        "mss_tier": 0.891039,
+        "scores": {
+          "popularity": 0.987792,
+          "price": 0.251167,
+          "capability": null,
+          "recency": 0.868493
+        },
+        "tier_price_score": 0.6158123078800968,
+        "coverage": 0.8,
+        "missing": ["capability"],
+        "flags": ["capability_missing", "capability_missing_admitted"],
+        "admitted_by": "rank",
+        "vendor": "anthropic",
+        "origin": "US",
+        "open_weights": false,
+        "capability_pct_in_tier": null,
+        "route": "anthropic",
+        "route_reason": "Claude model on the user's Anthropic key",
+        "pinned_version": {
+          "route": "anthropic",
+          "model_id": "local-anthropic/claude-opus-5-5",
+          "served_name": "claude-opus-5-5",
+          "openrouter_permaslug": "anthropic/claude-opus-5.5-20260921"
+        },
+        "run_cost_usd": 1.764,
+        "planning_cost_usd": 81.6,
+        "planning_cost_h0_usd": 240.0,
+        "go_usage": null,
+        "webdev": null,
+        "release_date": "2026-09-22",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 2,
+        "canonical_id": "openai/gpt-6.1-sol",
+        "display_name": "OpenAI: GPT-6.1 Sol",
+        "tier": "frontier",
+        "tier_rank": 2,
+        "mss_rank": 7,
+        "mss": 0.674262,
+        "mss_tier": 0.866257,
+        "scores": {
+          "popularity": 0.862973,
+          "price": 0.35151,
+          "capability": null,
+          "recency": 0.887671
+        },
+        "tier_price_score": 0.8618343745229922,
+        "coverage": 0.8,
+        "missing": ["capability"],
+        "flags": ["capability_missing", "capability_missing_admitted"],
+        "admitted_by": "rank",
+        "vendor": "openai",
+        "origin": "US",
+        "open_weights": false,
+        "capability_pct_in_tier": null,
+        "route": "openrouter",
+        "route_reason": "OpenRouter within the shared budget",
+        "pinned_version": {
+          "route": "openrouter",
+          "model_id": "openai/gpt-6.1-sol",
+          "permaslug": "openai/gpt-6.1-sol-20260929"
+        },
+        "run_cost_usd": 0.882,
+        "planning_cost_usd": 40.8,
+        "planning_cost_h0_usd": 120.0,
+        "go_usage": null,
+        "webdev": null,
+        "release_date": "2026-09-29",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 3,
+        "canonical_id": "anthropic/claude-sonnet-5.5",
+        "display_name": "Anthropic: Claude Sonnet 5.5",
+        "tier": "frontier",
+        "tier_rank": 3,
+        "mss_rank": 10,
+        "mss": 0.63494,
+        "mss_tier": 0.81575,
+        "scores": {
+          "popularity": 0.785014,
+          "price": 0.35151,
+          "capability": null,
+          "recency": 0.884932
+        },
+        "tier_price_score": 0.8618343745229922,
+        "coverage": 0.8,
+        "missing": ["capability"],
+        "flags": ["capability_missing", "capability_missing_admitted"],
+        "admitted_by": "rank",
+        "vendor": "anthropic",
+        "origin": "US",
+        "open_weights": false,
+        "capability_pct_in_tier": null,
+        "route": "anthropic",
+        "route_reason": "Claude model on the user's Anthropic key",
+        "pinned_version": {
+          "route": "anthropic",
+          "model_id": "local-anthropic/claude-sonnet-5-5",
+          "served_name": "claude-sonnet-5-5",
+          "openrouter_permaslug": "anthropic/claude-sonnet-5.5-20260928"
+        },
+        "run_cost_usd": 0.882,
+        "planning_cost_usd": 40.8,
+        "planning_cost_h0_usd": 120.0,
+        "go_usage": null,
+        "webdev": null,
+        "release_date": "2026-09-28",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 4,
+        "canonical_id": "tencent/hy4",
+        "display_name": "Tencent: Hy4 preview",
+        "tier": "mid",
+        "tier_rank": 1,
+        "mss_rank": 1,
+        "mss": 0.811522,
+        "mss_tier": 0.880945,
+        "scores": {
+          "popularity": 0.984468,
+          "price": 0.522667,
+          "capability": null,
+          "recency": 0.986301
+        },
+        "tier_price_score": 0.5001390306495561,
+        "coverage": 0.8,
+        "missing": ["capability"],
+        "flags": ["capability_missing", "capability_missing_admitted"],
+        "admitted_by": "rank",
+        "vendor": "tencent",
+        "origin": "CN",
+        "open_weights": true,
+        "capability_pct_in_tier": null,
+        "route": "go",
+        "route_reason": "served on OpenCode Go within its monthly limit",
+        "pinned_version": {
+          "route": "go",
+          "model_id": "local-opencode-go/hy4",
+          "served_name": "hy4",
+          "note": "identity assumed through the catalog twin"
+        },
+        "run_cost_usd": 0.270396,
+        "planning_cost_usd": 12.4869,
+        "planning_cost_h0_usd": 38.6229375,
+        "go_usage": {
+          "monthly_limit_usd": 60.0,
+          "planning_cost_usd": 12.4869,
+          "share_of_monthly_limit": 0.2081,
+          "weeks_needed": 1,
+          "runs_per_5h": 36
+        },
+        "webdev": null,
+        "release_date": "2026-11-04",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 5,
+        "canonical_id": "meta/muse-spark-1.3",
+        "display_name": "Meta: Muse Spark 1.3",
+        "tier": "mid",
+        "tier_rank": 3,
+        "mss_rank": 14,
+        "mss": 0.60589,
+        "mss_tier": 0.575143,
+        "scores": {
+          "popularity": 0.770384,
+          "price": 0.437788,
+          "capability": 0.42515,
+          "recency": 0.813699
+        },
+        "tier_price_score": 0.13036671016269774,
+        "coverage": 1.0,
+        "missing": [],
+        "flags": [],
+        "admitted_by": "rank",
+        "vendor": "meta",
+        "origin": "US",
+        "open_weights": false,
+        "capability_pct_in_tier": 0.8,
+        "route": "openrouter",
+        "route_reason": "OpenRouter within the shared budget",
+        "pinned_version": {
+          "route": "openrouter",
+          "model_id": "meta/muse-spark-1.3",
+          "permaslug": "meta/muse-spark-1.3-20260902"
+        },
+        "run_cost_usd": 0.486,
+        "planning_cost_usd": 22.4344,
+        "planning_cost_h0_usd": 58.734375,
+        "go_usage": null,
+        "webdev": {
+          "rating": 1620.06,
+          "rating_lower": 1612.67,
+          "rating_upper": 1627.46,
+          "arena_name": "Muse Spark 1.3 (xHigh)",
+          "publish_date": "2026-10-28",
+          "match": "variant",
+          "from_model": "meta/muse-spark-1.3"
+        },
+        "release_date": "2026-09-02",
+        "selection_frequency": 0.483,
+        "robustness": "borderline"
+      },
+      {
+        "position": 6,
+        "canonical_id": "deepseek/deepseek-v4-pro",
+        "display_name": "DeepSeek: DeepSeek V4 Pro 0423",
+        "tier": "mid",
+        "tier_rank": 5,
+        "mss_rank": 19,
+        "mss": 0.550179,
+        "mss_tier": 0.54527,
+        "scores": {
+          "popularity": 0.599321,
+          "price": 0.5621,
+          "capability": 0.32965,
+          "recency": 0.758904
+        },
+        "tier_price_score": 0.6719321207037703,
+        "coverage": 1.0,
+        "missing": [],
+        "flags": [],
+        "admitted_by": "rank",
+        "vendor": "deepseek",
+        "origin": "CN",
+        "open_weights": true,
+        "capability_pct_in_tier": 0.6,
+        "route": "go",
+        "route_reason": "served on OpenCode Go within its monthly limit",
+        "pinned_version": {
+          "route": "go",
+          "model_id": "local-opencode-go/deepseek-v4-pro",
+          "served_name": "deepseek-v4-pro",
+          "note": "identity assumed through the catalog twin"
+        },
+        "run_cost_usd": 0.20592,
+        "planning_cost_usd": 9.5122,
+        "planning_cost_h0_usd": 30.56625,
+        "go_usage": {
+          "monthly_limit_usd": 15.0,
+          "planning_cost_usd": 9.5122,
+          "share_of_monthly_limit": 0.6341,
+          "weeks_needed": 2,
+          "runs_per_5h": 11
+        },
+        "webdev": {
+          "rating": 1581.86,
+          "rating_lower": 1572.39,
+          "rating_upper": 1591.33,
+          "arena_name": "DeepSeek-V4-Pro (High, 20260813)",
+          "publish_date": "2026-10-28",
+          "match": "exact",
+          "from_model": "deepseek/deepseek-v4-pro-0813"
+        },
+        "release_date": "2026-08-13",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 7,
+        "canonical_id": "deepseek/deepseek-v4.1-flash",
+        "display_name": "DeepSeek: DeepSeek V4.1 Flash",
+        "tier": "budget",
+        "tier_rank": 1,
+        "mss_rank": 2,
+        "mss": 0.807726,
+        "mss_tier": 0.72328,
+        "scores": {
+          "popularity": 1.0,
+          "price": 0.764826,
+          "capability": 0.4229,
+          "recency": 0.936986
+        },
+        "tier_price_score": 0.3514123316765505,
+        "coverage": 1.0,
+        "missing": [],
+        "flags": [],
+        "admitted_by": "rank",
+        "vendor": "deepseek",
+        "origin": "CN",
+        "open_weights": true,
+        "capability_pct_in_tier": 0.625,
+        "route": "go",
+        "route_reason": "served on OpenCode Go within its monthly limit",
+        "pinned_version": {
+          "route": "go",
+          "model_id": "local-opencode-go/deepseek-v4.1-flash",
+          "served_name": "deepseek-v4.1-flash",
+          "note": "identity assumed through the catalog twin"
+        },
+        "run_cost_usd": 0.05076,
+        "planning_cost_usd": 2.349,
+        "planning_cost_h0_usd": 7.2,
+        "go_usage": {
+          "monthly_limit_usd": 100.0,
+          "planning_cost_usd": 2.349,
+          "share_of_monthly_limit": 0.0235,
+          "weeks_needed": 1,
+          "runs_per_5h": 319
+        },
+        "webdev": {
+          "rating": 1619.16,
+          "rating_lower": 1608.2,
+          "rating_upper": 1630.12,
+          "arena_name": "DeepSeek-V4.1-Flash-20260910 (Max)",
+          "publish_date": "2026-10-28",
+          "match": "variant",
+          "from_model": "deepseek/deepseek-v4.1-flash"
+        },
+        "release_date": "2026-10-17",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 8,
+        "canonical_id": "xiaomi/mimo-v2.6-flash",
+        "display_name": "Xiaomi: MiMo-V2.6-Flash",
+        "tier": "budget",
+        "tier_rank": 5,
+        "mss_rank": 9,
+        "mss": 0.643888,
+        "mss_tier": 0.546595,
+        "scores": {
+          "popularity": 0.551551,
+          "price": 0.809446,
+          "capability": 0.467925,
+          "recency": 0.868493
+        },
+        "tier_price_score": 0.47446955167918425,
+        "coverage": 1.0,
+        "missing": [],
+        "flags": [],
+        "admitted_by": "rank",
+        "vendor": "xiaomi",
+        "origin": "CN",
+        "open_weights": true,
+        "capability_pct_in_tier": 1.0,
+        "route": "go",
+        "route_reason": "served on OpenCode Go within its monthly limit",
+        "pinned_version": {
+          "route": "go",
+          "model_id": "local-opencode-go/mimo-v2.6-flash",
+          "served_name": "mimo-v2.6-flash",
+          "note": "identity assumed through the catalog twin"
+        },
+        "run_cost_usd": 0.037296,
+        "planning_cost_usd": 1.7199,
+        "planning_cost_h0_usd": 6.2475,
+        "go_usage": {
+          "monthly_limit_usd": 60.0,
+          "planning_cost_usd": 1.7199,
+          "share_of_monthly_limit": 0.0287,
+          "weeks_needed": 1,
+          "runs_per_5h": 261
+        },
+        "webdev": {
+          "rating": 1637.17,
+          "rating_lower": 1628.73,
+          "rating_upper": 1645.62,
+          "arena_name": "MiMo-V2.6-Flash",
+          "publish_date": "2026-10-28",
+          "match": "exact",
+          "from_model": "xiaomi/mimo-v2.6-flash"
+        },
+        "release_date": "2026-09-22",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 9,
+        "canonical_id": "xiaomi/mimo-v2.6-pro",
+        "display_name": "Xiaomi: MiMo-V2.6-Pro",
+        "tier": "budget",
+        "tier_rank": 7,
+        "mss_rank": 16,
+        "mss": 0.583222,
+        "mss_tier": 0.463994,
+        "scores": {
+          "popularity": 0.534168,
+          "price": 0.649987,
+          "capability": 0.43855,
+          "recency": 0.868493
+        },
+        "tier_price_score": 0.03469641432321613,
+        "coverage": 1.0,
+        "missing": [],
+        "flags": [],
+        "admitted_by": "rank",
+        "vendor": "xiaomi",
+        "origin": "CN",
+        "open_weights": true,
+        "capability_pct_in_tier": 0.75,
+        "route": "go",
+        "route_reason": "served on OpenCode Go within its monthly limit",
+        "pinned_version": {
+          "route": "go",
+          "model_id": "local-opencode-go/mimo-v2.6-pro",
+          "served_name": "mimo-v2.6-pro",
+          "note": "identity assumed through the catalog twin"
+        },
+        "run_cost_usd": 0.112212,
+        "planning_cost_usd": 5.1765,
+        "planning_cost_h0_usd": 19.411875,
+        "go_usage": {
+          "monthly_limit_usd": 15.0,
+          "planning_cost_usd": 5.1765,
+          "share_of_monthly_limit": 0.3451,
+          "weeks_needed": 1,
+          "runs_per_5h": 21
+        },
+        "webdev": {
+          "rating": 1625.42,
+          "rating_lower": 1617.01,
+          "rating_upper": 1633.82,
+          "arena_name": "MiMo-V2.6-Pro",
+          "publish_date": "2026-10-28",
+          "match": "exact",
+          "from_model": "xiaomi/mimo-v2.6-pro"
+        },
+        "release_date": "2026-09-22",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      },
+      {
+        "position": 10,
+        "canonical_id": "qwen/qwen3.8-flash",
+        "display_name": "Qwen: Qwen3.8 Flash",
+        "tier": "budget",
+        "tier_rank": 8,
+        "mss_rank": 18,
+        "mss": 0.567284,
+        "mss_tier": 0.453649,
+        "scores": {
+          "popularity": 0.448969,
+          "price": 0.730281,
+          "capability": 0.4458,
+          "recency": 0.794521
+        },
+        "tier_price_score": 0.2561414283242942,
+        "coverage": 1.0,
+        "missing": [],
+        "flags": [],
+        "admitted_by": "rank",
+        "vendor": "qwen",
+        "origin": "CN",
+        "open_weights": false,
+        "capability_pct_in_tier": 0.875,
+        "route": "go",
+        "route_reason": "served on OpenCode Go within its monthly limit",
+        "pinned_version": {
+          "route": "go",
+          "model_id": "local-opencode-go/qwen3.8-flash",
+          "served_name": "qwen3.8-flash",
+          "note": "identity assumed through the catalog twin"
+        },
+        "run_cost_usd": 0.06444,
+        "planning_cost_usd": 2.9711,
+        "planning_cost_h0_usd": 9.043125,
+        "go_usage": {
+          "monthly_limit_usd": 30.0,
+          "planning_cost_usd": 2.9711,
+          "share_of_monthly_limit": 0.099,
+          "weeks_needed": 1,
+          "runs_per_5h": 75
+        },
+        "webdev": {
+          "rating": 1628.32,
+          "rating_lower": 1620.72,
+          "rating_upper": 1635.93,
+          "arena_name": "Qwen3.8-Flash-Next",
+          "publish_date": "2026-10-28",
+          "match": "assumed",
+          "from_model": "qwen/qwen3.8-flash"
+        },
+        "release_date": "2026-08-26",
+        "selection_frequency": 1.0,
+        "robustness": "robust"
+      }
+    ],
+    "by_tier": {
+      "frontier": [
+        "anthropic/claude-opus-5.5",
+        "openai/gpt-6.1-sol",
+        "anthropic/claude-sonnet-5.5"
+      ],
+      "mid": ["tencent/hy4", "meta/muse-spark-1.3", "deepseek/deepseek-v4-pro"],
+      "budget": [
+        "deepseek/deepseek-v4.1-flash",
+        "xiaomi/mimo-v2.6-flash",
+        "xiaomi/mimo-v2.6-pro",
+        "qwen/qwen3.8-flash"
+      ]
+    },
+    "budget_use": {
+      "anthropic": {
+        "planned_usd": 122.4,
+        "available_usd": 200.0,
+        "effective_usd": 170.0
+      },
+      "openrouter": {
+        "planned_usd": 63.23,
+        "available_usd": 100.0,
+        "effective_usd": 85.0,
+        "source": "explicit --openrouter-budget / parameter"
+      },
+      "go": [
+        {
+          "canonical_id": "tencent/hy4",
+          "monthly_limit_usd": 60.0,
+          "planning_cost_usd": 12.4869,
+          "share_of_monthly_limit": 0.2081,
+          "weeks_needed": 1,
+          "runs_per_5h": 36
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4-pro",
+          "monthly_limit_usd": 15.0,
+          "planning_cost_usd": 9.5122,
+          "share_of_monthly_limit": 0.6341,
+          "weeks_needed": 2,
+          "runs_per_5h": 11
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4.1-flash",
+          "monthly_limit_usd": 100.0,
+          "planning_cost_usd": 2.349,
+          "share_of_monthly_limit": 0.0235,
+          "weeks_needed": 1,
+          "runs_per_5h": 319
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-flash",
+          "monthly_limit_usd": 60.0,
+          "planning_cost_usd": 1.7199,
+          "share_of_monthly_limit": 0.0287,
+          "weeks_needed": 1,
+          "runs_per_5h": 261
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-pro",
+          "monthly_limit_usd": 15.0,
+          "planning_cost_usd": 5.1765,
+          "share_of_monthly_limit": 0.3451,
+          "weeks_needed": 1,
+          "runs_per_5h": 21
+        },
+        {
+          "canonical_id": "qwen/qwen3.8-flash",
+          "monthly_limit_usd": 30.0,
+          "planning_cost_usd": 2.9711,
+          "share_of_monthly_limit": 0.099,
+          "weeks_needed": 1,
+          "runs_per_5h": 75
+        }
+      ],
+      "contingency": 0.15,
+      "runs_per_model": 30,
+      "retry_factor": 1.25
+    },
+    "ties_at_4dp": [],
+    "origin_mix": { "US": 4, "CN": 6 },
+    "open_weight_mix": { "False": 5, "True": 5 }
+  },
+  "blocked": [
+    {
+      "canonical_id": "google/gemini-3.8-flash",
+      "tier": "mid",
+      "tier_rank": 2,
+      "mss_tier": 0.619829,
+      "mss": 0.615226,
+      "blocked_by": "floor:Q-quality(capability missing, popularity below the top quartile)"
+    },
+    {
+      "canonical_id": "z-ai/glm-5.3",
+      "tier": "mid",
+      "tier_rank": 4,
+      "mss_tier": 0.574945,
+      "mss": 0.613082,
+      "blocked_by": "budget:B-openrouter"
+    },
+    {
+      "canonical_id": "z-ai/glm-5.3-flash",
+      "tier": "budget",
+      "tier_rank": 2,
+      "mss_tier": 0.614269,
+      "mss": 0.713992,
+      "blocked_by": "floor:Q-quality(capability 0.392 < 0.407)"
+    },
+    {
+      "canonical_id": "openai/gpt-6-luna",
+      "tier": "budget",
+      "tier_rank": 3,
+      "mss_tier": 0.571461,
+      "mss": 0.678032,
+      "blocked_by": "floor:Q-quality(capability 0.324 < 0.407)"
+    },
+    {
+      "canonical_id": "minimax/minimax-m3.1-flash",
+      "tier": "budget",
+      "tier_rank": 4,
+      "mss_tier": 0.551512,
+      "mss": 0.662762,
+      "blocked_by": "floor:Q-quality(capability 0.331 < 0.407)"
+    },
+    {
+      "canonical_id": "anthropic/claude-haiku-5.5",
+      "tier": "budget",
+      "tier_rank": 6,
+      "mss_tier": 0.517925,
+      "mss": 0.629329,
+      "blocked_by": "floor:Q-quality(capability 0.347 < 0.407)"
+    }
+  ],
+  "alternates": {
+    "next_in_tier": {
+      "frontier": [
+        {
+          "canonical_id": "moonshotai/kimi-k3.1-pro",
+          "tier_rank": 4,
+          "mss_tier": 0.804602,
+          "route": null,
+          "selectable": false,
+          "note": "budget:B-go"
+        },
+        {
+          "canonical_id": "google/gemini-4-argon",
+          "tier_rank": 5,
+          "mss_tier": 0.70335,
+          "route": "openrouter",
+          "selectable": true,
+          "note": null
+        },
+        {
+          "canonical_id": "moonshotai/kimi-k3",
+          "tier_rank": 6,
+          "mss_tier": 0.681602,
+          "route": "openrouter",
+          "selectable": false,
+          "note": "floor:Q-quality(capability 0.516 < 0.555)"
+        }
+      ],
+      "mid": [
+        {
+          "canonical_id": "z-ai/glm-5.3-flashx",
+          "tier_rank": 6,
+          "mss_tier": 0.487244,
+          "route": "openrouter",
+          "selectable": false,
+          "note": "floor:Q-quality(capability missing, popularity below the top quartile)"
+        },
+        {
+          "canonical_id": "google/gemini-3.5-flash-lite",
+          "tier_rank": 7,
+          "mss_tier": 0.464152,
+          "route": "openrouter",
+          "selectable": false,
+          "note": "floor:Q-quality(capability missing, popularity below the top quartile)"
+        },
+        {
+          "canonical_id": "minimax/minimax-m3",
+          "tier_rank": 8,
+          "mss_tier": 0.429978,
+          "route": "go",
+          "selectable": false,
+          "note": "floor:Q-quality(capability 0.083 < 0.330)"
+        }
+      ],
+      "budget": [
+        {
+          "canonical_id": "qwen/qwen3.8-omni-flash",
+          "tier_rank": 9,
+          "mss_tier": 0.330257,
+          "route": "openrouter",
+          "selectable": false,
+          "note": "floor:Q-quality(capability missing, popularity below the top quartile)"
+        },
+        {
+          "canonical_id": "stepfun/step-3.7-flash",
+          "tier_rank": 10,
+          "mss_tier": 0.298747,
+          "route": "openrouter",
+          "selectable": false,
+          "note": "floor:Q-quality(capability missing, popularity below the top quartile)"
+        },
+        {
+          "canonical_id": "meituan/longcat-2.0",
+          "tier_rank": 11,
+          "mss_tier": 0.275731,
+          "route": "go",
+          "selectable": false,
+          "note": "floor:Q-quality(capability missing, popularity below the top quartile)"
+        }
+      ]
+    },
+    "replacements": [
+      {
+        "replace": "anthropic/claude-opus-5.5",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      },
+      {
+        "replace": "openai/gpt-6.1-sol",
+        "with": ["google/gemini-4-argon"],
+        "also_leaves": [],
+        "feasible": true
+      },
+      {
+        "replace": "anthropic/claude-sonnet-5.5",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      },
+      {
+        "replace": "tencent/hy4",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      },
+      {
+        "replace": "meta/muse-spark-1.3",
+        "with": ["z-ai/glm-5.3"],
+        "also_leaves": [],
+        "feasible": true
+      },
+      {
+        "replace": "deepseek/deepseek-v4-pro",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      },
+      {
+        "replace": "deepseek/deepseek-v4.1-flash",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      },
+      {
+        "replace": "xiaomi/mimo-v2.6-flash",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      },
+      {
+        "replace": "xiaomi/mimo-v2.6-pro",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      },
+      {
+        "replace": "qwen/qwen3.8-flash",
+        "with": null,
+        "also_leaves": null,
+        "feasible": false
+      }
+    ]
+  },
+  "constraint_status": [
+    {
+      "code": "Q-tier",
+      "kind": "quota",
+      "value": { "frontier": 3, "mid": 3, "budget": 4 },
+      "limit": { "frontier": 3, "mid": 3, "budget": 4 },
+      "satisfied": true,
+      "binding": null
+    },
+    {
+      "code": "Q-vendor",
+      "kind": "cap",
+      "value": 2,
+      "limit": 2,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "Q-vendors",
+      "kind": "quota",
+      "value": 7,
+      "limit": 6,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "Q-open",
+      "kind": "quota",
+      "value": 5,
+      "limit": 3,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "Q-closed",
+      "kind": "quota",
+      "value": 5,
+      "limit": 3,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "Q-claude",
+      "kind": "quota",
+      "value": 2,
+      "limit": 1,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "Q-origin-us",
+      "kind": "quota",
+      "value": 4,
+      "limit": 0,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "Q-origin-cn",
+      "kind": "quota",
+      "value": 6,
+      "limit": 0,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "B-anthropic",
+      "kind": "cap",
+      "value": 122.4,
+      "limit": 170.0,
+      "satisfied": true,
+      "binding": false
+    },
+    {
+      "code": "B-openrouter",
+      "kind": "cap",
+      "value": 63.23,
+      "limit": 85.0,
+      "satisfied": true,
+      "binding": true
+    },
+    {
+      "code": "Q-quality",
+      "kind": "floor",
+      "value": null,
+      "limit": null,
+      "satisfied": true,
+      "binding": true
+    },
+    {
+      "code": "B-go",
+      "kind": "budget",
+      "value": null,
+      "limit": null,
+      "satisfied": true,
+      "binding": true
+    }
+  ],
+  "sum_optimal": {
+    "set": [
+      "anthropic/claude-opus-5.5",
+      "tencent/hy4",
+      "openai/gpt-6.1-sol",
+      "anthropic/claude-sonnet-5.5",
+      "deepseek/deepseek-v4.1-flash",
+      "meta/muse-spark-1.3",
+      "xiaomi/mimo-v2.6-flash",
+      "deepseek/deepseek-v4-pro",
+      "xiaomi/mimo-v2.6-pro",
+      "qwen/qwen3.8-flash"
+    ],
+    "sum_mss_tier": 6.761922,
+    "exhaustive": true,
+    "nodes": 25,
+    "differs_from_greedy": false,
+    "sum_mss_tier_greedy": 6.761922
+  },
+  "infeasible": null,
+  "sensitivity": {
+    "S1": {
+      "run": "S1",
+      "description": "Within-tier weights ~ Dirichlet(alpha = 50 x w)",
+      "draws": 2000,
+      "infeasible_draws": 0,
+      "frequencies": [
+        {
+          "canonical_id": "anthropic/claude-opus-5.5",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "anthropic/claude-sonnet-5.5",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4-pro",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4.1-flash",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "openai/gpt-6.1-sol",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "qwen/qwen3.8-flash",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "tencent/hy4",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-flash",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-pro",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "z-ai/glm-5.3",
+          "frequency": 0.517,
+          "picked": false,
+          "class": "contender"
+        },
+        {
+          "canonical_id": "meta/muse-spark-1.3",
+          "frequency": 0.483,
+          "picked": true,
+          "class": "borderline"
+        }
+      ],
+      "jaccard_mean": 0.906,
+      "jaccard_p5": 0.818182,
+      "kendall_tau_b_mean": 0.915765,
+      "kendall_tau_b_p5": 0.8149,
+      "kendall_tau_top20_mean": 0.896646,
+      "rbo_mean": 0.948977,
+      "rbo_p5": 0.863689
+    },
+    "S2": {
+      "run": "S2",
+      "description": "Within-tier weights uniform on the simplex (SMAA, no preference)",
+      "draws": 500,
+      "infeasible_draws": 0,
+      "frequencies": [
+        {
+          "canonical_id": "anthropic/claude-opus-5.5",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "anthropic/claude-sonnet-5.5",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4-pro",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4.1-flash",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "qwen/qwen3.8-flash",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "tencent/hy4",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-flash",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-pro",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "openai/gpt-6.1-sol",
+          "frequency": 0.964,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "meta/muse-spark-1.3",
+          "frequency": 0.84,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "z-ai/glm-5.3",
+          "frequency": 0.16,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "google/gemini-4-argon",
+          "frequency": 0.036,
+          "picked": false,
+          "class": "rarely"
+        }
+      ],
+      "jaccard_mean": 0.964364,
+      "jaccard_p5": 0.818182,
+      "kendall_tau_b_mean": 0.687347,
+      "kendall_tau_b_p5": 0.44,
+      "kendall_tau_top20_mean": 0.770695,
+      "rbo_mean": 0.791993,
+      "rbo_p5": 0.637562
+    },
+    "S3": {
+      "run": "S3",
+      "description": "Specification: normalisation, popularity definition, cache hit share, censoring, missing capability, WebDev rating noise",
+      "draws": 300,
+      "infeasible_draws": 0,
+      "frequencies": [
+        {
+          "canonical_id": "tencent/hy4",
+          "frequency": 1.0,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4.1-flash",
+          "frequency": 0.9867,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-flash",
+          "frequency": 0.9567,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "anthropic/claude-opus-5.5",
+          "frequency": 0.9333,
+          "picked": true,
+          "class": "robust"
+        },
+        {
+          "canonical_id": "xiaomi/mimo-v2.6-pro",
+          "frequency": 0.6833,
+          "picked": true,
+          "class": "borderline"
+        },
+        {
+          "canonical_id": "z-ai/glm-5.3-flash",
+          "frequency": 0.6633,
+          "picked": false,
+          "class": "contender"
+        },
+        {
+          "canonical_id": "anthropic/claude-sonnet-5.5",
+          "frequency": 0.6267,
+          "picked": true,
+          "class": "borderline"
+        },
+        {
+          "canonical_id": "deepseek/deepseek-v4-pro",
+          "frequency": 0.57,
+          "picked": true,
+          "class": "borderline"
+        },
+        {
+          "canonical_id": "openai/gpt-6.1-sol",
+          "frequency": 0.57,
+          "picked": true,
+          "class": "borderline"
+        },
+        {
+          "canonical_id": "google/gemini-4-argon",
+          "frequency": 0.5467,
+          "picked": false,
+          "class": "contender"
+        },
+        {
+          "canonical_id": "qwen/qwen3.8-flash",
+          "frequency": 0.5133,
+          "picked": true,
+          "class": "borderline"
+        },
+        {
+          "canonical_id": "meta/muse-spark-1.3",
+          "frequency": 0.45,
+          "picked": true,
+          "class": "borderline"
+        },
+        {
+          "canonical_id": "z-ai/glm-5.3",
+          "frequency": 0.3633,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "google/gemini-3.8-flash",
+          "frequency": 0.27,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "qwen/qwen3.7-plus",
+          "frequency": 0.2433,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "minimax/minimax-m3.1-flash",
+          "frequency": 0.2233,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "anthropic/claude-haiku-5.5",
+          "frequency": 0.1467,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "openai/gpt-6-luna",
+          "frequency": 0.1133,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "qwen/qwen3.8-max",
+          "frequency": 0.07,
+          "picked": false,
+          "class": "rarely"
+        },
+        {
+          "canonical_id": "z-ai/glm-5.3-flashx",
+          "frequency": 0.07,
+          "picked": false,
+          "class": "rarely"
+        }
+      ],
+      "jaccard_mean": 0.620223,
+      "jaccard_p5": 0.25,
+      "kendall_tau_b_mean": 0.767771,
+      "kendall_tau_b_p5": 0.5592,
+      "kendall_tau_top20_mean": 0.772352,
+      "rbo_mean": 0.713449,
+      "rbo_p5": 0.571206
+    },
+    "S4": {
+      "run": "S4",
+      "description": "One-at-a-time weight changes (renormalised)",
+      "changes": [
+        {
+          "change": "leave out popularity",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        },
+        {
+          "change": "popularity x0.5",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        },
+        {
+          "change": "popularity x1.5",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3"],
+          "left": ["meta/muse-spark-1.3"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "leave out price",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3"],
+          "left": ["meta/muse-spark-1.3"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "price x0.5",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3"],
+          "left": ["meta/muse-spark-1.3"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "price x1.5",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        },
+        {
+          "change": "leave out capability",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        },
+        {
+          "change": "capability x0.5",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        },
+        {
+          "change": "capability x1.5",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3"],
+          "left": ["meta/muse-spark-1.3"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "leave out recency",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3"],
+          "left": ["meta/muse-spark-1.3"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "recency x0.5",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3"],
+          "left": ["meta/muse-spark-1.3"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "recency x1.5",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        }
+      ]
+    },
+    "S5": {
+      "run": "S5",
+      "description": "Tier cut points moved by \u00b110%",
+      "changes": [
+        {
+          "change": "cut points x0.9/x0.9",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3-flash"],
+          "left": ["deepseek/deepseek-v4-pro"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "cut points x1.1/x1.1",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        },
+        {
+          "change": "cut points x0.9/x1.1",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3", "z-ai/glm-5.3-flash"],
+          "left": ["deepseek/deepseek-v4-pro", "meta/muse-spark-1.3"],
+          "jaccard": 0.6667
+        },
+        {
+          "change": "cut points x1.1/x0.9",
+          "feasible": true,
+          "entered": [],
+          "left": [],
+          "jaccard": 1.0
+        }
+      ]
+    },
+    "S6": {
+      "run": "S6",
+      "description": "Quality-floor variants",
+      "changes": [
+        {
+          "change": "floor at the tier's 40th percentile",
+          "feasible": true,
+          "entered": ["z-ai/glm-5.3-flash"],
+          "left": ["qwen/qwen3.8-flash"],
+          "jaccard": 0.8182
+        },
+        {
+          "change": "no quality floor",
+          "feasible": true,
+          "entered": [
+            "google/gemini-3.8-flash",
+            "minimax/minimax-m3.1-flash",
+            "openai/gpt-6-luna",
+            "z-ai/glm-5.3-flash"
+          ],
+          "left": [
+            "deepseek/deepseek-v4-pro",
+            "qwen/qwen3.8-flash",
+            "xiaomi/mimo-v2.6-flash",
+            "xiaomi/mimo-v2.6-pro"
+          ],
+          "jaccard": 0.4286
+        }
+      ]
+    },
+    "contenders": [
+      {
+        "canonical_id": "z-ai/glm-5.3",
+        "frequency": 0.517,
+        "picked": false,
+        "class": "contender"
+      }
+    ]
+  },
+  "preview": {
+    "written": false,
+    "sensitivity": true,
+    "draws_capped": true,
+    "draws": { "S1": 2000, "S2": 500, "S3": 300 }
+  }
+}

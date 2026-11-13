@@ -40,9 +40,18 @@ dependencies = [
   "pyyaml>=6.0.2",
   "redis==8.0.1",
   "sentry-sdk==2.64.0",
+  "tree-sitter==0.26.0",
+  # 0.13.x is the last line that ships its grammars inside the wheel (hash-pinned by uv.lock);
+  # 1.x downloads them from GitHub at first use, which breaks offline containers and pinned grammars.
+  "tree-sitter-language-pack==0.13.0",
   "uvicorn[standard]==0.50.2",
   "uvicorn-worker==0.4.0",
   "whitenoise==6.12.0",
+  "zstandard==0.25.0",
+]
+# Optional: exact token counts for cost estimates (else a chars/3.6 heuristic is used and recorded).
+optional-dependencies.tokenizer = [
+  "tiktoken==0.14.0",
 ]
 
 [dependency-groups]
@@ -78,6 +87,10 @@ line-length = 119
 # Exclude a variety of commonly ignored directories.
 extend-exclude = [
   "*/migrations/*.py",
+  # Pattern-detector fixtures: deliberately vulnerable sample code, not project code.
+  "backend/generation/data/detectors/tests/*",
+  # Task oracle / conformance-kit reference apps (spec 8.5, 11.1): sample apps evaluated as data, not project code.
+  "backend/generation/data/tasks/*/reference/*",
   "staticfiles/*",
 ]
 lint.select = [
@@ -175,11 +188,6 @@ lint.per-file-ignores."backend/generation/services/packages/**" = [
   # import/export callers, which catch `except ValueError` at the API
   #          boundary (see api/views/profiles.py) to return 400s for bad input.
 ]
-lint.per-file-ignores."backend/runtime/scaffolding/**" = [
-  "INP001",  # Scaffold templates are copied into generated apps, not imported as packages.
-  "PLW1508", # Generated Flask apps use int env defaults by design.
-  "S104",    # Generated apps bind 0.0.0.0 inside Docker.
-]
 lint.per-file-ignores."config/settings/local.py" = [
   "S701", # Local-dev settings intentionally enable Jinja2 autoescape=False stand-ins.
 ]
@@ -221,6 +229,11 @@ plugins = [
   "mypy_django_plugin.main",
 ]
 warn_unused_configs = true
+# The golden fixture trees and the task reference apps are sample apps (their `backend/` would shadow the real package).
+exclude = [
+  "backend/generation/testing/golden_library/(parent_app|starters)/",
+  "backend/generation/data/tasks/[^/]+/reference/",
+]
 overrides = [
   # Django migrations should not produce any errors:
   { module = "*.migrations.*", ignore_errors = true },

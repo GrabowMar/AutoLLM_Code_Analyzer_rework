@@ -71,10 +71,12 @@ class ModelComparisonRowSchema(Schema):
     success_rate: float | None = None
     # Mean over completed generations; None when none completed.
     avg_duration_seconds: float | None = None
-    mss: float
+    # None when the model has no MSS v2 (insufficient evidence or not in the frame).
+    mss: float | None = None
     empirical_quality: float | None = None
-    composite: float
-    smoke_pass_rate: float | None = None
+    composite: float | None = None
+    # The latest evaluation's functional pass rate; None when no run was measured.
+    pass_rate: float | None = None
     n_trials: int = 0
     # Code issues the empirical score counts; None when no app of the model was measured.
     findings: dict[str, int] | None = None
@@ -123,12 +125,16 @@ class CodeGenerationSchema(Schema):
     success_rate: float | None = None
     # Mean over completed generations; None until one completed.
     avg_duration_seconds: float | None = None
-    total_tokens: int
-    total_cost_usd: float
-    # Source LOC (reports.services.loc), the study tables' denominator; legacy
-    # jobs without stored code fall back to metrics.lines_of_code.
-    total_lines_of_code: int
-    unique_templates: int
+    # Sums over the completed runs that recorded the value (``*_runs`` of them);
+    # None when none did (unmeasured, not 0).
+    total_tokens: int | None = None
+    tokens_runs: int = 0
+    total_cost_usd: float | None = None
+    cost_runs: int = 0
+    # Model-scope non-test source LOC (metrics.loc_model), the study tables' denominator.
+    total_lines_of_code: int | None = None
+    loc_runs: int = 0
+    unique_stacks: int
 
 
 class AnalyzerInfoRowSchema(Schema):

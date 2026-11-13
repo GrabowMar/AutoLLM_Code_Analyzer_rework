@@ -1,0 +1,109 @@
+{
+  "at": "2026-11-11T16:04:57.855079+00:00",
+  "kinds": {
+    "csrf_missing": {
+      "auth_mode": "cookie_session",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "default_credential": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "idor_enumeration": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "jwt_none_alg": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "mass_assignment": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "open_redirect": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "path_traversal": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "plaintext_password_db": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "rate_limit_missing": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "sqli_boolean": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "sqli_error": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "sqli_time": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "ssrf_mock": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "verbose_errors": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "xss_reflected": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "xss_stored": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    },
+    "xxe": {
+      "auth_mode": "contract_bearer",
+      "fixed": "not_exploited",
+      "mutant": "exploited",
+      "validated": true
+    }
+  },
+  "probe_rules_version": 2,
+  "tester_version": 2
+}

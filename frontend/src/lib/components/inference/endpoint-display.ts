@@ -44,16 +44,21 @@ export function endpointStatusTone(status: string | null | undefined): Tone {
 /** Plain-words scheduler blocked reasons (spec §G.5 lane footers). */
 export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
   sandbox_full: "Sandbox slots full",
-  llm_threads_full: "LLM job threads full",
+  llm_threads_full: "LLM run threads full",
   endpoint_offline: "Waiting for relay",
   endpoint_full: "Endpoint at capacity",
   model_not_served: "Model not on the relay",
   residency_wait: "Waiting for a model swap slot",
   warming_model: "Loading model",
-  experiment_cap: "Experiment concurrency cap reached",
+  study_cap: "Experiment concurrency cap reached",
   circuit_open: "Paused after repeated errors",
   draining: "Executor draining",
   retry_backoff: "Retrying after backoff",
+  condition_paused: "Condition paused (stop rule or manual)",
+  study_endpoint_cap: "Experiment per-endpoint concurrency reached",
+  study_model_cap: "Experiment per-model concurrency reached",
+  study_provider_cap: "Experiment per-provider concurrency reached",
+  budget: "Waiting for budget admission",
 };
 
 export function blockedReasonText(reason: string | null | undefined): string {

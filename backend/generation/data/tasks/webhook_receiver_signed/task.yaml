@@ -1,0 +1,193 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Signed payment webhooks
+summary: Receive signed payment webhooks, verify them and keep order payment states; the admin reviews them.
+category: integration
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Order
+  fields:
+  - {name: order_id, type: string}
+  - name: status
+    type: enum
+    enum: [pending, paid, refunded, failed]
+  - {name: amount, type: float}
+  - {name: currency, type: string}
+  - {name: updated_at, type: datetime}
+- name: WebhookEvent
+  fields:
+  - {name: event_id, type: string}
+  - {name: type, type: string}
+  - {name: received_at, type: datetime}
+  - name: result
+    type: enum
+    enum: [applied, duplicate, ignored]
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: webhooks.payments
+  method: POST
+  path: /api/webhooks/payments
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      id: {type: string}
+      type: {type: string}
+      created: {type: integer}
+      data:
+        type: object
+        properties:
+          order_id: {type: string}
+          amount: {type: number}
+          currency: {type: string}
+        required: [order_id]
+    required: [id, type, data]
+  response_schema:
+    type: object
+    properties:
+      result:
+        type: string
+        enum: [applied, duplicate, ignored]
+    required: [result]
+  errors: [400, 401]
+  tags: [webhook]
+- id: admin.orders
+  method: GET
+  path: /api/admin/orders
+  auth: admin
+  query:
+  - name: status
+    type: enum
+    semantics: filter
+    enum: [pending, paid, refunded, failed]
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: [integer, string]
+            order_id:
+              type: [string, 'null']
+            status:
+              type: [string, 'null']
+              enum: [pending, paid, refunded, failed, null]
+            amount:
+              type: [number, 'null']
+            currency:
+              type: [string, 'null']
+            updated_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: admin.order
+  method: GET
+  path: /api/admin/orders/{order_id}
+  auth: admin
+  response_schema:
+    type: object
+    required: [id, events]
+    properties:
+      id:
+        type: [integer, string]
+      order_id:
+        type: [string, 'null']
+      status:
+        type: [string, 'null']
+        enum: [pending, paid, refunded, failed, null]
+      amount:
+        type: [number, 'null']
+      currency:
+        type: [string, 'null']
+      updated_at:
+        type: [string, 'null']
+        format: date-time
+      events: {type: array}
+  errors: [404]
+- id: admin.events
+  method: GET
+  path: /api/admin/events
+  auth: admin
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: [integer, string]
+            event_id:
+              type: [string, 'null']
+            type:
+              type: [string, 'null']
+            received_at:
+              type: [string, 'null']
+              format: date-time
+            result:
+              type: [string, 'null']
+              enum: [applied, duplicate, ignored, null]
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+has_frontend: false
+features: [auth, admin, webhook-signature]
+surfaces: [cwe-347, cwe-345, cwe-294, cwe-208, cwe-20, cwe-862, cwe-798, cwe-532]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: webhooks.unsigned
+  category: auth
+  endpoint: webhooks.payments
+  actor: anon
+  request:
+    method: POST
+    path: /api/webhooks/payments
+    json:
+      id: evt_zz1
+      type: payment.succeeded
+      created: 1700000000
+      data: {order_id: ord_1, amount: 10, currency: EUR}
+  expect: {status: 401}
+  stated_in: [standard, exhaustive]
+probes:
+- {id: probe.webhooks.default_admin, cwe: cwe-798, kind: default_credential}

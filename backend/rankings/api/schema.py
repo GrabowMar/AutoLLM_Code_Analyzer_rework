@@ -38,7 +38,7 @@ class RankingRow(Schema):
     apps_failed: int = 0
     # Mean generation time of completed apps; None when none completed.
     avg_duration: float | None = None
-    # Experiment conditions this row pools (several = arms mixed; see pooling_note).
+    # Study conditions this row pools (several = arms mixed; see pooling_note).
     conditions_pooled: int = 0
     pooling_note: str | None = None
     # Code issues the empirical score counts (common tools, no advisories, no
@@ -54,15 +54,37 @@ class RankingRow(Schema):
     n_trials: int = 0
     functional_pass_rate: float | None = None
     variance: VarianceStats | None = None
-    benchmark_score: float
-    cost_efficiency_score: float
-    accessibility_score: float
-    adoption_score: float
-    mss_score: float
+    # MSS v2 (docs/design/MSS_V2.md). Every score is None when its input is missing
+    # (never 0); a model without MSS (insufficient evidence, not in the frame) has
+    # no composite either.
+    canonical_id: str | None = None
+    vendor: str | None = None
+    origin: str | None = None
+    open_weights: bool | None = None
+    release_date: str | None = None
+    pinned_version: dict[str, Any] | None = None
+    routes: dict[str, Any] = {}
+    preferred_route: str | None = None
+    eligible: bool = False
+    exclusion: dict[str, Any] | None = None
+    popularity_score: float | None = None
+    price_score: float | None = None
+    capability_score: float | None = None
+    recency_score: float | None = None
+    mss_score: float | None = None
+    mss_coverage: float | None = None
+    mss_missing: list[str] = []
+    mss_flags: list[str] = []
+    mss_inherited_from: str | None = None
+    run_cost_usd: float | None = None
+    planning_cost_usd: float | None = None
+    price_tier: str | None = None
+    popularity: dict[str, Any] | None = None
+    webdev_rating: dict[str, Any] | None = None
+    list_price: dict[str, Any] | None = None
     empirical_quality_score: float | None = None
-    composite_score: float
+    composite_score: float | None = None
 
-    # Allow extra benchmark fields to pass through.
     class Config:
         extra = "allow"
 
@@ -78,10 +100,12 @@ class Pagination(Schema):
 
 class RankingStats(Schema):
     total: int
-    with_benchmarks: int
-    unique_providers: int
-    free_models: int = 0
-    avg_mss: float = 0.0
+    eligible: int = 0
+    with_popularity: int = 0
+    with_capability: int = 0
+    unique_vendors: int = 0
+    # Mean MSS over the filtered rows that have one; None when none has.
+    avg_mss: float | None = None
 
 
 class RankingsResponse(Schema):
@@ -89,13 +113,6 @@ class RankingsResponse(Schema):
     rankings: list[dict[str, Any]]
     pagination: Pagination
     statistics: RankingStats
-
-
-class StatusResponse(Schema):
-    benchmarks: dict[str, int]
-    total_benchmark_rows: int
-    models_with_benchmarks: int
-    total_models: int
 
 
 class TopModelsResponse(Schema):
@@ -120,3 +137,54 @@ class SensitivityResponse(Schema):
     models_evaluated: int
     baseline_ranking: list[SensitivityRankEntry]
     schemes: list[SensitivitySchemeRow]
+
+
+class SourcesResponse(Schema):
+    as_of: str
+    sources: list[dict[str, Any]]
+    coverage: dict[str, int]
+    tiers: dict[str, Any]
+    flow: list[dict[str, Any]]
+
+
+class SelectionSnapshotSummary(Schema):
+    id: int
+    created_at: str
+    kind: str
+    version: str
+    status: str
+    as_of: str | None = None
+    inputs_sha256: str
+    code_version: str
+    picks: list[str] = []
+    by_tier: dict[str, list[str]] = {}
+    created_by: str | None = None
+    confirmed_at: str | None = None
+    confirmed_by: str | None = None
+    confirmation: dict[str, Any] = {}
+
+
+class SelectionSnapshotDetail(SelectionSnapshotSummary):
+    params: dict[str, Any]
+    payload: dict[str, Any]
+
+
+class SelectionCreateIn(Schema):
+    n: int | None = None
+    tier_quotas: dict[str, int] | None = None
+    include_previews: bool = False
+    exclude: list[str] = []
+    force: list[str] = []
+    anthropic_budget: float | None = None
+    openrouter_budget: float | None = None
+    study_months: float | None = None
+    sensitivity: bool = True
+
+
+class ConfirmIn(Schema):
+    """The researcher's final list; every change against the nominal picks needs an override with a reason."""
+
+    final_ids: list[str]
+    # [{"replace": id, "with": id, "reason": "..."}]  # noqa: ERA001 - documents the payload shape, not dead code
+    overrides: list[dict[str, Any]] = []
+    notes: str = ""

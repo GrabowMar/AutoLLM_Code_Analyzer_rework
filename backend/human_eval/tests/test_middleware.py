@@ -23,7 +23,7 @@ pytestmark = pytest.mark.django_db
 DENIED = {"detail": middleware.DENIED_DETAIL, "code": "evaluator_only", "errors": []}
 
 BLOCKED_GET = [
-    "/api/generation/jobs/",
+    "/api/human-eval/tasks/",
     "/api/tokens/",
     f"/{django_settings.ADMIN_URL}",
     "/_allauth/app/v1/auth/session",
@@ -95,7 +95,7 @@ def test_bearer_token_of_a_restricted_user_is_refused(evaluator):
     raw, _ = generate_token(evaluator, "late")
     client = Client()
     bearer = {"HTTP_AUTHORIZATION": f"Bearer {raw}"}
-    for path in ("/api/users/me/", "/api/generation/jobs/", "/api/human-eval/portal/me/"):
+    for path in ("/api/users/me/", "/api/human-eval/tasks/", "/api/human-eval/portal/me/"):
         assert _is_denied(client.get(path, **bearer))
     assert _is_denied(client.post(f"/api/mcp/t/{raw}", data="{}", content_type="application/json"))
     assert _is_denied(client.post("/api/mcp", data="{}", content_type="application/json", **bearer))
@@ -115,22 +115,22 @@ def test_staff_are_never_restricted(client):
     staff = UserFactory(is_staff=True)
     EvaluatorProfileFactory(user=staff, is_restricted=True)
     client.force_login(staff)
-    assert client.get("/api/generation/jobs/").status_code == 200
+    assert client.get("/api/human-eval/tasks/").status_code == 200
     assert client.get("/api/users/me/").json()["is_evaluator"] is False
     raw, _ = generate_token(staff, "cli")
-    assert client.get("/api/generation/jobs/", HTTP_AUTHORIZATION=f"Bearer {raw}").status_code == 200
+    assert client.get("/api/human-eval/tasks/", HTTP_AUTHORIZATION=f"Bearer {raw}").status_code == 200
 
 
 def test_unrestricted_profiles_and_ordinary_users_pass(client):
     user = UserFactory()
     EvaluatorProfileFactory(user=user, is_restricted=False)
     client.force_login(user)
-    assert client.get("/api/generation/jobs/").status_code == 200
+    assert client.get("/api/human-eval/tasks/").status_code == 200
     assert client.get("/api/users/me/").json()["is_evaluator"] is False
 
 
 def test_anonymous_requests_are_left_to_normal_auth(client):
-    response = client.get("/api/generation/jobs/")
+    response = client.get("/api/human-eval/tasks/")
     assert response.status_code == 401
     assert response.json() != DENIED
 
@@ -152,7 +152,7 @@ def test_path_allowed():
 def test_anonymous_and_staff_requests_without_tokens_need_no_lookup(django_assert_num_queries):
     from django.contrib.auth.models import AnonymousUser
 
-    request = RequestFactory().get("/api/generation/jobs/")
+    request = RequestFactory().get("/api/human-eval/tasks/")
     staff = UserFactory(is_staff=True)
     with django_assert_num_queries(0):
         assert not middleware.needs_check(request, AnonymousUser())
@@ -165,7 +165,7 @@ def test_anonymous_and_staff_requests_without_tokens_need_no_lookup(django_asser
 
 
 def test_profile_lookup_is_cached_per_request(evaluator, django_assert_num_queries):
-    request = RequestFactory().get("/api/generation/jobs/")
+    request = RequestFactory().get("/api/human-eval/tasks/")
     with django_assert_num_queries(1):
         assert middleware.evaluate(request, evaluator) is not None
         assert middleware.evaluate(request, evaluator) is not None
@@ -204,7 +204,7 @@ def test_capability_flags():
 def test_same_decision_on_both_paths(evaluator):
     sync_mw = EvaluatorScopeMiddleware(_sync_view)
     async_mw = EvaluatorScopeMiddleware(_async_view)
-    for path, allowed in (("/api/generation/jobs/", False), ("/api/human-eval/portal/me/", True)):
+    for path, allowed in (("/api/human-eval/tasks/", False), ("/api/human-eval/portal/me/", True)):
         sync_response = sync_mw(_request(path, evaluator))
         async_response = async_to_sync(async_mw)(_request(path, evaluator))
         for response in (sync_response, async_response):
@@ -212,7 +212,7 @@ def test_same_decision_on_both_paths(evaluator):
             if not allowed:
                 assert response.status_code == 403
     ordinary = UserFactory()
-    assert async_to_sync(async_mw)(_request("/api/generation/jobs/", ordinary)).content == b"ok"
+    assert async_to_sync(async_mw)(_request("/api/human-eval/tasks/", ordinary)).content == b"ok"
 
 
 # --- MCP ------------------------------------------------------------------------------------

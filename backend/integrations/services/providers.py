@@ -63,6 +63,8 @@ class ProviderPreset:
     keys_url: str
     max_concurrency: int = 4
     request_timeout_s: int = 600
+    # The endpoint's ``api_flavor``: "openai" (an OpenAI-compatible API) or "anthropic" (native Messages API).
+    api_flavor: str = "openai"
     is_chat_model: Callable[[str], bool] = field(default_factory=_chat_filter, repr=False)
 
     def chat_models(self, model_ids: list[str]) -> list[str]:
@@ -74,10 +76,13 @@ PRESETS: tuple[ProviderPreset, ...] = (
         id="anthropic",
         name="Anthropic",
         base_url="https://api.anthropic.com/v1",
-        description="Claude API / Claude Console: Claude models through Anthropic's OpenAI-compatible API.",
-        docs_url="https://docs.claude.com/en/api/openai-sdk",
+        description=(
+            "Claude API / Claude Console: Claude models through Anthropic's native Messages API, with prompt caching."
+        ),
+        docs_url="https://docs.claude.com/en/api/messages",
         keys_url="https://console.anthropic.com/settings/keys",
         max_concurrency=4,
+        api_flavor="anthropic",
         is_chat_model=_chat_filter(include=r"^claude"),
     ),
     ProviderPreset(
@@ -277,7 +282,7 @@ def connect(user, preset: ProviderPreset, api_key: str, name: str | None = None)
         name=(name or "").strip()[:120] or preset.name,
         kind=LLMEndpoint.Kind.OPENAI_COMPATIBLE,
         connection=LLMEndpoint.Connection.DIRECT,
-        api_flavor=LLMEndpoint.ApiFlavor.OPENAI,
+        api_flavor=preset.api_flavor,
         base_url=preset.base_url,
         owner=user,
         visibility=LLMEndpoint.Visibility.PRIVATE,

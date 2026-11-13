@@ -1,0 +1,221 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Notification center
+summary: A personal inbox of notifications that users read, filter, mark as read and clear; the admin broadcasts
+  announcements.
+category: messaging
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Notification
+  fields:
+  - {name: message, type: string, required: true, max_length: 500}
+  - name: type
+    type: enum
+    enum: [info, warning, error]
+    default: info
+  - {name: read, type: bool, default: false}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: notifications.list
+  method: GET
+  path: /api/notifications
+  auth: user
+  query:
+  - {name: read, type: bool, semantics: filter}
+  - name: type
+    type: enum
+    semantics: filter
+    enum: [info, warning, error]
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size, unread_count]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, message]
+          properties:
+            id:
+              type: [integer, string]
+            message: {type: string, maxLength: 500, minLength: 1}
+            type:
+              type: [string, 'null']
+              enum: [info, warning, error, null]
+            read:
+              type: [boolean, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+      unread_count: {type: integer}
+- id: notifications.create
+  method: POST
+  path: /api/notifications
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      message: {type: string, maxLength: 500, minLength: 1}
+      type:
+        type: [string, 'null']
+        enum: [info, warning, error, null]
+    required: [message]
+  response_schema:
+    type: object
+    required: [id, message]
+    properties:
+      id:
+        type: [integer, string]
+      message: {type: string, maxLength: 500, minLength: 1}
+      type:
+        type: [string, 'null']
+        enum: [info, warning, error, null]
+      read:
+        type: [boolean, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+- id: notifications.read_all
+  method: POST
+  path: /api/notifications/read-all
+  auth: user
+  response_schema:
+    type: object
+    properties:
+      updated: {type: integer}
+    required: [updated]
+- id: notifications.get
+  method: GET
+  path: /api/notifications/{id}
+  auth: owner
+  owner_entity: Notification
+  response_schema:
+    type: object
+    required: [id, message]
+    properties:
+      id:
+        type: [integer, string]
+      message: {type: string, maxLength: 500, minLength: 1}
+      type:
+        type: [string, 'null']
+        enum: [info, warning, error, null]
+      read:
+        type: [boolean, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: notifications.update
+  method: PATCH
+  path: /api/notifications/{id}
+  auth: owner
+  owner_entity: Notification
+  request_schema:
+    type: object
+    properties:
+      read:
+        type: [boolean, 'null']
+  response_schema:
+    type: object
+    required: [id, message]
+    properties:
+      id:
+        type: [integer, string]
+      message: {type: string, maxLength: 500, minLength: 1}
+      type:
+        type: [string, 'null']
+        enum: [info, warning, error, null]
+      read:
+        type: [boolean, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404]
+- id: notifications.delete
+  method: DELETE
+  path: /api/notifications/{id}
+  auth: owner
+  owner_entity: Notification
+  success_status: 204
+  errors: [404]
+- id: admin.broadcast
+  method: POST
+  path: /api/admin/broadcast
+  auth: admin
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      message: {type: string, maxLength: 500, minLength: 1}
+      type:
+        type: [string, 'null']
+        enum: [info, warning, error, null]
+    required: [message]
+  response_schema:
+    type: object
+    properties:
+      delivered: {type: integer}
+    required: [delivered]
+  errors: [400]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.bell
+  text: A bell icon with the unread count in the header.
+  endpoints: [notifications.list]
+- id: ui.inbox
+  text: The inbox with type badges, unread ones in bold, filters for read state and type, 'Mark all as read', per-item
+    read/unread toggles, delete and paging.
+  endpoints: [notifications.list, notifications.update, notifications.read_all, notifications.delete]
+- id: ui.add
+  text: A small form to add a notification to the own inbox.
+  endpoints: [notifications.create]
+- id: ui.admin
+  text: 'For the admin: a broadcast form.'
+  endpoints: [admin.broadcast]
+features: [auth, ownership, admin, filter, pagination]
+surfaces: [cwe-639, cwe-862, cwe-79, cwe-20, cwe-915, cwe-798]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+probes:
+- {id: probe.notifications.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: notifications.update}
+- id: probe.notifications.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: admin.broadcast
+  params: {field: message, view_endpoint: notifications.list}
+- {id: probe.notifications.default_admin, cwe: cwe-798, kind: default_credential}

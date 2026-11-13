@@ -63,7 +63,7 @@
 	</PageHeader>
 
 	<div class="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
-		<div class="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:max-h-[calc(100dvh-6rem)] lg:self-start lg:overflow-y-auto">
+		<div class="hidden min-w-0 lg:sticky lg:top-[4.25rem] lg:block lg:max-h-[calc(100dvh-5.25rem)] lg:self-start lg:overflow-y-auto">
 			<DocsNav groups={grouped} {currentSlug} />
 		</div>
 

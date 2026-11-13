@@ -35,6 +35,7 @@ function app(slot: PortalApp["slot"], label: string): PortalApp {
     },
     spec: null,
     admin_credentials: null,
+    admin_credentials_status: null,
     has_source: false,
   };
 }

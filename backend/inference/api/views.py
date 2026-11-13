@@ -71,6 +71,7 @@ from backend.inference.snapshot import effective_num_ctx
 router = Router(tags=["inference"])
 
 _SYSTEM_EDITABLE = frozenset({"max_concurrency", "max_active_jobs"})
+ANTHROPIC_FLAVOR_ERROR = "The Anthropic flavor needs a direct OpenAI-compatible endpoint."
 _CAP_FIELDS = (
     "max_concurrency",
     "max_active_jobs",
@@ -115,9 +116,10 @@ def _is_staff(request) -> bool:
 
 
 def _active_job_counts(endpoints: list[LLMEndpoint]) -> dict[int, int]:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models.choices import RunStatus
 
-    running = GenerationJob.objects.filter(status=GenerationJob.Status.RUNNING)
+    running = GenerationRun.objects.filter(status=RunStatus.RUNNING)
     counts = dict(
         running.filter(endpoint_id__in=[e.pk for e in endpoints])
         .values("endpoint_id")
@@ -399,6 +401,8 @@ def create_endpoint(request, data: EndpointCreate):
     flavor = data.api_flavor or ("native" if data.kind == "ollama" else "openai")
     if flavor == "native" and data.kind != "ollama":
         raise HttpError(400, "The native API flavor exists only for Ollama.")
+    if flavor == "anthropic" and (data.kind != "openai_compatible" or data.connection != "direct"):
+        raise HttpError(400, ANTHROPIC_FLAVOR_ERROR)
     endpoint = LLMEndpoint(
         slug=slug,
         name=data.name,
@@ -455,6 +459,8 @@ def update_endpoint(request, endpoint_id: int, data: EndpointUpdate):
         if changes["api_flavor"] == "native" and endpoint.kind != "ollama":
             raise HttpError(400, "The native API flavor exists only for Ollama.")
         endpoint.api_flavor = changes["api_flavor"]
+    if endpoint.api_flavor == "anthropic" and (endpoint.kind != "openai_compatible" or connection != "direct"):
+        raise HttpError(400, ANTHROPIC_FLAVOR_ERROR)
     if connection == "direct":
         url = changes.get("base_url", endpoint.base_url)
         if not url:
@@ -482,16 +488,16 @@ def update_endpoint(request, endpoint_id: int, data: EndpointUpdate):
 
 @router.delete("/endpoints/{endpoint_id}/", response={200: dict, 409: dict})
 def delete_endpoint(request, endpoint_id: int):
-    from backend.generation.models import ExperimentCondition
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models import StudyCondition
     from backend.llm_models.models import LLMModel
 
     endpoint = _owned(request, endpoint_id)
     if endpoint.is_system:
         raise HttpError(400, "The OpenRouter endpoint cannot be deleted.")
     in_use = (
-        GenerationJob.objects.filter(Q(endpoint=endpoint) | Q(model__endpoint=endpoint)).exists()
-        or ExperimentCondition.objects.filter(model__endpoint=endpoint).exists()
+        GenerationRun.objects.filter(Q(endpoint=endpoint) | Q(model__endpoint=endpoint)).exists()
+        or StudyCondition.objects.filter(model__endpoint=endpoint).exists()
         or LLMRequest.objects.filter(endpoint=endpoint).exists()
     )
     if in_use:

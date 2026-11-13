@@ -41,7 +41,7 @@ repo's pre-commit hooks.
 
 ```text
 src/
-  routes/(app)/      one directory per feature page (experiments, sample-generator,
+  routes/(app)/      one directory per feature page (studies, library, samples, slots,
                      analyzers, statistics, …); (auth)/ holds the sign-in flows
   routes/{dashboard,generation,login,settings}/   redirects from old URLs
   hooks.server.ts    API/auth/admin/media/apps reverse proxy

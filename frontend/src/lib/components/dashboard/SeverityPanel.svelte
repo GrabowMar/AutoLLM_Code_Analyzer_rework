@@ -20,12 +20,14 @@
 	<Card.Header>
 		<div class="flex min-w-0 items-center gap-2">
 			<ShieldAlert class="h-4 w-4 shrink-0 text-muted-foreground" />
-			<Card.Title>Finding severity</Card.Title>
-			<span
-				class="truncate text-xs text-muted-foreground"
+			<div class="min-w-0">
+			<Card.Title class="whitespace-nowrap">Finding Severity</Card.Title>
+			<Card.Description
+				class="truncate text-xs"
 				title="The platform's normalized level, a heuristic that also places findings whose tool printed no level; not the tools' own labels"
-				>normalized (heuristic) · all analyses</span
+				>Normalized (heuristic) · all analyses</Card.Description
 			>
+			</div>
 		</div>
 	</Card.Header>
 	<Card.Content>

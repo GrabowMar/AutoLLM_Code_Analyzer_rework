@@ -142,7 +142,17 @@ def v2_apps(transactional_db: None) -> Iterator[Apps]:
     try:
         yield executor.loader.project_state(nodes).apps
     finally:
+        # Tests that make the wipe fail on purpose leave v2 rows behind; the v3 guard migration would
+        # then refuse to migrate forward and leave every later test on the v2 schema.
+        _truncate_v2_tables()
         migrate_to_leaf()
+
+
+def _truncate_v2_tables() -> None:
+    v2 = sorted(t for t in _tables() if t.startswith("generation_") and t in {s.table for s in wipe.STEPS})
+    if v2:
+        with connection.cursor() as cursor:
+            cursor.execute("TRUNCATE " + ", ".join(connection.ops.quote_name(t) for t in v2) + " CASCADE")
 
 
 @pytest.fixture

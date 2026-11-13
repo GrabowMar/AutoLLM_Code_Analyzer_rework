@@ -1,0 +1,11 @@
+name: innerHTML from data (JS/TS)
+description: Non-constant markup (a variable, expression or interpolated template) is written through innerHTML / outerHTML / insertAdjacentHTML, which renders it unescaped.
+content:
+  engine: regex
+  languages: [javascript, typescript, tsx, vue, svelte]
+  rule: '\.(?:inner|outer)HTML\s*\+?=(?!=)(?!\s*(?:"[^"\n]*"|''[^''\n]*''|`[^`$\n]*`)\s*;?\s*$)|\.insertAdjacentHTML\s*\(\s*["''][^"'']+["'']\s*,(?!\s*(?:"[^"\n]*"|''[^''\n]*''|`[^`$\n]*`)\s*\))'
+  tool: {name: re, version: py3.13}
+  feature_key: js-innerhtml-user-data
+  polarity: insecure
+  cwe: [cwe-79]
+  description: innerHTML/outerHTML/insertAdjacentHTML receives a non-constant value.

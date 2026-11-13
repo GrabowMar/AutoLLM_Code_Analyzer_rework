@@ -1,0 +1,12 @@
+name: shadcn/ui
+description: shadcn/ui components (Radix UI + Tailwind CSS) copied into the React project.
+content:
+  system: component-library
+  library:
+    name: shadcn/ui
+    packages: [tailwindcss, class-variance-authority, '@radix-ui/react-slot']
+    frameworks: [react]
+  fragment: style-shadcn@1
+  adherence:
+    required_markers: ['@radix-ui', tailwindcss]
+  compatible_frontends: [react]

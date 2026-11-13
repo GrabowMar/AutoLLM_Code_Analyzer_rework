@@ -24,7 +24,10 @@ from backend.runtime.services import port_allocator
 from backend.runtime.services import traefik_router
 
 if TYPE_CHECKING:
-    from backend.generation.models import GenerationJob
+    from collections.abc import Callable
+
+    from backend.generation.models import GenerationRun
+    from backend.runtime.services.sample_builds import SampleBuildResult
     from backend.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -34,7 +37,7 @@ def visible_containers(user):
     """ContainerInstance rows *user* may see/control through the API or proxy.
 
     A container belongs to whoever built it (``created_by``) and to the owner
-    of its generation job; staff see every container. Internal callers
+    of its ``GenerationRun`` (``generation_job``); staff see every container. Internal callers
     (analysis runner, executor, evaluation) query the model directly and are
     not scoped.
     """
@@ -62,8 +65,10 @@ def create_action(
     container: ContainerInstance,
     action_type: str,
     user: User | None = None,
+    *,
+    cached_build: SampleBuildResult | None = None,
 ) -> ContainerAction:
-    """Persist a ContainerAction and dispatch it in a daemon thread."""
+    """Persist an action; builds are admitted by the executor after commit."""
     action = ContainerAction.objects.create(
         action_id=f"act_{uuid.uuid4().hex[:12]}",
         container=container,
@@ -71,21 +76,56 @@ def create_action(
         status=ContainerAction.Status.PENDING,
         triggered_by=user,
     )
-    _dispatch(action.id)
+    if action_type == ContainerAction.ActionType.BUILD and cached_build is not None:
+        from backend.execution.runtime_builds import claim_cached_start
+
+        owner = claim_cached_start(action)
+        if owner is not None:
+            transaction.on_commit(lambda: _dispatch_cached_start(action.id, owner, cached_build))
+    elif action_type == ContainerAction.ActionType.BUILD:
+        from backend.execution.api import wake_preview_build
+
+        wake_preview_build(action.id)
+    else:
+        transaction.on_commit(lambda: _dispatch(action.id))
     return action
 
 
-def _dispatch(action_id) -> None:
-    dispatch_in_thread(_execute, action_id, name=f"container-action-{action_id}")
+def _dispatch_cached_start(action_id, owner: str, cached_build: SampleBuildResult) -> None:
+    from backend.execution import runtime_builds
+
+    try:
+        dispatch_in_thread(
+            runtime_builds.run_cached_start,
+            action_id,
+            owner,
+            cached_build,
+            name=f"cached-preview-{action_id}",
+        )
+    except Exception as exc:
+        logger.exception("Dispatching cached preview %s failed", action_id)
+        runtime_builds.submission_failed(action_id, owner, str(exc))
 
 
-def _execute(action_id) -> None:
+def _dispatch(action_id, **kwargs) -> None:
+    dispatch_in_thread(_execute, action_id, name=f"container-action-{action_id}", **kwargs)
+
+
+def _execute(
+    action_id,
+    *,
+    claimed: bool = False,
+    cancelled: Callable[[], bool] | None = None,
+    cached_build: SampleBuildResult | None = None,
+) -> None:
     try:
         with transaction.atomic():
             action = ContainerAction.objects.select_for_update().get(id=action_id)
-            if action.status != ContainerAction.Status.PENDING:
+            expected = ContainerAction.Status.RUNNING if claimed else ContainerAction.Status.PENDING
+            if action.status != expected:
                 return
-            action.mark_running()
+            if not claimed:
+                action.mark_running()
 
         container = action.container
         if container is None:
@@ -95,7 +135,7 @@ def _execute(action_id) -> None:
         action_type = action.action_type
 
         if action_type == ContainerAction.ActionType.BUILD:
-            _do_build(action, container)
+            _do_build(action, container, cancelled=cancelled, cached_build=cached_build)
         elif action_type == ContainerAction.ActionType.START:
             _do_start(action, container)
         elif action_type == ContainerAction.ActionType.STOP:
@@ -128,7 +168,38 @@ def _execute(action_id) -> None:
         connection.close()
 
 
-def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
+def _run_env(run: GenerationRun) -> tuple[dict[str, str], dict[str, str] | None]:
+    """The hosted app's credentials env from ``evaluation.credentials(run)`` and its metadata stamp.
+
+    ``ADMIN_PASSWORD`` / ``SECRET_KEY`` come from the run's stored record (spec 8.6), never a default. A
+    missing or unreadable record (``CredentialsUnavailableError``, ``NotImplementedError`` or any error)
+    starts the app without them and without a stamp, so consumers report the login as ``not_measured``.
+    The stamp holds only the password's sha256, never the password itself.
+    """
+    from backend.generation import evaluation
+    from backend.human_eval.services.credentials import RUNTIME_ENV_SOURCE
+    from backend.human_eval.services.credentials import password_fingerprint
+
+    try:
+        record = evaluation.credentials(run)
+    except Exception:  # noqa: BLE001 - no record means no credentials, never a default
+        logger.info("No credentials record for run %s; hosting without admin credentials", run.pk)
+        return {}, None
+    password = record.get("admin_password") if isinstance(record, dict) else None
+    secret = record.get("secret_key") if isinstance(record, dict) else None
+    if not isinstance(password, str) or not password or not isinstance(secret, str) or not secret:
+        return {}, None
+    env = {"ADMIN_PASSWORD": password, "SECRET_KEY": secret}
+    return env, {"source": RUNTIME_ENV_SOURCE, "admin_password_sha256": password_fingerprint(password)}
+
+
+def _do_build(
+    action: ContainerAction,
+    container: ContainerInstance,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    cached_build: SampleBuildResult | None = None,
+) -> None:
     if not docker_manager.ping():
         action.mark_failed("Docker daemon unavailable")
         container.status = ContainerInstance.Status.FAILED
@@ -140,27 +211,44 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
     action.update_progress(10)
     publish_container_status(container)
 
-    job = container.generation_job
+    run = container.generation_job  # the GenerationRun (forward FK name kept, spec D5)
     tag = f"backend/{container.name}:latest"
+    cid = ""
 
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            build_path = Path(tmpdir)
-            if job is not None:
-                from backend.runtime.services.scaffolding import HealingReport
-                from backend.runtime.services.scaffolding import prepare_build_dir
+        action.update_progress(40)
+        queued_seconds = max(0, (timezone.now() - action.created_at).total_seconds())
+        if run is not None:
+            # The app tree comes from the run's RunFile rows through the build seam
+            # (runtime.services.build_context -> generation.build.context.prepare_build_dir).
+            from backend.runtime.services.sample_builds import build_sample
 
-                healing = HealingReport()
-                prepare_build_dir(job, build_path, report=healing)
-                container.metadata = {**(container.metadata or {}), "healing": healing.to_dict()}
-                container.save(update_fields=["metadata"])
-            else:
+            built = cached_build or build_sample(
+                run,
+                client=docker_manager.client(),
+                force_rebuild=bool((container.config or {}).get("force_rebuild")),
+                cancelled=cancelled,
+            )
+            tag = built.image_tag
+            run_image = built.image_id
+            build_log = built.log
+            container.metadata = {
+                **(container.metadata or {}),
+                "build": {**built.metrics(), "admission_seconds": round(queued_seconds, 3)},
+            }
+        else:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                build_path = Path(tmpdir)
                 _write_minimal_dockerfile(build_path)
+                from backend.runtime.services.build_backend import build
 
-            action.update_progress(40)
-            _, build_log = docker_manager.build_image(str(build_path), tag)
+                built_minimal = build(str(build_path), tag, client=docker_manager.client(), cancelled=cancelled)
+                build_log = built_minimal.log
+                run_image = built_minimal.image_id
 
         container.image = tag
+        # Persist the reference before creating the container so GC protects it.
+        container.save(update_fields=["image", "metadata"])
         action.update_progress(70)
 
         from django.conf import settings
@@ -169,11 +257,26 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
 
         ports: dict[str, int] = {}
         env: dict[str, str] = {}
+        runtime_stamp: dict[str, str] | None = None
+        if run is not None:
+            env, runtime_stamp = _run_env(run)
+        # A stale stamp from an earlier start must never vouch for this container's env.
+        from backend.human_eval.services.credentials import RUNTIME_ENV_KEY
+
+        metadata = dict(container.metadata or {})
+        metadata.pop(RUNTIME_ENV_KEY, None)
+        if runtime_stamp is not None:
+            metadata[RUNTIME_ENV_KEY] = runtime_stamp
+        container.metadata = metadata
         if container.app_port and not apps_network:
             ports["8000/tcp"] = container.app_port
 
+        if cancelled is not None and cancelled():
+            msg = "Preview build cancelled before container startup"
+            raise RuntimeError(msg)
+        startup_started = time.monotonic()
         cid = docker_manager.run_container(
-            tag,
+            run_image,
             container.name,
             ports,
             env,
@@ -181,9 +284,14 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             network=apps_network,
         )
         container.container_id = cid
-        container.save(update_fields=["image", "container_id"])
+        container.save(update_fields=["image", "container_id", "metadata"])
 
         ok, detail = _verify_running(container)
+        container.metadata = {
+            **container.metadata,
+            "startup_seconds": round(time.monotonic() - startup_started, 3),
+        }
+        container.save(update_fields=["metadata"])
         if not ok:
             container.status = ContainerInstance.Status.FAILED
             container.save(update_fields=["status"])
@@ -192,16 +300,20 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             publish_container_status(container)
             return
 
+        if cancelled is not None and cancelled():
+            msg = "Preview build cancelled during container startup"
+            raise RuntimeError(msg)
+
         container.status = ContainerInstance.Status.RUNNING
         container.save(update_fields=["status"])
         traefik_router.write_route(container)
 
         smoke_note = ""
-        if job is not None:
+        if run is not None:
             from backend.runtime.services import smoke
 
             try:
-                smoke_result = smoke.run_smoke(job, container)
+                smoke_result = smoke.run_smoke(run, container)
                 smoke_note = (
                     f"\n\nSmoke test: {'PASSED' if smoke_result.get('passed') else 'FAILED'}"
                     f" ({smoke_result.get('endpoints_ok', 0)}/{smoke_result.get('endpoints_checked', 0)}"
@@ -211,6 +323,9 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
                 logger.exception("Smoke test errored for %s", container.name)
 
         action.update_progress(100)
+        if cancelled is not None and cancelled():
+            msg = "Preview build cancelled during readiness checks"
+            raise RuntimeError(msg)
         action.mark_completed(
             output=f"Built {tag}, container {cid}{smoke_note}\n\n{build_log[-2000:]}",
             exit_code=0,
@@ -219,6 +334,9 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
 
     except Exception as exc:
         logger.exception("Build failed for %s", container.name)
+        if cid:
+            docker_manager.remove(container.name)
+            traefik_router.delete_route(container)
         container.status = ContainerInstance.Status.FAILED
         container.save(update_fields=["status"])
         # Extract detailed Docker build log when available
@@ -226,7 +344,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             error_detail = docker_manager.extract_build_error(exc)
         except Exception:  # noqa: BLE001
             error_detail = ""
-        error_msg = error_detail or str(exc)
+        error_msg = getattr(exc, "log", "") or error_detail or str(exc)
         action.mark_failed(error_msg[-4000:])
         publish_container_status(container)
 
@@ -378,8 +496,16 @@ def _do_health(action: ContainerAction, container: ContainerInstance) -> None:
         )
 
 
-def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
-    """Create a ContainerInstance for *job* and kick off a build action.
+def build_for_job(
+    job: GenerationRun,
+    user: User | None,
+    *,
+    force_rebuild: bool = False,
+) -> ContainerInstance:
+    """Create a ContainerInstance for the run *job* and kick off a build action.
+
+    The image is built from the run's app tree (``RunFile`` rows; slot variants get the parent
+    tree with their slot files over it) through ``runtime.services.build_context``.
 
     In bridge mode (DOCKER_APPS_NETWORK set) the app is reached via a unique
     subdomain through Traefik and needs no host port, so ``app_port`` is left
@@ -397,6 +523,7 @@ def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
         status=ContainerInstance.Status.PENDING,
         app_port=app_port,
         created_by=user,
+        config={"force_rebuild": force_rebuild},
     )
 
     if app_port is not None:
@@ -407,7 +534,17 @@ def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
         except PortAllocation.DoesNotExist:
             pass
 
-    create_action(instance, ContainerAction.ActionType.BUILD, user)
+    cached_build = None
+    if not force_rebuild:
+        from backend.runtime.services.sample_builds import cached_sample
+
+        try:
+            cached_build = cached_sample(job, client=docker_manager.client())
+        except Exception:  # noqa: BLE001 - a cache outage falls back to a queued build
+            # Lookup failure takes the ordinary queued build path, where the
+            # worker reports a useful error without losing the saved request.
+            logger.warning("Sample image cache lookup failed for %s", job.id, exc_info=True)
+    create_action(instance, ContainerAction.ActionType.BUILD, user, cached_build=cached_build)
     return instance
 
 

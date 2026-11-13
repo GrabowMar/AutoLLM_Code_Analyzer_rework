@@ -26,7 +26,7 @@ from backend.export.services.findings import ExportContext
 from backend.export.services.findings import export_context
 from backend.export.services.findings import finding_csv_row
 from backend.export.services.findings import finding_rows_queryset
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
 from backend.reports.models import Report
 
 if TYPE_CHECKING:
@@ -58,17 +58,23 @@ _FINDINGS = ExportSpec(
     owner_field="result__run__created_by",
     filters={
         "task_id": "result__run_id",
-        "generation_job_id": "result__run__generation_job_id",
-        "experiment_id": "result__run__generation_job__experiment_id",
+        "generation_run_id": "result__run__generation_job_id",
+        "study_id": "result__run__generation_job__study_id",
         "analyzer": "result__tool_slug",
         "normalized_severity": "severity",
     },
 )
-_JOBS = ExportSpec(
-    model=GenerationJob,
+_RUNS = ExportSpec(
+    model=GenerationRun,
     owner_field="created_by",
     # The model slug (e.g. "deepseek/deepseek-v4.1-flash"), as everywhere else in the API.
-    filters={"status": "status", "model_id": "model__model_id"},
+    filters={
+        "status": "status",
+        "model_id": "model__model_id",
+        "study_id": "study_id",
+        "kind": "kind",
+        "outcome": "outcome",
+    },
 )
 _TASKS = ExportSpec(
     model=AnalysisRun,
@@ -146,8 +152,8 @@ def _findings_window(
     request: object,
     *,
     task_id: uuid.UUID | None,
-    generation_job_id: uuid.UUID | None,
-    experiment_id: uuid.UUID | None,
+    generation_run_id: uuid.UUID | None,
+    study_id: uuid.UUID | None,
     analyzer: str,
     tool_severity: str,
     normalized_severity: str,
@@ -158,8 +164,8 @@ def _findings_window(
     """The findings one export returns, and what its rows share (counted results, the apps they describe)."""
     params = {
         "task_id": task_id,
-        "generation_job_id": generation_job_id,
-        "experiment_id": experiment_id,
+        "generation_run_id": generation_run_id,
+        "study_id": study_id,
         "analyzer": analyzer,
         "normalized_severity": normalized_severity,
     }
@@ -169,8 +175,8 @@ def _findings_window(
         qs = qs.filter(tool_severity="")
     elif label:
         qs = qs.filter(tool_severity__iexact=label)
-    job_ids = qs.order_by().values_list("result__run__generation_job_id", flat=True).distinct()
-    ctx = export_context(job_ids)
+    run_ids = qs.order_by().values_list("result__run__generation_job_id", flat=True).distinct()
+    ctx = export_context(run_ids)
     if latest_only:
         qs = qs.filter(result_id__in=ctx.latest_ids)
     return _window(qs, limit), ctx
@@ -192,8 +198,8 @@ def _stream_findings_csv(qs: QuerySet, ctx: ExportContext, *, spreadsheet_safe: 
 def findings_csv(
     request,
     task_id: uuid.UUID | None = None,
-    generation_job_id: uuid.UUID | None = None,
-    experiment_id: uuid.UUID | None = None,
+    generation_run_id: uuid.UUID | None = None,
+    study_id: uuid.UUID | None = None,
     analyzer: str = Query(""),
     tool_severity: str = Query(""),
     normalized_severity: str = Query(""),
@@ -208,8 +214,8 @@ def findings_csv(
     window, ctx = _findings_window(
         request,
         task_id=task_id,
-        generation_job_id=generation_job_id,
-        experiment_id=experiment_id,
+        generation_run_id=generation_run_id,
+        study_id=study_id,
         analyzer=analyzer,
         tool_severity=tool_severity,
         normalized_severity=normalized_severity or severity,
@@ -234,8 +240,8 @@ def findings_csv(
 def findings_json(
     request,
     task_id: uuid.UUID | None = None,
-    generation_job_id: uuid.UUID | None = None,
-    experiment_id: uuid.UUID | None = None,
+    generation_run_id: uuid.UUID | None = None,
+    study_id: uuid.UUID | None = None,
     analyzer: str = Query(""),
     tool_severity: str = Query(""),
     normalized_severity: str = Query(""),
@@ -249,8 +255,8 @@ def findings_json(
     window, ctx = _findings_window(
         request,
         task_id=task_id,
-        generation_job_id=generation_job_id,
-        experiment_id=experiment_id,
+        generation_run_id=generation_run_id,
+        study_id=study_id,
         analyzer=analyzer,
         tool_severity=tool_severity,
         normalized_severity=normalized_severity or severity,
@@ -265,8 +271,8 @@ def findings_json(
 def findings_sarif(
     request,
     task_id: uuid.UUID | None = None,
-    generation_job_id: uuid.UUID | None = None,
-    experiment_id: uuid.UUID | None = None,
+    generation_run_id: uuid.UUID | None = None,
+    study_id: uuid.UUID | None = None,
     analyzer: str = Query(""),
     tool_severity: str = Query(""),
     normalized_severity: str = Query(""),
@@ -280,8 +286,8 @@ def findings_sarif(
     window, ctx = _findings_window(
         request,
         task_id=task_id,
-        generation_job_id=generation_job_id,
-        experiment_id=experiment_id,
+        generation_run_id=generation_run_id,
+        study_id=study_id,
         analyzer=analyzer,
         tool_severity=tool_severity,
         normalized_severity=normalized_severity or severity,
@@ -294,37 +300,65 @@ def findings_sarif(
     return resp
 
 
-# ── Generation jobs ───────────────────────────────────────────────────────────
+# ── Generation runs ───────────────────────────────────────────────────────────
 
 
-@router.get("/generation-jobs.csv", auth=None, include_in_schema=True)
-def generation_jobs_csv(
+def _runs_params(status: str, model_id: str, study_id: uuid.UUID | None, kind: str, outcome: str) -> dict[str, object]:
+    return {"status": status, "model_id": model_id, "study_id": study_id, "kind": kind, "outcome": outcome}
+
+
+@router.get("/generation-runs.csv", auth=None, include_in_schema=True)
+def generation_runs_csv(
     request,
     status: str = Query(""),
     model_id: str = Query("", description="Model slug, e.g. deepseek/deepseek-v4.1-flash."),
+    study_id: uuid.UUID | None = None,
+    kind: str = Query(""),
+    outcome: str = Query(""),
     spreadsheet_safe: bool = True,
     since: datetime | None = None,
     limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    window = _window(_build_qs(_JOBS, request, {"status": status, "model_id": model_id}, since), limit)
-    content = services.generation_jobs_csv(window.qs, spreadsheet_safe=spreadsheet_safe)
-    return _csv_response(content, "generation-jobs.csv", window)
+    params = _runs_params(status, model_id, study_id, kind, outcome)
+    window = _window(_build_qs(_RUNS, request, params, since), limit)
+    content = services.generation_runs_csv(window.qs, spreadsheet_safe=spreadsheet_safe)
+    return _csv_response(content, "generation-runs.csv", window)
 
 
-@router.get("/generation-jobs.json", auth=None, include_in_schema=True)
-def generation_jobs_json(
+@router.get("/generation-runs.json", auth=None, include_in_schema=True)
+def generation_runs_json(
     request,
     status: str = Query(""),
     model_id: str = Query("", description="Model slug, e.g. deepseek/deepseek-v4.1-flash."),
+    study_id: uuid.UUID | None = None,
+    kind: str = Query(""),
+    outcome: str = Query(""),
     since: datetime | None = None,
     limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    window = _window(_build_qs(_JOBS, request, {"status": status, "model_id": model_id}, since), limit)
-    return _json_response(services.generation_jobs_json(window.qs), window)
+    params = _runs_params(status, model_id, study_id, kind, outcome)
+    window = _window(_build_qs(_RUNS, request, params, since), limit)
+    return _json_response(services.generation_runs_json(window.qs), window)
+
+
+@router.get("/runs/{run_id}/bundle.zip", auth=None, include_in_schema=True)
+def run_bundle_zip(request, run_id: uuid.UUID):
+    """One run's evidence: manifest.json, files.csv (path, origin, sha, loc), resolved_lock.json, task and code."""
+    if not _auth_check(request):
+        return HttpResponse(status=401)
+    qs = GenerationRun.objects.all()
+    if not request.user.is_staff:
+        qs = qs.filter(created_by=request.user)
+    run = qs.filter(id=run_id).first()
+    if run is None:
+        return HttpResponse(status=404)
+    resp = HttpResponse(services.run_bundle(run), content_type="application/zip")
+    resp["Content-Disposition"] = f'attachment; filename="run-{run_id}.zip"'
+    return resp
 
 
 # ── Analysis tasks ────────────────────────────────────────────────────────────
@@ -397,25 +431,27 @@ def reports_json(
 @router.get("/review-sample.zip")
 def review_sample_zip(
     request,
-    experiment_id: uuid.UUID | None = None,
-    batch_id: uuid.UUID | None = None,
+    study_id: uuid.UUID | None = None,
     size: int = Query(30, ge=1, le=500),
     per_stratum: int | None = Query(None, ge=1, le=100),
-    stratify: str = Query("model", pattern="^(|model|template|model,template)$"),
+    stratify: str = Query("model", pattern="^(|model|task|model,task)$"),
     seed: int = Query(0, ge=0),
     blind: bool = True,
 ):
-    """A seeded, stratified sample of apps with blank label sheets for manual review."""
-    from backend.export.services.review_sample import build_review_sample
-    from backend.statistics.services.study import study_jobs
+    """A seeded, stratified sample of apps with blank label sheets for manual review.
 
-    jobs = study_jobs(
-        request.auth,
-        experiment_id=str(experiment_id) if experiment_id else None,
-        batch_id=str(batch_id) if batch_id else None,
-    )
+    With ``study_id``: the study's current runs (404 for another user's study); otherwise every sample run
+    the caller owns (staff: everyone's).
+    """
+    from backend.export.services.review_sample import build_review_sample
+    from backend.export.services.review_sample import review_population
+
+    try:
+        runs = review_population(request.auth, study_id=str(study_id) if study_id else None)
+    except ValueError:
+        return HttpResponse("Study not found", status=404)
     data, _manifest = build_review_sample(
-        jobs,
+        runs,
         size=size,
         per_stratum=per_stratum,
         stratify=tuple(k for k in stratify.split(",") if k),

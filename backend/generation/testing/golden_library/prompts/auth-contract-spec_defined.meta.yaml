@@ -1,0 +1,4 @@
+name: Auth contract, defined by the task
+role: fragment
+modes: [app]
+variables: []

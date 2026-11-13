@@ -1,10 +1,12 @@
-"""Shared fixtures for the execution engine tests: endpoints, live relay sessions, executor-owned jobs."""
+"""Shared fixtures for the execution engine tests: endpoints, live relay sessions, studies and executor-owned runs."""
 
 from __future__ import annotations
 
 import itertools
 import uuid
+from collections.abc import Callable
 from datetime import timedelta
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -12,9 +14,17 @@ from django.utils import timezone
 
 from backend.execution.breaker import breaker
 from backend.execution.capacity import EffectiveSlots
-from backend.generation.models import Experiment
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import ExperimentFactory
+from backend.generation.models import GenerationRun
+from backend.generation.models import ResourcePolicy
+from backend.generation.models import SlotTarget
+from backend.generation.models import Study
+from backend.generation.models import TaskSpecVersion
+from backend.generation.testing.content import resource_policy_content
+from backend.generation.tests.factories import GenerationRunFactory
+from backend.generation.tests.factories import ResourcePolicyFactory
+from backend.generation.tests.factories import SlotTargetFactory
+from backend.generation.tests.factories import StudyFactory
+from backend.generation.tests.factories import TaskSpecVersionFactory
 from backend.inference.access import system_openrouter
 from backend.inference.models import LLMEndpoint
 from backend.inference.models import RelaySession
@@ -23,6 +33,7 @@ from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
 
 _counter = itertools.count()
+_SHARED: dict[str, Any] = {}
 
 
 @pytest.fixture(autouse=True)
@@ -96,30 +107,62 @@ def make_model(endpoint=None, served: str = "", digest: str = "", **kw):
     )
 
 
-def running_experiment(user, **kw) -> Experiment:
-    kw.setdefault("status", Experiment.Status.RUNNING)
+def _shared(key: str, model: type, make: Callable[[], Any]) -> Any:
+    """One object per test for rows every run may share (a task version, a slot target); rebuilt after rollback."""
+    obj = _SHARED.get(key)
+    if obj is None or not model.objects.filter(pk=obj.pk).exists():
+        obj = make()
+        _SHARED[key] = obj
+    return obj
+
+
+def shared_task_version() -> TaskSpecVersion:
+    return _shared("task_version", TaskSpecVersion, TaskSpecVersionFactory)
+
+
+def shared_slot_target() -> SlotTarget:
+    return _shared("slot_target", SlotTarget, SlotTargetFactory)
+
+
+def policy_with_infra_retries(n: int) -> ResourcePolicy:
+    content = resource_policy_content("standard")
+    content["retries"]["infra_retries"] = n
+    return ResourcePolicyFactory(content=content)
+
+
+def running_study(user, *, scheduling: str | None = None, **kw) -> Study:
+    """A study in ``running`` state (``launched_at`` set); ``scheduling`` is written past the design mirror."""
+    kw.setdefault("status", "running")
     kw.setdefault("launched_at", timezone.now())
-    return ExperimentFactory(created_by=user, **kw)
+    study = StudyFactory(created_by=user, **kw)
+    if scheduling is not None:
+        Study.objects.filter(pk=study.pk).update(scheduling=scheduling)
+        study.scheduling = scheduling
+    return study
 
 
-def make_job(user, model=None, *, lane="llm", experiment=None, sequence=None, **kw) -> GenerationJob:
-    """An executor-owned PENDING job (``queued_at`` set), with the frozen endpoint section for local models."""
-    bundle = dict(kw.pop("resolved_bundle", {}) or {})
-    if model is not None and model.endpoint_id and not model.endpoint.is_system:
-        bundle.setdefault(
-            "endpoint",
-            {"slug": model.endpoint.slug, "served_model_name": model.served_model_name, "digest": model.digest},
-        )
+def make_run(user, model=None, *, lane="llm", study=None, sequence=None, **kw) -> GenerationRun:
+    """An executor-owned PENDING run (``queued_at`` set) with the pinned served name of local models.
+
+    ``lane="sandbox"`` makes an ``app_agentic`` run, ``lane="llm"`` a ``slot_single_shot`` variant (of a
+    slot target shared within the test), so the lane follows from the kind as in production.
+    """
+    model = model if model is not None else make_model()
+    if model.endpoint_id and not model.endpoint.is_system:
+        kw.setdefault("pinned_served_name", model.served_model_name)
+        kw.setdefault("pinned_digest", model.digest)
     kw.setdefault("queued_at", timezone.now() - timedelta(seconds=1))
-    kw.setdefault("mode", GenerationJob.Mode.AGENT if lane == "sandbox" else GenerationJob.Mode.SCAFFOLDING)
-    return GenerationJob.objects.create(
+    if lane == "sandbox":
+        kw.setdefault("task_version", shared_task_version())
+    else:
+        kw.setdefault("slot_single_shot", True)
+        kw.setdefault("slot_target", shared_slot_target())
+    return GenerationRunFactory(
         created_by=user,
         model=model,
-        endpoint=model.endpoint if model is not None and model.endpoint_id else None,
-        lane=lane,
-        experiment=experiment,
+        endpoint=model.endpoint if model.endpoint_id else None,
+        study=study,
         sequence=sequence,
-        resolved_bundle=bundle,
         **kw,
     )
 

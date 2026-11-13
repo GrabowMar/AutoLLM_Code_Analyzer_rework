@@ -1,0 +1,4 @@
+name: Stack fragment, Flask + React
+role: fragment
+modes: [app, slot]
+variables: []

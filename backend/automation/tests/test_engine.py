@@ -691,7 +691,7 @@ class TestDispatcherMocking:
 
         with patch(
             "backend.automation.engine.dispatchers.dispatch_generate",
-            return_value={"generation_job_id": "fake-id", "status": "completed"},
+            return_value={"generation_run_id": "fake-id", "status": "completed"},
         ) as mock_gen:
             execute_run(run.id)
 

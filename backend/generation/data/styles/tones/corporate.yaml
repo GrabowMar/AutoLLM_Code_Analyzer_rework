@@ -1,0 +1,3 @@
+# Tone catalogue entry (not a library entity). A style with this tone copies `tone` (the slug) and `tone_text`.
+{name: Corporate, description: 'Visual tone preset: corporate.', tone_text: 'Corporate: a sober blue-grey palette,
+    dense tables and forms, clear hierarchy and formal labels.'}

@@ -1,4 +1,7 @@
-"""The internal LLM proxy (spec §D.3): auth, translation, dedupe, 504 re-attach, synthesized streaming."""
+"""The internal LLM proxy (spec §D.3): auth, translation, dedupe, 504 re-attach, synthesized streaming.
+
+Runs are v3 ``GenerationRun`` rows; the proxy reads the frozen endpoint from the run's manifest.
+"""
 
 from __future__ import annotations
 
@@ -14,13 +17,15 @@ import pytest
 from django.db import connection
 from django.utils import timezone
 
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models import GenerationRun
+from backend.generation.models.choices import RunPhase
+from backend.generation.models.choices import RunStatus
+from backend.generation.tests.factories import GenerationRunFactory
 from backend.inference import proxy_server
 from backend.inference import requests as q
 from backend.inference.gateway_wiring import proxy_token
 from backend.inference.models import LLMRequest
-from backend.inference.snapshot import endpoint_section
+from backend.inference.tests.conftest import make_agent_run
 from backend.inference.tests.conftest import make_endpoint
 from backend.inference.tests.conftest import make_local_model
 from backend.inference.timeouts import Chain
@@ -55,22 +60,7 @@ def proxy():
 def agent_job(owner):
     endpoint = make_endpoint(owner, num_ctx_cap=8192)
     model = make_local_model(endpoint, context_window=4096)
-    return GenerationJobFactory(
-        model=model,
-        created_by=owner,
-        mode=GenerationJob.Mode.AGENT,
-        status=GenerationJob.Status.RUNNING,
-        phase=GenerationJob.Phase.RUNNING,
-        attempt=1,
-        priority=3,
-        lease_expires_at=timezone.now() + timedelta(minutes=5),
-        resolved_bundle={
-            "mode": "agent",
-            "endpoint": endpoint_section(model),
-            "llm": {"model_slug": model.model_id},
-            "agent": {"wall_clock_seconds": 600},
-        },
-    )
+    return make_agent_run(model, owner)
 
 
 class Completer:
@@ -148,24 +138,54 @@ def test_health_and_auth(proxy, agent_job):
     assert _call(proxy, "/v1/chat/completions", _chat_body(), token="garbage")[0] == 401  # noqa: S106
     status, raw = _call(proxy, "/v1/models", token=proxy_token(agent_job))
     assert (status, json.loads(raw)["data"][0]["id"]) == (200, agent_job.model.model_id)
-    stale = GenerationJob(pk=agent_job.pk, attempt=0)
+    stale = GenerationRun(pk=agent_job.pk, attempt=0)
     assert _call(proxy, "/v1/models", token=proxy_token(stale))[0] == 401
-    GenerationJob.objects.filter(pk=agent_job.pk).update(lease_expires_at=timezone.now() - timedelta(seconds=1))
+    GenerationRun.objects.filter(pk=agent_job.pk).update(lease_expires_at=timezone.now() - timedelta(seconds=1))
     proxy_server._auth_cache._jobs.clear()
     assert _call(proxy, "/v1/models", token=proxy_token(agent_job))[0] == 401
-    GenerationJob.objects.filter(pk=agent_job.pk).update(
+    GenerationRun.objects.filter(pk=agent_job.pk).update(
         lease_expires_at=timezone.now() + timedelta(minutes=5),
-        phase=GenerationJob.Phase.EVAL_QUEUED,
+        phase=RunPhase.EVAL_QUEUED,
     )
     proxy_server._auth_cache._jobs.clear()
     assert _call(proxy, "/v1/models", token=proxy_token(agent_job))[0] == 401
 
 
-def test_non_stream_round_trip_uses_the_frozen_snapshot(proxy, agent_job):
+def test_runs_without_a_local_frozen_endpoint_are_denied(proxy, owner):
+    endpoint = make_endpoint(owner)
+    model = make_local_model(endpoint)
+    no_manifest = GenerationRunFactory(
+        model=model,
+        created_by=owner,
+        status=RunStatus.RUNNING,
+        phase=RunPhase.RUNNING,
+        attempt=1,
+        lease_expires_at=timezone.now() + timedelta(minutes=5),
+    )
+    assert _call(proxy, "/v1/models", token=proxy_token(no_manifest))[0] == 401
+    openrouter = make_agent_run(
+        model,
+        owner,
+        endpoint_section={"id": endpoint.pk, "kind": "openrouter", "cost_basis": "billed"},
+    )
+    assert _call(proxy, "/v1/models", token=proxy_token(openrouter))[0] == 401
+
+
+def test_token_lifetime_follows_the_manifest_wall_clock(owner):
+    assert (
+        proxy_server.manifest_wall_clock_s({"resources": {"effective": {"content": {"time": {"wall_clock_s": 7}}}}})
+        == 7
+    )
+    assert proxy_server.manifest_wall_clock_s({"resources": {"effective": {"time.wall_clock_s": 9}}}) == 9
+    # No recorded wall clock: the unchanged v2 default, never 0 (a 0 max_age would expire every token).
+    assert proxy_server.manifest_wall_clock_s({}) == proxy_server.DEFAULT_WALL_CLOCK_S
+
+
+def test_non_stream_round_trip_uses_the_frozen_endpoint(proxy, agent_job):
     from backend.llm_models.models import LLMModel
 
-    # The live row changes after the snapshot froze num_ctx; the proxy must not follow it.
-    LLMModel.objects.filter(pk=agent_job.model_id).update(num_ctx_override=1024)
+    # The live row changes after the manifest froze the served name; the proxy must not follow it.
+    LLMModel.objects.filter(pk=agent_job.model_id).update(served_model_name="live-rename:1b")
     with Completer(agent_job.model.endpoint_id) as completer:
         status, raw = _call(proxy, "/v1/chat/completions", _chat_body(), token=proxy_token(agent_job))
     assert status == 200, raw
@@ -177,6 +197,8 @@ def test_non_stream_round_trip_uses_the_frozen_snapshot(proxy, agent_job):
     row = LLMRequest.objects.get(pk=completer.handled[0].pk)
     assert (row.source, row.job_id, row.job_attempt, row.priority) == ("agent_proxy", agent_job.pk, 1, 3)
     sent = completer.handled[0].body
+    assert sent["model"] == agent_job.model.served_model_name
+    # num_ctx is not frozen by the v3 manifest yet: it comes from the run's model row, never the server default.
     assert sent["options"]["num_ctx"] == 4096
     assert sent["options"]["seed"] == 99
     assert sent["options"]["num_predict"] == 256

@@ -4,6 +4,7 @@
 	import { getPreferences } from '$lib/stores/preferences.svelte';
 	import AppSidebar from '$lib/components/AppSidebar.svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
+	import SpendChip from '$lib/components/layout/SpendChip.svelte';
 	import AppFooter from '$lib/components/AppFooter.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -92,7 +93,12 @@
 		<div
 			class="flex flex-1 flex-col min-w-0 transition-[padding] duration-200 ease-out motion-reduce:transition-none md:pl-[var(--app-sidebar-offset)]"
 		>
-			<AppHeader {auth} />
+			<AppHeader {auth}>
+				{#snippet actions()}
+					<!-- Header spend chip (WP-15), left of the theme toggle and account menu. -->
+					<div class="hidden sm:flex"><SpendChip /></div>
+				{/snippet}
+			</AppHeader>
 			<div class="flex min-h-[calc(100dvh-3rem)] flex-1 flex-col p-3 sm:p-4 md:p-5 min-w-0 overflow-x-clip pt-[calc(3rem+0.75rem)] sm:pt-[calc(3rem+1rem)] md:pt-[calc(3rem+1.25rem)]">
 				{@render children()}
 			</div>

@@ -15,7 +15,7 @@ from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import AnalyzerWorkspaceFactory
 from backend.analysis.tests.factories import InstalledToolFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.analysis.tests.factories import generation_run
 from backend.runtime.models import ContainerInstance
 from backend.runtime.tests.factories import ContainerInstanceFactory
 from backend.users.tests.factories import UserFactory
@@ -74,7 +74,7 @@ def test_resolve_requires_generation_job(user):
 
 
 def test_resolve_reports_app_not_running(user):
-    job = GenerationJobFactory(created_by=user)
+    job = generation_run(user)
     ContainerInstanceFactory(generation_job=job, created_by=user, status=ContainerInstance.Status.STOPPED)
     run = AnalysisRunFactory(created_by=user, generation_job=job)
     url, reason = runner.resolve_app_url(run)
@@ -84,7 +84,7 @@ def test_resolve_reports_app_not_running(user):
 
 def test_resolve_uses_container_ip_on_default_bridge(user, monkeypatch, settings):
     settings.DOCKER_APPS_NETWORK = ""
-    job = GenerationJobFactory(created_by=user)
+    job = generation_run(user)
     _running_app(job, user)
     monkeypatch.setattr(runner.docker_manager, "inspect", _inspect_with_ip("172.17.0.9"))
     run = AnalysisRunFactory(created_by=user, generation_job=job)
@@ -93,7 +93,7 @@ def test_resolve_uses_container_ip_on_default_bridge(user, monkeypatch, settings
 
 def test_resolve_uses_container_name_on_apps_network(user, settings):
     settings.DOCKER_APPS_NETWORK = "apps"
-    job = GenerationJobFactory(created_by=user)
+    job = generation_run(user)
     _running_app(job, user, name="llm-app2")
     run = AnalysisRunFactory(created_by=user, generation_job=job)
     assert runner.resolve_app_url(run) == ("http://llm-app2:8000", "")
@@ -102,7 +102,7 @@ def test_resolve_uses_container_name_on_apps_network(user, settings):
 def test_resolve_never_targets_another_users_app(user, settings):
     settings.DOCKER_APPS_NETWORK = "apps"
     other = UserFactory()
-    job = GenerationJobFactory(created_by=other)
+    job = generation_run(other)
     _running_app(job, other)
     run = AnalysisRunFactory(created_by=user, generation_job=job)
     url, reason = runner.resolve_app_url(run)
@@ -126,7 +126,7 @@ def _stub_workspace(monkeypatch, exec_calls, output=""):
 
 def test_execute_skips_dynamic_tool_when_app_not_running(user, monkeypatch):
     _dynamic_tool()
-    job = GenerationJobFactory(created_by=user, result_data={"backend_code": "print(1)"})
+    job = generation_run(user, files={"app.py": "print(1)\n"})
     run = AnalysisRunFactory(
         created_by=user,
         workspace=AnalyzerWorkspaceFactory(user=user),
@@ -151,7 +151,7 @@ def test_execute_runs_dynamic_tool_against_app_with_user_config(user, monkeypatc
     tool = _dynamic_tool()
     workspace = AnalyzerWorkspaceFactory(user=user)
     InstalledToolFactory(workspace=workspace, tool=tool, config={"tags": "exposure"})
-    job = GenerationJobFactory(created_by=user, result_data={"backend_code": "print(1)"})
+    job = generation_run(user, files={"app.py": "print(1)\n"})
     _running_app(job, user, name="llm-app3")
     run = AnalysisRunFactory(created_by=user, workspace=workspace, generation_job=job, tool_slugs=["dast-fixture"])
     hit = {
@@ -181,7 +181,7 @@ def _dast_run(user, settings, name="llm-app4"):
     settings.DOCKER_APPS_NETWORK = "apps"
     _dynamic_tool()
     workspace = AnalyzerWorkspaceFactory(user=user)
-    job = GenerationJobFactory(created_by=user, result_data={"backend_code": "print(1)"})
+    job = generation_run(user, files={"app.py": "print(1)\n"})
     _running_app(job, user, name=name)
     return AnalysisRunFactory(created_by=user, workspace=workspace, generation_job=job, tool_slugs=["dast-fixture"])
 

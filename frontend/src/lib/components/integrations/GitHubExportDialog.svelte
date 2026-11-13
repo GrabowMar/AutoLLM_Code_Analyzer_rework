@@ -3,7 +3,7 @@
 	 * GitHubExportDialog — export one application (generation job) to a new
 	 * GitHub repository or a Gist.
 	 *
-	 * Props: `open` (bindable), `applicationId` (GenerationJob UUID),
+	 * Props: `open` (bindable), `applicationId` (generation run UUID),
 	 * `defaultName` (suggested repository name; slugified).
 	 * Checks `/integrations/github/status/` on open and points to the
 	 * Settings → GitHub when no working token is stored.

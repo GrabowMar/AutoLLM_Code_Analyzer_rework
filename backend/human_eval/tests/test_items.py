@@ -7,8 +7,8 @@ from collections import Counter
 
 import pytest
 
-from backend.generation.tests.factories import ExperimentConditionFactory
-from backend.generation.tests.factories import ExperimentFactory
+from backend.generation.tests.factories import StudyConditionFactory
+from backend.generation.tests.factories import StudyPlanFactory
 from backend.human_eval.models import EvalItem
 from backend.human_eval.models import EvalTask
 from backend.human_eval.models import EvalTaskApp
@@ -24,11 +24,15 @@ pytestmark = pytest.mark.django_db
 GROUP = "todo-app:0123456789ab"
 
 
-def _task(mode: str = EvalTask.Mode.PAIRWISE, *, seed: int | None = None, experiment=None, **pairing) -> EvalTask:
+def _task(mode: str = EvalTask.Mode.PAIRWISE, *, seed: int | None = None, study=None, **pairing) -> EvalTask:
     settings, errors = design_service.validate_settings({"pairing": pairing} if pairing else {})
     assert not errors
     fields = {"seed": seed} if seed is not None else {}
-    return EvalTaskFactory(mode=mode, settings=settings, experiment=experiment, **fields)
+    task = EvalTaskFactory(mode=mode, settings=settings, **fields)
+    if study is not None:
+        task.study_id = study.pk
+        task.save(update_fields=["study_id"])
+    return task
 
 
 def _app(task, *, condition=None, model="model-a", repeat=0, group=GROUP, active=True) -> EvalTaskApp:
@@ -147,12 +151,12 @@ def test_random_k_stops_when_eligible_pairs_run_out():
 # --- vs_baseline ------------------------------------------------------------------------
 
 
-def test_vs_baseline_pairs_with_the_experiment_baseline_preferring_the_same_repeat():
-    experiment = ExperimentFactory()
-    base, treat, third = (ExperimentConditionFactory(experiment=experiment) for _ in range(3))
-    experiment.baseline_condition = base
-    experiment.save(update_fields=["baseline_condition"])
-    task = _task(strategy="vs_baseline", experiment=experiment)
+def test_vs_baseline_pairs_with_the_study_baseline_preferring_the_same_repeat():
+    plan = StudyPlanFactory()
+    base = StudyConditionFactory(plan=plan, is_baseline=True)
+    treat, third = (StudyConditionFactory(plan=plan) for _ in range(2))
+    task = _task(strategy="vs_baseline", study=plan.study)
+    assert items.baseline_condition_id(task) == base.id
     b0, b1 = _app(task, condition=base.id, repeat=0), _app(task, condition=base.id, repeat=1)
     t0, t1 = _app(task, condition=treat.id, repeat=0), _app(task, condition=treat.id, repeat=1)
     lone = _app(task, condition=third.id, repeat=5)  # no baseline app with repeat 5: paired with every one
@@ -161,15 +165,11 @@ def test_vs_baseline_pairs_with_the_experiment_baseline_preferring_the_same_repe
     assert _ids(pairs) == {tuple(sorted((str(a.id), str(b.id)))) for a, b in expected}
 
 
-def test_vs_baseline_setting_overrides_the_experiment_baseline():
-    experiment = ExperimentFactory()
-    first, second = (
-        ExperimentConditionFactory(experiment=experiment),
-        ExperimentConditionFactory(experiment=experiment),
-    )
-    experiment.baseline_condition = first
-    experiment.save(update_fields=["baseline_condition"])
-    task = _task(strategy="vs_baseline", experiment=experiment, baseline_condition_id=second.id)
+def test_vs_baseline_setting_overrides_the_study_baseline():
+    plan = StudyPlanFactory()
+    first = StudyConditionFactory(plan=plan, is_baseline=True)
+    second = StudyConditionFactory(plan=plan)
+    task = _task(strategy="vs_baseline", study=plan.study, baseline_condition_id=second.id)
     assert items.baseline_condition_id(task) == second.id
     a, b, c = _app(task, condition=first.id), _app(task, condition=second.id), _app(task, condition=first.id, repeat=1)
     pairs = items.plan_pairs(task, [a, b, c])

@@ -1,0 +1,255 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Kanban board
+summary: A shared kanban board where tasks move through To Do, In Progress and Done.
+category: workflow
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Task
+  fields:
+  - {name: title, type: string, required: true, max_length: 200}
+  - {name: description, type: text, max_length: 2000}
+  - name: status
+    type: enum
+    enum: [todo, in_progress, done]
+    default: todo
+  - name: priority
+    type: enum
+    enum: [low, medium, high]
+    default: medium
+  - {name: position, type: int, min: 1}
+  - {name: updated_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: tasks.list
+  method: GET
+  path: /api/tasks
+  auth: public
+  query:
+  - name: status
+    type: enum
+    semantics: filter
+    enum: [todo, in_progress, done]
+  - name: priority
+    type: enum
+    semantics: filter
+    enum: [low, medium, high]
+  response_schema:
+    type: object
+    required: [items, total, counts]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, title]
+          properties:
+            id:
+              type: [integer, string]
+            title: {type: string, maxLength: 200, minLength: 1}
+            description:
+              type: [string, 'null']
+              maxLength: 2000
+            status:
+              type: [string, 'null']
+              enum: [todo, in_progress, done, null]
+            priority:
+              type: [string, 'null']
+              enum: [low, medium, high, null]
+            position:
+              type: [integer, 'null']
+              minimum: 1
+            updated_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      counts: {type: object}
+- id: tasks.create
+  method: POST
+  path: /api/tasks
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      status:
+        type: [string, 'null']
+        enum: [todo, in_progress, done, null]
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+    required: [title]
+  response_schema:
+    type: object
+    required: [id, title]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      status:
+        type: [string, 'null']
+        enum: [todo, in_progress, done, null]
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      position:
+        type: [integer, 'null']
+        minimum: 1
+      updated_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+- id: tasks.get
+  method: GET
+  path: /api/tasks/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, title]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      status:
+        type: [string, 'null']
+        enum: [todo, in_progress, done, null]
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      position:
+        type: [integer, 'null']
+        minimum: 1
+      updated_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: tasks.update
+  method: PATCH
+  path: /api/tasks/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      status:
+        type: [string, 'null']
+        enum: [todo, in_progress, done, null]
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      position:
+        type: [integer, 'null']
+        minimum: 1
+  response_schema:
+    type: object
+    required: [id, title]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      status:
+        type: [string, 'null']
+        enum: [todo, in_progress, done, null]
+      priority:
+        type: [string, 'null']
+        enum: [low, medium, high, null]
+      position:
+        type: [integer, 'null']
+        minimum: 1
+      updated_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404]
+- id: tasks.delete
+  method: DELETE
+  path: /api/tasks/{id}
+  auth: user
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.board
+  text: Three columns with task cards (title, priority badge) and per-column counts, plus a priority filter.
+  endpoints: [tasks.list]
+- id: ui.drag
+  text: 'For signed-in users: drag and drop between and within columns that saves the new column and position.'
+  endpoints: [tasks.update]
+- id: ui.forms
+  text: Create and edit dialogs showing the API's validation messages; delete with confirmation.
+  endpoints: [tasks.create, tasks.update, tasks.delete]
+features: [auth, filter, sort]
+surfaces: [cwe-862, cwe-79, cwe-20, cwe-362, cwe-89]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: tasks.move.reorders
+  category: functional
+  endpoint: tasks.update
+  setup:
+  - request:
+      method: POST
+      path: /api/tasks
+      json: {title: zz a, status: done}
+    expect_status: 201
+  - request:
+      method: POST
+      path: /api/tasks
+      json: {title: zz b, status: done}
+    expect_status: 201
+    capture: {bid: $.id}
+  request:
+    method: PATCH
+    path: /api/tasks/{bid}
+    json: {position: 1}
+  expect:
+    status: 200
+    json_contains: {position: 1, status: done}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.tasks.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: tasks.create
+  params: {field: title, view_endpoint: tasks.list}

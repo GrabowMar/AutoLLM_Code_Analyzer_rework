@@ -45,14 +45,14 @@ def test_list_containers_authenticated(auth_client):
 
 @pytest.mark.django_db
 def test_list_containers_filter_by_model(auth_client):
-    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.generation.tests.factories import GenerationRunFactory
     from backend.llm_models.tests.factories import LLMModelFactory
 
     client, user = auth_client
-    job = GenerationJobFactory(model=LLMModelFactory(), created_by=user)
+    job = GenerationRunFactory(model=LLMModelFactory(), created_by=user)
     mine = ContainerInstanceFactory(generation_job=job, created_by=user)
     ContainerInstanceFactory(
-        generation_job=GenerationJobFactory(model=LLMModelFactory(), created_by=user),
+        generation_job=GenerationRunFactory(model=LLMModelFactory(), created_by=user),
         created_by=user,
     )
     resp = client.get("/api/runtime/containers/", {"model_id": job.model.model_id})
@@ -216,12 +216,12 @@ def _docker_up():
 
 @pytest.mark.django_db
 def test_list_containers_only_shows_own(auth_client):
-    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.generation.tests.factories import GenerationRunFactory
 
     client, user = auth_client
     built = ContainerInstanceFactory(created_by=user)
     # Built by someone else (e.g. the executor) for a job the caller owns.
-    via_job = ContainerInstanceFactory(generation_job=GenerationJobFactory(created_by=user))
+    via_job = ContainerInstanceFactory(generation_job=GenerationRunFactory(created_by=user))
     ContainerInstanceFactory()  # another user's
     ContainerInstanceFactory(created_by=None)  # ownerless (internal)
     resp = client.get("/api/runtime/containers/")
@@ -294,11 +294,11 @@ def test_actions_scoped_to_own_containers(auth_client):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("suffix", ["build/", "smoke/"])
-def test_build_and_smoke_reject_other_users_job(auth_client, suffix):
-    from backend.generation.tests.factories import GenerationJobFactory
+def test_build_and_smoke_reject_other_users_run(auth_client, suffix):
+    from backend.generation.tests.factories import GenerationRunFactory
 
     client, _ = auth_client
-    job = GenerationJobFactory()  # owned by someone else
+    job = GenerationRunFactory()  # owned by someone else
     with (
         patch("backend.runtime.services.docker_manager.ping", return_value=True),
         patch("backend.runtime.services.container_service.build_for_job") as build,
@@ -309,19 +309,20 @@ def test_build_and_smoke_reject_other_users_job(auth_client, suffix):
 
 
 @pytest.mark.django_db
-def test_build_own_job_dispatches(auth_client):
-    from backend.generation.tests.factories import GenerationJobFactory
+@pytest.mark.parametrize("force_rebuild", [False, True])
+def test_build_own_run_dispatches(auth_client, force_rebuild):
+    from backend.generation.tests.factories import GenerationRunFactory
 
     client, user = auth_client
-    job = GenerationJobFactory(created_by=user)
+    job = GenerationRunFactory(created_by=user)
     instance = ContainerInstanceFactory(generation_job=job, created_by=user)
     with (
         patch("backend.runtime.services.docker_manager.ping", return_value=True),
         patch("backend.runtime.services.container_service.build_for_job", return_value=instance) as build,
     ):
-        resp = client.post(f"/api/runtime/jobs/{job.id}/build/")
+        resp = client.post(f"/api/runtime/jobs/{job.id}/build/?force_rebuild={str(force_rebuild).lower()}")
     assert resp.status_code == HTTPStatus.OK
-    build.assert_called_once()
+    build.assert_called_once_with(job, user, force_rebuild=force_rebuild)
 
 
 @pytest.mark.django_db

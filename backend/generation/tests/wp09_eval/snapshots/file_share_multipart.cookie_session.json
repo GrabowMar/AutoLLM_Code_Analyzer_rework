@@ -1,0 +1,1909 @@
+{
+ "actors": [
+  "anon",
+  "user_a",
+  "user_b",
+  "admin"
+ ],
+ "adjusted": [
+  {
+   "id": "shares.revoked",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 0
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/files, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by files.upload.ok."
+  },
+  {
+   "id": "shares.revoked",
+   "setup_status": {
+    "after": [
+     200,
+     201
+    ],
+    "before": 201,
+    "step": 1
+   },
+   "why": "A setup is not an assertion: this hand-written setup step required exactly 201 from POST /api/files/{fid}/shares, but the standard prose, in which the check is stated, gives no success status for that endpoint. 200 and 201 both mean the resource was created (as in every compiled setup); the exact status is asserted once, by shares.create.ok."
+  }
+ ],
+ "auth": {
+  "admin_username": "admin",
+  "auth_flow": null,
+  "credential": "cookie",
+  "csrf": "double_submit_cookie",
+  "csrf_cookie": "csrf_token",
+  "csrf_header": "X-CSRF-Token",
+  "login_path": "/api/auth/login",
+  "logout_path": "/api/auth/logout",
+  "mode": "cookie_session",
+  "register_path": "/api/auth/register",
+  "token_json_path": null
+ },
+ "base_url": "http://app:8000",
+ "checks": [
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "infra",
+   "depends_on": [],
+   "endpoint": null,
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "health",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/health",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "infra",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": null,
+   "expect": {
+    "header_contains": {
+     "Content-Type": "text/html"
+    },
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "index_served",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "infra",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": null,
+   "expect": {
+    "header_contains": {
+     "Content-Type": "text/html"
+    },
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "spa_fallback",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/llmlab/client/route",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "auth.register",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 201
+   },
+   "id": "auth.register.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "password": "Tk7-{alpha}-Wq9!",
+     "username": "llmlab{rand}"
+    },
+    "method": "POST",
+    "path": "/api/auth/register",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "auth.login",
+   "expect": {
+    "header_contains": {
+     "Set-Cookie": ""
+    },
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "auth.login.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {
+     "password": "Tk7-{alpha}-Wq9!",
+     "username": "llmlab{rand}"
+    },
+    "method": "POST",
+    "path": "/api/auth/login",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "anon",
+     "capture": {},
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {
+       "password": "Tk7-{alpha}-Wq9!",
+       "username": "llmlab{rand}"
+      },
+      "method": "POST",
+      "path": "/api/auth/register",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.upload",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "content_type": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "description": {
+       "maxLength": 300,
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "download_url": {
+       "type": "string"
+      },
+      "filename": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string"
+       ]
+      },
+      "size_bytes": {
+       "type": [
+        "integer",
+        "null"
+       ]
+      },
+      "uploaded_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      }
+     },
+     "required": [
+      "id",
+      "download_url"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 201
+   },
+   "id": "files.upload.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": {
+     "file": {
+      "content": "llmlab file {rand}\n",
+      "content_type": "text/plain",
+      "filename": "llmlab.txt"
+     }
+    },
+    "form": {
+     "description": "llmlab description"
+    },
+    "json": null,
+    "method": "POST",
+    "path": "/api/files",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.upload",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "files.upload.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": {
+     "file": {
+      "content": "llmlab file {rand}\n",
+      "content_type": "text/plain",
+      "filename": "llmlab.txt"
+     }
+    },
+    "form": {
+     "description": "llmlab description"
+    },
+    "json": null,
+    "method": "POST",
+    "path": "/api/files",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "negative",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.upload",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 413
+   },
+   "id": "files.upload.oversize",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": {
+     "file": {
+      "content": "{oversize}",
+      "content_type": "text/plain",
+      "filename": "llmlab.txt"
+     }
+    },
+    "form": {
+     "description": "llmlab description"
+    },
+    "json": null,
+    "method": "POST",
+    "path": "/api/files",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "content_type": {
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "description": {
+          "maxLength": 300,
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "download_url": {
+          "type": "string"
+         },
+         "filename": {
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "id": {
+          "type": [
+           "integer",
+           "string"
+          ]
+         },
+         "size_bytes": {
+          "type": [
+           "integer",
+           "null"
+          ]
+         },
+         "uploaded_at": {
+          "format": "date-time",
+          "type": [
+           "string",
+           "null"
+          ]
+         }
+        },
+        "required": [
+         "id",
+         "download_url"
+        ],
+        "type": "object"
+       },
+       "type": "array"
+      },
+      "page": {
+       "type": "integer"
+      },
+      "page_size": {
+       "type": "integer"
+      },
+      "total": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "items",
+      "total",
+      "page",
+      "page_size"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "files.list.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files",
+    "query": {
+     "page": 1,
+     "page_size": 20
+    }
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.list",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "files.list.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files",
+    "query": {
+     "page": 1,
+     "page_size": 20
+    }
+   },
+   "restart_before": false,
+   "setup": [],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "content_type": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "description": {
+       "maxLength": 300,
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "download_url": {
+       "type": "string"
+      },
+      "filename": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string"
+       ]
+      },
+      "size_bytes": {
+       "type": [
+        "integer",
+        "null"
+       ]
+      },
+      "uploaded_at": {
+       "format": "date-time",
+       "type": [
+        "string",
+        "null"
+       ]
+      }
+     },
+     "required": [
+      "id",
+      "download_url"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "files.get.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "files.get.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "also": [],
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "files.get.other_user",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.download",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "files.download.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}/download",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.download",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "files.download.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}/download",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "also": [],
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.download",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "files.download.other_user",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}/download",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 204
+   },
+   "id": "files.delete.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/files/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "files.delete.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/files/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "also": [],
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "files.delete.other_user",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/files/{id}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "shares.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": {
+     "properties": {
+      "token": {
+       "type": "string"
+      },
+      "url": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "token",
+      "url"
+     ],
+     "type": "object"
+    },
+    "max_ms": null,
+    "status": 201
+   },
+   "id": "shares.create.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {},
+    "method": "POST",
+    "path": "/api/files/{id}/shares",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "shares.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "shares.create.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {},
+    "method": "POST",
+    "path": "/api/files/{id}/shares",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "also": [],
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "shares.create",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "shares.create.other_user",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": {},
+    "method": "POST",
+    "path": "/api/files/{id}/shares",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "shares.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 204
+   },
+   "id": "shares.delete.ok",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/files/{id}/shares/{token}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "token": "$.token"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {},
+      "method": "POST",
+      "path": "/api/files/{id}/shares",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "auth",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "shares.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 401
+   },
+   "id": "shares.delete.anon_401",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/files/{id}/shares/{token}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "token": "$.token"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {},
+      "method": "POST",
+      "path": "/api/files/{id}/shares",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_b",
+   "also": [],
+   "category": "ownership",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "shares.delete",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "shares.delete.other_user",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "DELETE",
+    "path": "/api/files/{id}/shares/{token}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "token": "$.token"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": {},
+      "method": "POST",
+      "path": "/api/files/{id}/shares",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "user_a",
+   "also": [],
+   "category": "persistence",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "files.get",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 200
+   },
+   "id": "files.get.persists",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}",
+    "query": {}
+   },
+   "restart_before": true,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "id": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "llmlab file {rand}\n",
+        "content_type": "text/plain",
+        "filename": "llmlab.txt"
+       }
+      },
+      "form": {
+       "description": "llmlab description"
+      },
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    }
+   ],
+   "source": "compiler",
+   "stated_in": [
+    "minimal",
+    "standard",
+    "exhaustive"
+   ]
+  },
+  {
+   "actor": "anon",
+   "also": [],
+   "category": "functional",
+   "depends_on": [
+    "health"
+   ],
+   "endpoint": "shared.download",
+   "expect": {
+    "header_contains": null,
+    "json_contains": null,
+    "json_schema": null,
+    "max_ms": null,
+    "status": 404
+   },
+   "id": "shares.revoked",
+   "label": null,
+   "overlay": false,
+   "request": {
+    "files": null,
+    "form": null,
+    "json": null,
+    "method": "GET",
+    "path": "/api/shared/{tok}",
+    "query": {}
+   },
+   "restart_before": false,
+   "setup": [
+    {
+     "actor": "user_a",
+     "capture": {
+      "fid": "$.id"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": {
+       "file": {
+        "content": "hello",
+        "content_type": "text/plain",
+        "filename": "a.txt"
+       }
+      },
+      "form": null,
+      "json": null,
+      "method": "POST",
+      "path": "/api/files",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {
+      "tok": "$.token"
+     },
+     "expect_status": [
+      200,
+      201
+     ],
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": null,
+      "method": "POST",
+      "path": "/api/files/{fid}/shares",
+      "query": {}
+     }
+    },
+    {
+     "actor": "user_a",
+     "capture": {},
+     "expect_status": 204,
+     "fresh": false,
+     "request": {
+      "files": null,
+      "form": null,
+      "json": null,
+      "method": "DELETE",
+      "path": "/api/files/{fid}/shares/{tok}",
+      "query": {}
+     }
+    }
+   ],
+   "source": "acceptance",
+   "stated_in": [
+    "standard",
+    "exhaustive"
+   ]
+  }
+ ],
+ "compiler_version": 2,
+ "has_frontend": true,
+ "health_path": "/api/health",
+ "mock_host": "mock.internal",
+ "mock_port": 9009,
+ "only": null,
+ "probes": [
+  {
+   "cwe": "cwe-22",
+   "endpoint": "files.upload",
+   "id": "probe.files.traversal",
+   "kind": "path_traversal",
+   "params": {
+    "field": "file",
+    "setup": [],
+    "target": {
+     "actor": "user_a",
+     "files": {
+      "file": {
+       "content": "llmlab file {rand}\n",
+       "content_type": "text/plain",
+       "filename": "llmlab.txt"
+      }
+     },
+     "form": {
+      "description": "llmlab description"
+     },
+     "method": "POST",
+     "path": "/api/files"
+    }
+   },
+   "positive_control": {
+    "actor": "user_a",
+    "expect_status": null,
+    "files": {
+     "file": {
+      "content": "llmlab file {rand}\n",
+      "content_type": "text/plain",
+      "filename": "llmlab.txt"
+     }
+    },
+    "form": {
+     "description": "llmlab description"
+    },
+    "headers": {},
+    "json": null,
+    "method": "POST",
+    "path": "/api/files",
+    "query": {}
+   },
+   "requires_checks": [
+    "files.upload.ok"
+   ]
+  },
+  {
+   "cwe": "cwe-639",
+   "endpoint": "files.download",
+   "id": "probe.files.idor",
+   "kind": "idor_enumeration",
+   "params": {
+    "read": {
+     "actor": "user_a",
+     "method": "GET",
+     "path": "/api/files/{id}/download"
+    },
+    "setup": [
+     {
+      "actor": "user_a",
+      "capture": {
+       "id": "$.id"
+      },
+      "expect_status": [
+       200,
+       201
+      ],
+      "request": {
+       "files": {
+        "file": {
+         "content": "llmlab file {rand}\n",
+         "content_type": "text/plain",
+         "filename": "llmlab.txt"
+        }
+       },
+       "form": {
+        "description": "llmlab description"
+       },
+       "method": "POST",
+       "path": "/api/files"
+      }
+     }
+    ],
+    "target": {
+     "actor": "user_a",
+     "method": "GET",
+     "path": "/api/files/{id}/download"
+    }
+   },
+   "positive_control": {
+    "actor": "user_a",
+    "expect_status": null,
+    "files": null,
+    "form": null,
+    "headers": {},
+    "json": null,
+    "method": "GET",
+    "path": "/api/files/{id}/download",
+    "query": {}
+   },
+   "requires_checks": [
+    "files.download.ok"
+   ]
+  }
+ ],
+ "signed_routes": [],
+ "skipped": [],
+ "upstream": null
+}

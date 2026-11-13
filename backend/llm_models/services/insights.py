@@ -5,8 +5,8 @@ outcomes, resource use, conformance results, analysis findings, the model's
 place in the rankings — plus where its catalog attributes and external
 benchmark scores sit relative to the rest of the catalog.
 
-Local numbers are scoped to the requesting user's jobs (the same scope as
-the jobs list and /statistics); catalog percentiles are global.
+Local numbers are scoped to the requesting user's generation runs (the same
+scope as the samples list and /statistics); catalog percentiles are global.
 """
 
 from __future__ import annotations
@@ -20,15 +20,17 @@ from typing import Any
 
 from django.core.cache import cache
 from django.db.models import Count
+from django.db.models import Max
 from django.db.models import Min
 
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
 from backend.analysis.services.base import is_dependency_advisory
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models.choices import RunStatus
+from backend.generation.runs.view import run_views
 from backend.llm_models.models import LLMModel
-from backend.rankings.models import BenchmarkResult
 from backend.statistics.services.inference import wilson_interval
 
 if TYPE_CHECKING:
@@ -40,7 +42,7 @@ UNRATED = "unrated"
 RANKINGS_CACHE_SECONDS = 60
 CATALOG_CACHE_SECONDS = 600
 TOP_RULES = 10
-TOP_TEMPLATES = 12
+TOP_TASKS = 12
 
 # Artificial Analysis indices OpenRouter embeds in the catalog payload.
 AA_INDICES = ("intelligence_index", "coding_index", "agentic_index")
@@ -86,12 +88,40 @@ def _num(metrics: dict, key: str) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-def _generation_stats(jobs) -> dict[str, Any]:
-    total = jobs.count()
-    by_status = dict(jobs.values_list("status").annotate(c=Count("id")).values_list("status", "c"))
-    by_mode = dict(jobs.values_list("mode").annotate(c=Count("id")).values_list("mode", "c"))
-    completed = int(by_status.get(GenerationJob.Status.COMPLETED, 0))
-    finished = completed + int(by_status.get(GenerationJob.Status.FAILED, 0))
+def _llm_calls(metrics: dict) -> float | None:
+    by_class = metrics.get("requests_by_class")
+    if not isinstance(by_class, dict) or not by_class:
+        return None
+    return float(sum(n for n in by_class.values() if isinstance(n, int) and not isinstance(n, bool)))
+
+
+def _eval_summary(metrics: Any) -> dict | None:
+    """``metrics["eval"]``: the mirror of the run's latest evaluation (None when never evaluated)."""
+    evaluation = metrics.get("eval") if isinstance(metrics, dict) else None
+    return evaluation if isinstance(evaluation, dict) else None
+
+
+def _providers(run_ids: list) -> Counter[str]:
+    """Calls per serving provider over every attempt of the runs (``RunAttempt.served``)."""
+    from backend.generation.models import RunAttempt
+
+    providers: Counter[str] = Counter()
+    for served in RunAttempt.objects.filter(run_id__in=run_ids).values_list("served", flat=True):
+        for provider, n in ((served or {}).get("providers") or {}).items():
+            if isinstance(n, int) and not isinstance(n, bool):
+                providers[str(provider)] += n
+    return providers
+
+
+def _generation_stats(runs) -> dict[str, Any]:
+    total = runs.count()
+    by_status = dict(runs.values_list("status").annotate(c=Count("id")).values_list("status", "c"))
+    by_kind = dict(runs.values_list("kind").annotate(c=Count("id")).values_list("kind", "c"))
+    by_outcome = dict(
+        runs.exclude(outcome="").values_list("outcome").annotate(c=Count("id")).values_list("outcome", "c"),
+    )
+    completed = int(by_status.get(RunStatus.COMPLETED, 0))
+    finished = completed + int(by_status.get(RunStatus.FAILED, 0))
 
     series: dict[str, list[float]] = {
         k: []
@@ -109,76 +139,67 @@ def _generation_stats(jobs) -> dict[str, Any]:
             "output_tps",
         )
     }
-    engines: Counter[str] = Counter()
-    providers: Counter[str] = Counter()
+    harnesses: Counter[str] = Counter()
     terminations: Counter[str] = Counter()
     functional_status: Counter[str] = Counter()
     functional_passed = functional_evaluated = 0
-    repair_used = continuations = 0
     total_cost = 0.0
 
-    # Lazy: backend.reports.services imports the statistics services.
-    from backend.reports.services.loc import loc_from_result_data
-
     cost_with_loc = loc_with_cost = 0.0
-    rows = jobs.filter(status=GenerationJob.Status.COMPLETED).values_list("metrics", "duration_seconds", "result_data")
-    for metrics, duration, result_data in rows:
-        if not isinstance(metrics, dict):
-            continue
-        for key in (
-            "prompt_tokens",
-            "completion_tokens",
-            "reasoning_tokens",
-            "cached_tokens",
-            "total_tokens",
-            "llm_calls",
-        ):
+    done = list(runs.filter(status=RunStatus.COMPLETED))
+    for run, view in zip(done, run_views(done), strict=True):
+        metrics = run.metrics if isinstance(run.metrics, dict) else {}
+        for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens", "total_tokens"):
             if (v := _num(metrics, key)) is not None:
                 series[key].append(v)
-        # Source LOC (reports.services.loc), as in the study tables: metrics.lines_of_code
-        # counts every generated line, lockfiles included, and is only the legacy fallback.
-        loc = loc_from_result_data(result_data)["total_loc"] or _num(metrics, "lines_of_code")
+        if (calls := _llm_calls(metrics)) is not None:
+            series["llm_calls"].append(calls)
+        # Source LOC of the model's own files (tests and lockfiles excluded), as in the study
+        # tables; None when no tree was collected (left out, never 0).
+        loc = _num(metrics, "loc_model")
+        if loc is None:
+            measured_loc = view.loc("model")
+            loc = float(measured_loc) if measured_loc is not None else None
         if loc:
-            series["lines_of_code"].append(float(loc))
-        if (cost := _num(metrics, "cost")) is not None:
+            series["lines_of_code"].append(loc)
+        if (cost := _num(metrics, "cost_usd")) is not None:
             series["cost"].append(cost)
             total_cost += cost
             if loc:
                 cost_with_loc += cost
-                loc_with_cost += float(loc)
-        dur = duration if duration else _num(metrics, "total_duration")
+                loc_with_cost += loc
+        dur = run.duration_seconds or _num(metrics, "wall_s")
         if dur:
             series["duration"].append(float(dur))
             if (out := _num(metrics, "completion_tokens")) is not None:
                 series["output_tps"].append(out / float(dur))
-        if metrics.get("engine"):
-            engines[str(metrics["engine"]).split("@", 1)[0]] += 1
-        for provider, n in (metrics.get("providers") or {}).items():
-            if isinstance(n, (int, float)):
-                providers[str(provider)] += int(n)
-        if metrics.get("termination"):
-            terminations[str(metrics["termination"])] += 1
-        repair_used += bool(metrics.get("repair_used"))
-        continuations += int(metrics.get("continuations_used") or 0)
-        functional = metrics.get("functional")
-        if isinstance(functional, dict) and functional:
-            functional_evaluated += 1
-            functional_passed += bool(functional.get("passed"))
-            functional_status[
-                str(functional.get("status") or ("passed" if functional.get("passed") else "failed"))
-            ] += 1
-            if isinstance(functional.get("pass_rate"), (int, float)):
-                series["pass_rate"].append(float(functional["pass_rate"]))
+        if view.harness is not None:
+            harnesses[view.harness[0]] += 1
+        termination = (run.result or {}).get("termination") if isinstance(run.result, dict) else None
+        if termination:
+            terminations[str(termination)] += 1
+        evaluation = _eval_summary(metrics)
+        if evaluation is not None:
+            functional_status[str(evaluation.get("status") or "unknown")] += 1
+            rate = evaluation.get("agent_pass_rate")
+            # Only a measured evaluation grades the run; anything else is ungraded, not 0.
+            if evaluation.get("measured") and isinstance(rate, int | float) and not isinstance(rate, bool):
+                functional_evaluated += 1
+                functional_passed += rate >= 1.0
+                series["pass_rate"].append(float(rate))
 
     prompt_sum = sum(series["prompt_tokens"])
 
     return {
-        "jobs_total": total,
+        "runs_total": total,
         "by_status": by_status,
-        "by_mode": by_mode,
+        # Run kinds (app_agentic, slot_single_shot, ...).
+        "by_kind": by_kind,
+        "by_outcome": by_outcome,
         "completed": completed,
         "success": _rate(completed, finished),
         "functional": {
+            # Successes = measured evaluations that passed every acceptance check.
             **_rate(functional_passed, functional_evaluated),
             "mean_pass_rate": _mean(series["pass_rate"]),
             "by_status": dict(functional_status),
@@ -186,7 +207,7 @@ def _generation_stats(jobs) -> dict[str, Any]:
         "resources": {
             "total_cost": round(total_cost, 4),
             "mean_cost": _mean(series["cost"]),
-            # Over the jobs with both a cost and code, so numerator and denominator describe the same apps.
+            # Over the runs with both a cost and code, so numerator and denominator describe the same apps.
             "cost_per_kloc": round(cost_with_loc / loc_with_cost * 1000, 4) if loc_with_cost else None,
             "mean_duration": _mean(series["duration"]),
             "median_duration": _median(series["duration"]),
@@ -201,38 +222,44 @@ def _generation_stats(jobs) -> dict[str, Any]:
             "mean_lines_of_code": _mean(series["lines_of_code"]),
             "median_output_tps": _median(series["output_tps"]),
         },
-        "repair_rate": round(repair_used / completed, 4) if completed else None,
-        "continuations_used": continuations,
-        "engines": dict(engines.most_common()),
-        "providers": dict(providers.most_common()),
+        "harnesses": dict(harnesses.most_common()),
+        "providers": dict(_providers([run.id for run in done]).most_common()),
         "terminations": dict(terminations.most_common()),
-        "first_job_at": jobs.order_by("created_at").values_list("created_at", flat=True).first(),
-        "last_job_at": jobs.order_by("-created_at").values_list("created_at", flat=True).first(),
+        "first_run_at": runs.order_by("created_at").values_list("created_at", flat=True).first(),
+        "last_run_at": runs.order_by("-created_at").values_list("created_at", flat=True).first(),
     }
 
 
-def _template_breakdown(jobs) -> list[dict[str, Any]]:
+def _task_breakdown(runs) -> list[dict[str, Any]]:
+    """Per task: runs, completed runs and the functional rate of the measured evaluations."""
     rows = (
-        jobs.exclude(app_requirement__isnull=True)
-        .values("app_requirement__slug", "app_requirement__name")
-        .annotate(n=Count("id"))
-        .order_by("-n")[:TOP_TEMPLATES]
+        runs.exclude(task_version__isnull=True)
+        .values("task_version__task__slug")
+        .annotate(n=Count("id"), name=Max("task_version__name"))
+        .order_by("-n", "task_version__task__slug")[:TOP_TASKS]
     )
     out: list[dict[str, Any]] = []
     for row in rows:
-        scoped = jobs.filter(app_requirement__slug=row["app_requirement__slug"])
+        scoped = runs.filter(task_version__task__slug=row["task_version__task__slug"])
         completed = passed = evaluated = 0
         for status, metrics in scoped.values_list("status", "metrics"):
-            completed += status == GenerationJob.Status.COMPLETED
-            functional = (metrics or {}).get("functional") if isinstance(metrics, dict) else None
-            if status == GenerationJob.Status.COMPLETED and isinstance(functional, dict) and functional:
+            completed += status == RunStatus.COMPLETED
+            evaluation = _eval_summary(metrics)
+            rate = evaluation.get("agent_pass_rate") if evaluation else None
+            if (
+                status == RunStatus.COMPLETED
+                and evaluation is not None
+                and evaluation.get("measured")
+                and isinstance(rate, int | float)
+                and not isinstance(rate, bool)
+            ):
                 evaluated += 1
-                passed += bool(functional.get("passed"))
+                passed += rate >= 1.0
         out.append(
             {
-                "slug": row["app_requirement__slug"],
-                "name": row["app_requirement__name"],
-                "jobs": int(row["n"]),
+                "slug": row["task_version__task__slug"],
+                "name": row["name"],
+                "runs": int(row["n"]),
                 "completed": completed,
                 "functional": _rate(passed, evaluated),
             },
@@ -240,20 +267,20 @@ def _template_breakdown(jobs) -> list[dict[str, Any]]:
     return out
 
 
-def _experiments(jobs) -> list[dict[str, Any]]:
+def _studies(runs) -> list[dict[str, Any]]:
     rows = (
-        jobs.exclude(experiment__isnull=True)
-        .values("experiment_id", "experiment__name", "experiment__status", "experiment__created_at")
+        runs.exclude(study__isnull=True)
+        .values("study_id", "study__name", "study__status", "study__created_at")
         .annotate(n=Count("id"))
-        .order_by("-experiment__created_at")[:20]
+        .order_by("-study__created_at")[:20]
     )
     return [
         {
-            "id": str(r["experiment_id"]),
-            "name": r["experiment__name"],
-            "status": r["experiment__status"],
-            "jobs": int(r["n"]),
-            "created_at": r["experiment__created_at"],
+            "id": str(r["study_id"]),
+            "name": r["study__name"],
+            "status": r["study__status"],
+            "runs": int(r["n"]),
+            "created_at": r["study__created_at"],
         }
         for r in rows
     ]
@@ -272,7 +299,11 @@ def _labels_text(counts: Counter[str]) -> str:
 
 
 def _analysis_stats(jobs) -> dict[str, Any]:
-    """Findings of the model's apps (each job's latest result per tool).
+    """Findings of the model's apps (each run's latest result per tool).
+
+    Analysis runs on the whole app (``code_scope="app"``), so these counts
+    include findings in the starter's files; model-scope attribution is the
+    rankings' and the study tables' job.
 
     ``findings_static``/``findings_ai`` and the per-tool level columns are the
     *normalized* severity (a heuristic mapping, for aggregates only); a
@@ -280,7 +311,7 @@ def _analysis_stats(jobs) -> dict[str, Any]:
     of a level nobody gave it. ``tool_severities`` and the top rules'
     ``tool_severity`` are the labels exactly as the tools printed them.
     Dependency advisories of the known-vulnerability scanners describe
-    packages (mostly the scaffold's pins), not the model's code: they are
+    packages (mostly the starter's pins), not the model's code: they are
     ``findings_dependency``, not part of ``findings_static``
     (:func:`~backend.analysis.services.base.is_dependency_advisory`, the one
     P2 definition; deptry/depcheck manifest findings stay code issues).
@@ -365,7 +396,7 @@ def _analysis_stats(jobs) -> dict[str, Any]:
         )
 
     return {
-        "analyzed_jobs": ToolResult.objects.filter(id__in=latest).values("run__generation_job_id").distinct().count(),
+        "analyzed_runs": ToolResult.objects.filter(id__in=latest).values("run__generation_job_id").distinct().count(),
         "findings_static": static,
         "findings_ai": ai,
         "findings_dependency": dependency,
@@ -398,34 +429,50 @@ def _position(rows: list[dict[str, Any]], model_id: str, field: str) -> dict[str
 
 
 def _ranking_stats(model: LLMModel, user: AbstractBaseUser | None) -> dict[str, Any] | None:
+    """The model's MSS v2 scores and its positions in the rankings.
+
+    A model without its own rankings row (a route copy or dated member that
+    was never exercised) falls back to its canonical model's row
+    (``rankings.services.frame.canonical_of``); the scores are then that
+    model's and ``inherited_from`` names it.
+    """
     rows = _rankings_for(user)
     row = next((r for r in rows if r["model_id"] == model.model_id), None)
+    inherited_from = None
     if row is None:
-        return None
+        from backend.rankings.services.frame import canonical_of
+
+        canon = canonical_of(model.model_id, [{"model_id": model.model_id, "metadata": model.metadata or {}}])
+        row = next((r for r in rows if r.get("canonical_id") == canon and not r.get("mss_inherited_from")), None)
+        if row is None:
+            return None
+        inherited_from = row["model_id"]
     exercised = [r for r in rows if r.get("apps")]
+    model_id = row["model_id"]
+    canonical_rows = [r for r in rows if r.get("eligible") and not r.get("mss_inherited_from")]
+    canonical_model_id = row.get("mss_inherited_from") or model_id
     return {
         "scores": {
-            key: row.get(key)
-            for key in (
-                "composite_score",
-                "mss_score",
-                "empirical_quality_score",
-                "benchmark_score",
-                "cost_efficiency_score",
-                "accessibility_score",
-                "adoption_score",
-            )
+            "composite": row.get("composite_score"),
+            "mss": row.get("mss_score"),
+            "empirical": row.get("empirical_quality_score"),
+            "popularity": row.get("popularity_score"),
+            "price": row.get("price_score"),
+            "capability": row.get("capability_score"),
+            "recency": row.get("recency_score"),
+            "coverage": row.get("mss_coverage"),
         },
         "positions": {
-            "composite": _position(rows, model.model_id, "composite_score"),
-            "mss": _position(rows, model.model_id, "mss_score"),
-            "empirical": _position(exercised, model.model_id, "empirical_quality_score"),
-            "benchmark": _position(
-                [r for r in rows if (r.get("benchmark_score") or 0) > 0],
-                model.model_id,
-                "benchmark_score",
-            ),
+            "composite": _position(rows, model_id, "composite_score"),
+            # Ranked among canonical models only; a route copy takes its canonical model's place.
+            "mss": _position(canonical_rows, canonical_model_id, "mss_score"),
+            "empirical": _position(exercised, model_id, "empirical_quality_score"),
+            "capability": _position(canonical_rows, canonical_model_id, "capability_score"),
         },
+        "canonical_id": row.get("canonical_id"),
+        "eligible": row.get("eligible"),
+        "exclusion": row.get("exclusion"),
+        "inherited_from": inherited_from or row.get("mss_inherited_from"),
         "variance": row.get("variance"),
         "local_loc": row.get("local_loc", 0),
         "n_trials": row.get("n_trials", 0),
@@ -503,37 +550,18 @@ def _catalog_context(model: LLMModel) -> dict[str, Any]:
     }
 
 
-def _local_benchmarks(model: LLMModel) -> list[dict[str, Any]]:
-    rows = BenchmarkResult.objects.filter(model_id=model.model_id).order_by("benchmark")
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        others = sorted(BenchmarkResult.objects.filter(benchmark=row.benchmark).values_list("score", flat=True))
-        out.append(
-            {
-                "benchmark": row.benchmark,
-                "score": row.score,
-                "source": row.source,
-                "fetched_at": row.fetched_at,
-                "percentile": _percentile_rank(others, row.score),
-                "n": len(others),
-            },
-        )
-    return out
-
-
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 
 def model_insights(model: LLMModel, user: AbstractBaseUser | None) -> dict[str, Any]:
-    jobs = GenerationJob.objects.filter(model=model)
+    runs = GenerationRun.objects.filter(model=model, beyond_plan=False)
     if user is not None and getattr(user, "is_authenticated", False):
-        jobs = jobs.filter(created_by=user)
+        runs = runs.filter(created_by=user)
     return {
-        "generation": _generation_stats(jobs),
-        "templates": _template_breakdown(jobs),
-        "experiments": _experiments(jobs),
-        "analysis": _analysis_stats(jobs),
+        "generation": _generation_stats(runs),
+        "tasks": _task_breakdown(runs),
+        "studies": _studies(runs),
+        "analysis": _analysis_stats(runs),
         "ranking": _ranking_stats(model, user),
         "catalog": _catalog_context(model),
-        "benchmarks": _local_benchmarks(model),
     }

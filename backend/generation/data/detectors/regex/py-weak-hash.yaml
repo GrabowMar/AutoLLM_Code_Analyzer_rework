@@ -1,0 +1,11 @@
+name: Weak hash (MD5/SHA-1) in Python
+description: hashlib.md5 or hashlib.sha1 is called (unsuitable for passwords or integrity against attackers).
+content:
+  engine: regex
+  languages: [python]
+  rule: '\bhashlib\.(?:md5|sha1)\s*\('
+  tool: {name: re, version: py3.13}
+  feature_key: py-weak-hash
+  polarity: insecure
+  cwe: [cwe-328]
+  description: The code calls hashlib.md5 or hashlib.sha1.

@@ -1,0 +1,59 @@
+slug: eslint-sonarjs
+name: ESLint SonarJS
+description: >-
+  SonarSource's bug and code-smell rules for JavaScript and TypeScript
+  (eslint-plugin-sonarjs, recommended set): functions with high cognitive
+  complexity, identical functions and duplicated branches, conditions that
+  are always true or false, collapsible ifs, repeated string literals,
+  useless assignments.
+category: lint
+kind: container
+target_language: javascript
+analysis_mode: static
+technologies: [javascript, react]
+icon: bug
+version: "1"
+docs_url: https://github.com/SonarSource/eslint-plugin-sonarjs
+install_cmd: "npm install -g eslint@8 eslint-plugin-sonarjs@1 @typescript-eslint/parser@7 @typescript-eslint/eslint-plugin@7 typescript@5"
+verify_cmd: "eslint --version && npm ls -g eslint-plugin-sonarjs @typescript-eslint/parser >/dev/null"
+uninstall_cmd: "npm uninstall -g eslint-plugin-sonarjs"
+# No type information: the app's node_modules are not installed in the
+# workspace, so rules that need the TypeScript program report nothing.
+run_cmd: |
+  g="$(npm root -g)"; printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"plugins":["sonarjs"],"extends":["plugin:sonarjs/recommended-legacy"],"overrides":[{"files":["*.ts","*.tsx","*.mts","*.cts"],"parser":"PARSER"}]}' | sed "s#PARSER#$g/@typescript-eslint/parser/dist/index.js#" > /tmp/eslint-sonarjs.json
+  eslint {target} --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.mts,.cts -f json --no-eslintrc -c /tmp/eslint-sonarjs.json --resolve-plugins-relative-to "$g" --ignore-pattern node_modules 2>/dev/null
+parser_key: eslint
+file_patterns: ["*.js", "*.jsx", "*.cjs", "*.mjs", "*.ts", "*.tsx", "*.mts", "*.cts"]
+run_timeout: 120
+install_timeout: 300
+display_order: 37
+sample_filename: price.js
+sample_code: |
+  export function price(item, member) {
+    if (member) {
+      if (item.sale) {
+        return item.cost * 0.8;
+      }
+    }
+    if (item.kind === "book") {
+      return item.cost;
+    } else {
+      return item.cost;
+    }
+  }
+
+  export function total(items) {
+    let sum = 0;
+    for (const item of items) {
+      sum = sum + item.cost;
+    }
+    return sum;
+  }
+
+  export function sumAll(items) {
+    let sum = 0;
+    for (const item of items) {
+      sum = sum + item.cost;
+    }
+    return sum;
+  }

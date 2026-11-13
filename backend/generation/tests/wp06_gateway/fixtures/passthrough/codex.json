@@ -1,0 +1,179 @@
+{
+ "harness": "codex",
+ "front_protocol": "openai_responses",
+ "request_class_source": "default:main",
+ "note": "Recorded-shape Codex 0.166 session (exec --json, wire_api=responses, passthrough).",
+ "calls": [
+  {
+   "path": "/api/v1/responses",
+   "headers": {
+    "originator": "codex_exec",
+    "session_id": "0199-sess",
+    "version": "0.166.0"
+   },
+   "body": {
+    "model": "gpt-5.1-codex",
+    "instructions": "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.",
+    "input": [
+     {
+      "type": "message",
+      "role": "user",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "Build the todo app described in the brief."
+       }
+      ]
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "name": "shell",
+      "description": "Runs a shell command",
+      "strict": false,
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "command": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        }
+       },
+       "required": [
+        "command"
+       ]
+      }
+     }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": false,
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "prompt_cache_key": "0199-sess"
+   },
+   "upstream": {
+    "status": 200,
+    "content_type": "text/event-stream",
+    "events": [
+     "event: response.created\ndata: {\"type\": \"response.created\", \"sequence_number\": 0, \"response\": {\"id\": \"resp_1\", \"object\": \"response\", \"status\": \"in_progress\", \"model\": \"openai/gpt-5.1-codex\", \"output\": [], \"usage\": null}}\n\n",
+     "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"sequence_number\": 1, \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": [], \"encrypted_content\": \"gAAAAABpEnc-ZW5jcnlwdGVkLXJlYXNvbmluZw==\"}}\n\n",
+     "event: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"sequence_number\": 2, \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": [], \"encrypted_content\": \"gAAAAABpEnc-ZW5jcnlwdGVkLXJlYXNvbmluZw==\"}}\n\n",
+     "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"sequence_number\": 3, \"output_index\": 0, \"item\": {\"type\": \"function_call\", \"id\": \"fc_1\", \"call_id\": \"call_1\", \"name\": \"shell\", \"arguments\": \"{\\\"command\\\":[\\\"ls\\\",\\\"-la\\\"]}\", \"status\": \"completed\"}}\n\n",
+     "event: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"sequence_number\": 4, \"output_index\": 0, \"item\": {\"type\": \"function_call\", \"id\": \"fc_1\", \"call_id\": \"call_1\", \"name\": \"shell\", \"arguments\": \"{\\\"command\\\":[\\\"ls\\\",\\\"-la\\\"]}\", \"status\": \"completed\"}}\n\n",
+     "event: response.completed\ndata: {\"type\": \"response.completed\", \"sequence_number\": 5, \"response\": {\"id\": \"resp_1\", \"object\": \"response\", \"status\": \"completed\", \"model\": \"openai/gpt-5.1-codex\", \"output\": [{\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": [], \"encrypted_content\": \"gAAAAABpEnc-ZW5jcnlwdGVkLXJlYXNvbmluZw==\"}, {\"type\": \"function_call\", \"id\": \"fc_1\", \"call_id\": \"call_1\", \"name\": \"shell\", \"arguments\": \"{\\\"command\\\":[\\\"ls\\\",\\\"-la\\\"]}\", \"status\": \"completed\"}], \"usage\": {\"input_tokens\": 3200, \"input_tokens_details\": {\"cached_tokens\": 0}, \"output_tokens\": 120, \"output_tokens_details\": {\"reasoning_tokens\": 64}, \"total_tokens\": 3320, \"cost\": 0.0052}}}\n\n"
+    ]
+   },
+   "expect": {
+    "finish_reason": "tool_calls",
+    "prompt_tokens": 3200,
+    "completion_tokens": 120,
+    "request_class": "main",
+    "cost": 0.0052
+   }
+  },
+  {
+   "path": "/api/v1/responses",
+   "headers": {
+    "originator": "codex_exec",
+    "session_id": "0199-sess",
+    "version": "0.166.0"
+   },
+   "body": {
+    "model": "gpt-5.1-codex",
+    "instructions": "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.",
+    "input": [
+     {
+      "type": "message",
+      "role": "user",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "Build the todo app described in the brief."
+       }
+      ]
+     },
+     {
+      "type": "reasoning",
+      "id": "rs_1",
+      "summary": [],
+      "encrypted_content": "gAAAAABpEnc-ZW5jcnlwdGVkLXJlYXNvbmluZw=="
+     },
+     {
+      "type": "function_call",
+      "id": "fc_1",
+      "call_id": "call_1",
+      "name": "shell",
+      "arguments": "{\"command\":[\"ls\",\"-la\"]}"
+     },
+     {
+      "type": "function_call_output",
+      "call_id": "call_1",
+      "output": "app\nREADME.md"
+     }
+    ],
+    "tools": [
+     {
+      "type": "function",
+      "name": "shell",
+      "description": "Runs a shell command",
+      "strict": false,
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "command": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        }
+       },
+       "required": [
+        "command"
+       ]
+      }
+     }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": false,
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "prompt_cache_key": "0199-sess"
+   },
+   "upstream": {
+    "status": 200,
+    "content_type": "text/event-stream",
+    "events": [
+     "event: response.created\ndata: {\"type\": \"response.created\", \"sequence_number\": 0, \"response\": {\"id\": \"resp_2\", \"object\": \"response\", \"status\": \"in_progress\", \"model\": \"openai/gpt-5.1-codex\", \"output\": [], \"usage\": null}}\n\n",
+     "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"sequence_number\": 1, \"output_index\": 0, \"item\": {\"type\": \"message\", \"id\": \"msg_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Listed the workspace; next I write app.py.\", \"annotations\": []}]}}\n\n",
+     "event: response.output_text.delta\ndata: {\"type\": \"response.output_text.delta\", \"sequence_number\": 2, \"delta\": \"Listed the workspace; next I write app.py.\"}\n\n",
+     "event: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"sequence_number\": 3, \"output_index\": 0, \"item\": {\"type\": \"message\", \"id\": \"msg_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Listed the workspace; next I write app.py.\", \"annotations\": []}]}}\n\n",
+     "event: response.completed\ndata: {\"type\": \"response.completed\", \"sequence_number\": 4, \"response\": {\"id\": \"resp_2\", \"object\": \"response\", \"status\": \"completed\", \"model\": \"openai/gpt-5.1-codex\", \"output\": [{\"type\": \"message\", \"id\": \"msg_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Listed the workspace; next I write app.py.\", \"annotations\": []}]}], \"usage\": {\"input_tokens\": 3400, \"input_tokens_details\": {\"cached_tokens\": 3072}, \"output_tokens\": 30, \"output_tokens_details\": {\"reasoning_tokens\": 0}, \"total_tokens\": 3430}}}\n\n"
+    ]
+   },
+   "expect": {
+    "finish_reason": "stop",
+    "prompt_tokens": 3400,
+    "completion_tokens": 30,
+    "request_class": "main",
+    "cost": null
+   }
+  }
+ ]
+}

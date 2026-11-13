@@ -191,7 +191,6 @@ class BatchCreateSchema(Schema):
 
 class BatchItemSchema(ModelSchema):
     id: UUID
-    batch_id: UUID
     pipeline_run_id: UUID | None
 
     class Meta:

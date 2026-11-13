@@ -1,0 +1,864 @@
+{
+  "factor_vocabulary": {
+    "keys": [
+      "model",
+      "harness_preset",
+      "stack_profile",
+      "starter_level",
+      "style",
+      "auth_mode",
+      "guidance",
+      "prompt_set",
+      "prose_variant",
+      "sampling_preset",
+      "resource_policy",
+      "network_policy",
+      "slot_executor",
+      "hole_mode",
+      "keep_docstring",
+      "context_policy"
+    ],
+    "app": [
+      "auth_mode",
+      "guidance",
+      "harness_preset",
+      "model",
+      "network_policy",
+      "prompt_set",
+      "prose_variant",
+      "resource_policy",
+      "sampling_preset",
+      "stack_profile",
+      "starter_level",
+      "style"
+    ],
+    "slot": [
+      "context_policy",
+      "guidance",
+      "harness_preset",
+      "hole_mode",
+      "keep_docstring",
+      "model",
+      "prompt_set",
+      "resource_policy",
+      "sampling_preset",
+      "slot_executor",
+      "style"
+    ]
+  },
+  "stacks_matrix": {
+    "fastapi": ["vue"],
+    "flask": ["react"]
+  },
+  "auth_modes": [
+    {
+      "value": "contract_bearer",
+      "label": "Contract (bearer token)"
+    },
+    {
+      "value": "cookie_session",
+      "label": "Cookie session"
+    },
+    {
+      "value": "spec_defined",
+      "label": "Defined by the task spec"
+    }
+  ],
+  "prose_variants": ["minimal", "standard", "exhaustive"],
+  "hole_modes": ["stub", "remove", "rewrite"],
+  "context_modes": [
+    "slot_file_only",
+    "related_files",
+    "full_app",
+    "interface_only"
+  ],
+  "executors": ["single_shot", "restricted_agent"],
+  "eval_levels": ["none", "static", "build", "functional", "security", "full"],
+  "serving_tiers": ["standard", "flex", "batch", "auto_batch"],
+  "knob_classes": {
+    "C": "confound: changes what the model sees or how it samples (in generation_policy_hash) (19 knobs)",
+    "R": "recorded limit: changes the outcome only through truncation or stopping (hashed; stop reason recorded) (17 knobs)",
+    "O": "operational: cost, speed or scheduling only (recorded, never hashed) (25 knobs)",
+    "S": "stopping/design: study-level rule that changes inference (in prereg_hash) (20 knobs)"
+  },
+  "harnesses": [
+    {
+      "name": "opencode",
+      "label": "OpenCode",
+      "enabled": true
+    },
+    {
+      "name": "mini-swe-agent",
+      "label": "mini-swe-agent",
+      "enabled": true
+    },
+    {
+      "name": "aider",
+      "label": "Aider",
+      "enabled": true
+    },
+    {
+      "name": "claude-code",
+      "label": "Claude Code",
+      "enabled": true
+    },
+    {
+      "name": "codex",
+      "label": "Codex CLI",
+      "enabled": false
+    },
+    {
+      "name": "goose",
+      "label": "Goose",
+      "enabled": true
+    },
+    {
+      "name": "qwen-code",
+      "label": "Qwen Code",
+      "enabled": false
+    },
+    {
+      "name": "gemini-cli",
+      "label": "Gemini CLI",
+      "enabled": false
+    }
+  ],
+  "issue_codes": [
+    {
+      "code": "estimate_exceeds_cap",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": ["error"],
+      "owner": "budget/estimate.py",
+      "summary": "warn when p90_total > study cap; error when expected_total > study cap"
+    },
+    {
+      "code": "cap_admits_fewer_blocks",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "budget/estimate.py",
+      "summary": "the study cap admits fewer replicate blocks than planned (whole-block worst-case reservation, E2E-28)"
+    },
+    {
+      "code": "context_cap_above_call_cap",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "call.max_input_tokens < 1.1 x context cap"
+    },
+    {
+      "code": "call_cap_without_compaction",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "call.max_input_tokens set and the harness has no context knob"
+    },
+    {
+      "code": "reasoning_mode_invalid",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "both effort and max_tokens, or neither for its mode"
+    },
+    {
+      "code": "reasoning_budget_too_large",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "reasoning.max_tokens >= call.max_output_tokens"
+    },
+    {
+      "code": "reasoning_budget_too_small",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "Anthropic models: reasoning.max_tokens < 1024"
+    },
+    {
+      "code": "output_cap_below_harness_min",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "call.max_output_tokens < HarnessFacts.min_call_output_tokens"
+    },
+    {
+      "code": "slot_output_cap_tight",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "1.6 x est_tokens(original) + r_avg > slot cap"
+    },
+    {
+      "code": "brief_exceeds_call_cap",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "rendered brief + harness overhead > call input cap"
+    },
+    {
+      "code": "slot_context_exceeds_model",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "resolved slot context + prompt > model context"
+    },
+    {
+      "code": "model_lacks_tools",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "agentic harness with a model without tool calling (cell excluded:config_invalid at resolve)"
+    },
+    {
+      "code": "batch_requires_single_shot",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "serving_tier=batch with an agentic executor"
+    },
+    {
+      "code": "provider_unpinned",
+      "exploratory": "info",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "not exactly one routing.only provider with allow_fallbacks=false (unless provider is a random effect)"
+    },
+    {
+      "code": "usd_basis_multi_model",
+      "exploratory": null,
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "budget_basis=usd with more than one model level"
+    },
+    {
+      "code": "resources_vary_by_stack",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "sandbox values differ between cells"
+    },
+    {
+      "code": "mixed_serving_tier",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "serving tiers differ between compared conditions"
+    },
+    {
+      "code": "model_alias_in_confirmatory",
+      "exploratory": null,
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "model slug ends -latest/:latest or is a router slug"
+    },
+    {
+      "code": "slot_sampling_provider_default",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "budget/policy.py",
+      "summary": "slot study with sampling.policy=provider_default or temperature 0"
+    },
+    {
+      "code": "harness_not_enabled",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "harness adapter has open questions (registry enabled=False)"
+    },
+    {
+      "code": "harness_exploratory_only",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "harness enabled but not verified for confirmatory use (no real-model smoke run / tool-surface caveat)"
+    },
+    {
+      "code": "harness_protocol_unavailable_for_endpoint",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "the harness front protocol has no available mode for the cell's endpoint"
+    },
+    {
+      "code": "mixed_harness_profiles",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "harnesses crossed with mixed native/controlled presets"
+    },
+    {
+      "code": "harness_brief_differs",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "aider crossed with agentic harnesses (prompt confound)"
+    },
+    {
+      "code": "vendor_affinity",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "Claude Code or Codex cell with a non-vendor model"
+    },
+    {
+      "code": "auth_flow_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "auth_mode spec_defined without task.auth_flow"
+    },
+    {
+      "code": "starter_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "the stack profile has no starter at the requested level"
+    },
+    {
+      "code": "incompatible_style",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "style not compatible with the stack's frontend"
+    },
+    {
+      "code": "oracle_missing",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "task has no passing oracle for the stack"
+    },
+    {
+      "code": "conformance_missing",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "backend framework not covered by a passing tester conformance kit"
+    },
+    {
+      "code": "adaptive_stop_in_confirmatory",
+      "exploratory": null,
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "adaptive precision stopping in a confirmatory study"
+    },
+    {
+      "code": "mixed_eval_mode",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "slot evaluation modes differ across compared conditions"
+    },
+    {
+      "code": "single_parent",
+      "exploratory": "info",
+      "confirmatory": "error",
+      "alternatives": ["info"],
+      "owner": "study/plan.py",
+      "summary": "slot study with a single parent (confirmatory: error unless estimand=conditional_on_parent)"
+    },
+    {
+      "code": "parent_draw_pending",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "parent_selection drew parents whose slot sets or template matches are not frozen yet; freezing the plan creates them"
+    },
+    {
+      "code": "manual_parent_selection",
+      "exploratory": "info",
+      "confirmatory": "error",
+      "alternatives": ["info"],
+      "owner": "study/plan.py",
+      "summary": "parents picked manually (confirmatory: error unless estimand=conditional_on_parent)"
+    },
+    {
+      "code": "variant_model_equals_parent_model",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "variant model equals the parent's model"
+    },
+    {
+      "code": "image_built_after_plan",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "agentic/images.py",
+      "summary": "image digest recorded after plan time"
+    },
+    {
+      "code": "aliasing",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "study/expand.py",
+      "summary": "fractional grid aliases main effects"
+    },
+    {
+      "code": "unbalanced_grid",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "study/expand.py",
+      "summary": "pruned or fractional grid; EMMs flagged unbalanced"
+    },
+    {
+      "code": "combination_pruned",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "study/expand.py",
+      "summary": "an incompatible level combination was dropped (drop_incompatible)"
+    },
+    {
+      "code": "prose_variant_in_unit",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/design.py",
+      "summary": "legacy design shape with per-task variants"
+    },
+    {
+      "code": "mixed_parents",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/design.py",
+      "summary": "slot sets of different tasks in one study"
+    },
+    {
+      "code": "primary_feature_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/design.py",
+      "summary": "ci_width_reached (or a confirmatory slot study) without slot_primary_features"
+    },
+    {
+      "code": "mixed_eval_suite",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/results.py",
+      "summary": "compared runs were evaluated under different suites"
+    },
+    {
+      "code": "mixed_config_fingerprint",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "study/results.py",
+      "summary": "more than one config_fingerprint inside one (condition, unit)"
+    },
+    {
+      "code": "exclusion_rate",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "study/results.py",
+      "summary": "excluded + infra exceed the threshold of a condition"
+    },
+    {
+      "code": "differential_attrition",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "study/results.py",
+      "summary": "attrition differs by more than 5 points between compared conditions"
+    },
+    {
+      "code": "low_effective_n",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "patterns/prevalence.py",
+      "summary": "exact-duplicate share > 0.5 (near-copies)"
+    },
+    {
+      "code": "few_clusters",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "patterns/prevalence.py",
+      "summary": "fewer than 20 clusters: no cluster-robust SE"
+    },
+    {
+      "code": "slot_tests_uninformative",
+      "exploratory": "warn",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "slot/validate.py",
+      "summary": "target has no discriminating linked check"
+    },
+    {
+      "code": "slot_leak_verbatim",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "slot/leak.py",
+      "summary": "verbatim copy of the original elsewhere in context"
+    },
+    {
+      "code": "slot_leak_high",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "slot/leak.py",
+      "summary": "leak_score > 0.3"
+    },
+    {
+      "code": "overlapping_targets",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "slot/selection.py",
+      "summary": "overlapping targets in one SlotSet"
+    },
+    {
+      "code": "editor_harness_agent_brief",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a non-agentic editor harness (aider) with a brief not tagged editor"
+    },
+    {
+      "code": "probe_unvalidated",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "evaluation/baseline.py",
+      "summary": "probe kind disabled: no passing vulnerable/fixed mutant pair"
+    },
+    {
+      "code": "lint_content_invalid",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "content does not validate against its contract"
+    },
+    {
+      "code": "lint_unknown_library_ref",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a library ref names a version that does not exist"
+    },
+    {
+      "code": "lint_library_ref_kind",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a library ref names an entity of the wrong role/kind"
+    },
+    {
+      "code": "lint_unknown_feature",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a task feature is not in the vocabulary (11.3)"
+    },
+    {
+      "code": "lint_unknown_surface",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a task surface is neither a CWE id nor in the vocabulary"
+    },
+    {
+      "code": "lint_unknown_endpoint_ref",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a check, probe, UI item or auth flow names no endpoint"
+    },
+    {
+      "code": "lint_unknown_entity_ref",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "owner_entity or a ref field names no entity"
+    },
+    {
+      "code": "lint_duplicate_id",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "duplicate endpoint, check, probe or UI id"
+    },
+    {
+      "code": "lint_owner_entity_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "an owner-auth endpoint has no owner_entity"
+    },
+    {
+      "code": "lint_owner_entity_not_owned",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "owner_entity is not owned_by_user"
+    },
+    {
+      "code": "lint_auth_flow_missing",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the task has user endpoints but no auth_flow"
+    },
+    {
+      "code": "lint_prose_variant_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a system task lacks one of the three prose variants"
+    },
+    {
+      "code": "lint_prose_endpoint_unmentioned",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": ["error"],
+      "owner": "library/lint.py",
+      "summary": "an endpoint is not mentioned in the standard or exhaustive prose"
+    },
+    {
+      "code": "lint_prose_forbidden_phrase",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "prose mentions evaluation, tests or a default password"
+    },
+    {
+      "code": "lint_prose_too_long",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the minimal prose exceeds its word budget"
+    },
+    {
+      "code": "lint_check_unstated",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a check is stated in no prose variant (8.2)"
+    },
+    {
+      "code": "lint_template_syntax",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the template does not parse in the sandboxed engine"
+    },
+    {
+      "code": "lint_undeclared_variable",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the template uses an undeclared context variable"
+    },
+    {
+      "code": "lint_unused_variable",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a declared variable is never used by the template"
+    },
+    {
+      "code": "lint_unknown_variable",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a declared variable is not in the render context"
+    },
+    {
+      "code": "lint_prompt_role_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the prompt set lacks a role its mode requires"
+    },
+    {
+      "code": "lint_prompt_role_mismatch",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a prompt set role points at a template of another role"
+    },
+    {
+      "code": "lint_prompt_mode_mismatch",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a template's modes exclude the prompt set's mode"
+    },
+    {
+      "code": "lint_prompt_fragment_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "an app prompt set lacks an auth_contract.* or network.* fragment"
+    },
+    {
+      "code": "lint_fragment_role",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a fragment ref names a template whose role is not fragment"
+    },
+    {
+      "code": "lint_guidance_fragment_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a security hint other than none has no fragment"
+    },
+    {
+      "code": "lint_style_frontend_unknown",
+      "exploratory": "warn",
+      "confirmatory": "warn",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "compatible_frontends names an unknown framework"
+    },
+    {
+      "code": "lint_starter_forbidden_content",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a starter file contains forbidden content"
+    },
+    {
+      "code": "lint_starter_security_library",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a starter manifest names a denied security library"
+    },
+    {
+      "code": "lint_starter_unpinned_image",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a starter FROM is not digest-pinned"
+    },
+    {
+      "code": "lint_starter_file_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the dockerfile or a lockfile is not in files"
+    },
+    {
+      "code": "lint_starter_stack_mismatch",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the starter tree does not match its stack profile"
+    },
+    {
+      "code": "lint_starter_blob_missing",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a starter file's blob is not in the blob store"
+    },
+    {
+      "code": "lint_template_render_error",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "the template fails to render with the given context"
+    },
+    {
+      "code": "lint_detector_rule_invalid",
+      "exploratory": "error",
+      "confirmatory": "error",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "a detector rule does not compile or parse"
+    },
+    {
+      "code": "lint_vocabulary_fallback",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "library/lint.py",
+      "summary": "tasks/vocab.yaml is missing: the built-in vocabulary"
+    }
+  ],
+  "limits": {
+    "max_repeats": 200,
+    "max_cells": 20000,
+    "sandbox_max": {
+      "memory": "3g",
+      "nano_cpus": 2000000000
+    }
+  }
+}

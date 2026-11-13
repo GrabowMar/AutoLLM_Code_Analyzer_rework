@@ -9,6 +9,7 @@ normalized in-memory shapes that parsers and runners produce.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
@@ -16,11 +17,11 @@ from typing import Any
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 
 # Known-vulnerability scanners. Every ``dependency`` finding of theirs is about
-# a package (often one the stack scaffold pinned), not code the model wrote, so
+# a package (often one the starter pinned), not code the model wrote, so
 # it is counted apart from code findings: this is the study tables' rule
 # (``statistics.dedup.IssueCluster.is_advisory``), and it includes packages
 # that do not exist (``nonexistent-*``): the study reports them with the other
-# dependency findings, split by who declared the package (model or scaffold).
+# dependency findings, split by who declared the package (model or starter).
 # Manifest hygiene (deptry, depcheck: missing/unused dependencies) is the
 # app's own code issue.
 ADVISORY_TOOLS = frozenset({"pip-audit", "npm-audit", "osv-scanner", "trivy", "retire"})
@@ -49,9 +50,46 @@ NON_SOURCE_DIRS = frozenset(
 )
 
 
+# A Python virtual environment under any directory name. Agents create throw-away ones with names of
+# their own (``.test_venv``, ``.tmpv_25.3``, ``_venv`` ...: 20 of the 2026-11 study apps), so the name
+# cannot be listed in NON_SOURCE_DIRS; the layout inside is fixed by ``python -m venv``.
+_VENV_PATH = re.compile(
+    r"(?:^|/)(?:"
+    r"(?:site|dist)-packages/"
+    r"|lib(?:64)?/python\d+(?:\.\d+)?/"
+    r"|pyvenv\.cfg$"
+    r"|(?:bin|Scripts)/(?:[Aa]ctivate(?:\.\w+|_this\.py)?|pip[\d.]*|python[\d.]*|wheel|easy_install[\d.-]*)$"
+    r")",
+)
+
+
 def is_non_source_path(path: str) -> bool:
-    """Whether *path* lies inside one of :data:`NON_SOURCE_DIRS` (any directory level)."""
-    return any(part in NON_SOURCE_DIRS for part in path.strip("/").split("/")[:-1])
+    """Whether *path* lies inside one of :data:`NON_SOURCE_DIRS` (any directory level) or inside a
+    Python virtual environment of any name (``site-packages``, ``lib/pythonX.Y``, ``pyvenv.cfg``, the
+    interpreter and activation files of its ``bin``)."""
+    clean = path.strip("/")
+    return any(part in NON_SOURCE_DIRS for part in clean.split("/")[:-1]) or _VENV_PATH.search(clean) is not None
+
+
+# A JavaScript or CSS file this large is bundler output (an app's own dependencies compiled into one
+# file), not code the model wrote: agents leave such files behind after bundling the frontend for a
+# smoke test (``frontend/dist-test/test-entry.js``, ``.smoketest/app.bundle.js``, ``.ssrsmoke.mjs``).
+# In the 2026-11 study the largest hand-written script is 44 KB and the smallest bundle 1.2 MB; the
+# five bundles of four apps drew 13% of all static findings (React's code) and made jscpd run out of
+# memory. Names and directories vary, so the rule is the size.
+BUNDLE_MIN_BYTES = 256 * 1024
+_BUNDLE_EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".css")
+
+
+def is_generated_bundle(path: str, content: object) -> bool:
+    """Whether *content* of the file at *path* is bundler output (see :data:`BUNDLE_MIN_BYTES`)."""
+    return isinstance(content, str) and len(content) >= BUNDLE_MIN_BYTES and path.lower().endswith(_BUNDLE_EXTENSIONS)
+
+
+def non_source_paths(code: dict) -> list[str]:
+    """Sorted paths of *code* (``{path: content}``) the analysis leaves out: files in non-source
+    directories (:func:`is_non_source_path`) and generated bundles (:func:`is_generated_bundle`)."""
+    return sorted(path for path, text in code.items() if is_non_source_path(path) or is_generated_bundle(path, text))
 
 
 def is_dependency_advisory(tool_slug: str, category: str, rule_id: str = "") -> bool:

@@ -10,7 +10,7 @@ from ninja import Query
 from ninja import Router
 
 from backend.common.pagination import paginate_queryset
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
 from backend.runtime.api.schema import ActionListResponse
 from backend.runtime.api.schema import ContainerActionSchema
 from backend.runtime.api.schema import ContainerExecRequest
@@ -33,9 +33,10 @@ router = Router(tags=["runtime"])
 
 
 # Ownership: containers are scoped by container_service.visible_containers
-# (builder or job owner; staff see all). Rows that belong to someone else
+# (builder or run owner; staff see all). Rows that belong to someone else
 # answer 404 (not 403) so their ids don't leak — the same convention as the
-# generation jobs/experiments routers. Internal callers (analysis runner,
+# generation runs/studies routers. ``job_id`` path/query parameters are
+# GenerationRun ids (the FK keeps its v2 name ``generation_job``). Internal callers (analysis runner,
 # executor, evaluation) use the models directly and are not affected.
 def _is_staff(user) -> bool:
     return bool(getattr(user, "is_staff", False))
@@ -55,7 +56,7 @@ def _action_qs(user):
 
 
 def _job_qs(user):
-    qs = GenerationJob.objects.all()
+    qs = GenerationRun.objects.all()
     if _is_staff(user):
         return qs
     return qs.filter(created_by=user)
@@ -138,12 +139,12 @@ def get_container(request: HttpRequest, container_id: str):
     "/jobs/{job_id}/build/",
     response={200: ContainerInstanceSchema, 400: GenericResponse, 503: GenericResponse},
 )
-def build_container_for_job(request: HttpRequest, job_id: str):
-    """Kick off a container build for the given generation job."""
+def build_container_for_job(request: HttpRequest, job_id: str, force_rebuild: bool = False):
+    """Kick off a preview container build for the given GenerationRun (its app tree)."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
     job = get_object_or_404(_job_qs(request.auth), id=job_id)
-    instance = container_service.build_for_job(job, request.auth)
+    instance = container_service.build_for_job(job, request.auth, force_rebuild=force_rebuild)
     return 200, instance
 
 
@@ -152,7 +153,7 @@ def build_container_for_job(request: HttpRequest, job_id: str):
     response={200: dict, 404: GenericResponse, 409: GenericResponse},
 )
 def smoke_test_job(request: HttpRequest, job_id: str):
-    """Re-probe a job's running container (health + declared GET endpoints)."""
+    """Re-probe a run's running container (health + the task's declared GET endpoints)."""
     from backend.runtime.services import smoke
 
     job = get_object_or_404(_job_qs(request.auth), id=job_id)
@@ -160,7 +161,7 @@ def smoke_test_job(request: HttpRequest, job_id: str):
     if container is None:
         return 409, GenericResponse(
             success=False,
-            message="No running container for this job — build it first.",
+            message="No running container for this run — build it first.",
         )
     return 200, smoke.run_smoke(job, container)
 

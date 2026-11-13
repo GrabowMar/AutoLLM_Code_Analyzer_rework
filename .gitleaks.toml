@@ -7,6 +7,18 @@ description = "Project-wide allowlist for documented false positives."
 paths = [
   # `*.example` env templates are intentionally committed placeholders.
   '''(^|/)\.envs/.*\.example$''',
+  # Golden-library fixture: content hashes (sha256 hex) of test library entities, not secrets.
+  '''backend/generation/testing/golden_library/hashes\.json$''',
+  # Starter tree hashes (sha256 hex) pinned by the WP-05 tests.
+  '''backend/generation/tests/wp05_build/starter_hashes\.json$''',
+  # Golden plan test: pinned content hashes (sha256 hex), not secrets.
+  '''backend/generation/tests/wp10_study/test_identity_golden\.py$''',
+  # Recorded harness/gateway fixtures: prompt_cache_key UUIDs and prompt text, no credentials.
+  '''backend/generation/tests/wp07_harnesses/fixtures/''',
+  # Pattern-detector fixtures: deliberately vulnerable sample code (fake literal secrets).
+  '''backend/generation/data/detectors/tests/''',
+  # Task reference apps (oracles / conformance kit): throwaway dev-default secrets of sample apps, no credentials.
+  '''backend/generation/data/tasks/[^/]+/reference/''',
 ]
 
 [[rules]]

@@ -1,0 +1,4 @@
+name: Style fragment, model choice
+role: fragment
+modes: [app, slot]
+variables: []

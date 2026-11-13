@@ -44,7 +44,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import {
 		CONNECTION_LABELS,
 		DiscoveredModelsTable,
@@ -264,10 +264,10 @@
 		}
 	}
 
-	function useInExperiment() {
+	function useInStudy() {
 		const ids = [...selectedModels];
 		if (ids.length === 0) return;
-		void goto(`/experiments/new?models=${ids.join(',')}`);
+		void goto(`/experiments/new?models=${ids.map(encodeURIComponent).join(",")}`);
 	}
 
 	function reveal(secret: TokenSecret, note = '') {
@@ -436,7 +436,7 @@
 					<Card.Content class="space-y-3 text-sm">
 						<SlotMeter label="Request slots" used={endpoint.live.inflight_requests} total={endpoint.max_concurrency} />
 						<dl class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-							<dt class="text-muted-foreground">Active jobs</dt>
+							<dt class="text-muted-foreground">Active runs</dt>
 							<dd class="text-right tabular-nums">
 								{endpoint.live.active_jobs} / {endpoint.max_active_jobs_effective.sandbox} agent · {endpoint.max_active_jobs_effective.llm} LLM
 							</dd>
@@ -545,7 +545,7 @@
 					<p class="text-sm text-muted-foreground">
 						Hidden models stay out of the model pickers. Overrides apply to new runs only.
 					</p>
-					<Button size="sm" onclick={useInExperiment} disabled={selectedModels.size === 0}>
+					<Button size="sm" onclick={useInStudy} disabled={selectedModels.size === 0}>
 						<FlaskConical />Use {selectedModels.size || ''} in new experiment
 					</Button>
 				</div>

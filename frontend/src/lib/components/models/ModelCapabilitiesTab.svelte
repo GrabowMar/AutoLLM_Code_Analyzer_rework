@@ -26,6 +26,7 @@
 		getReasoning,
 		getSupportedParameters,
 		metadataView,
+		knownTokenLimit,
 		type ReasoningInfo,
 	} from './helpers';
 
@@ -98,22 +99,38 @@
 	});
 
 	const mdReasoning = $derived(md?.reasoning_options ?? []);
+	const hasReasoning = $derived(!!reasoning || mdReasoning.length > 0);
+	const supported = $derived(features.filter((f) => f.on));
+	const unsupported = $derived(features.filter((f) => !f.on));
+	const unpublished = $derived(
+		[
+			!hasReasoning && 'reasoning controls',
+			!params.length && 'request parameters',
+			!defaults.length && 'default parameters',
+		].filter(Boolean) as string[],
+	);
 </script>
 
 <div class="space-y-4">
-	<div class="grid gap-4 lg:grid-cols-2">
+	<div class="grid gap-4 {hasReasoning ? 'lg:grid-cols-2' : ''}">
 		<Card.Root>
 			<Card.Header class="pb-0"><Card.Title class="text-sm font-medium">Features</Card.Title></Card.Header>
 			<Card.Content class="space-y-4">
-				<ul class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-3">
-					{#each features as f (f.label)}
-						<li class="flex items-center gap-1.5 {f.on ? '' : 'text-muted-foreground'}" title={f.note}>
-							{#if f.on}<Check class="size-3.5 text-success-fg" aria-hidden="true" />{:else}<X class="size-3.5 opacity-60" aria-hidden="true" />{/if}
-							<span>{f.label}</span>
-							<span class="sr-only">{f.on ? 'supported' : 'not supported'}</span>
-						</li>
-					{/each}
-				</ul>
+				{#if supported.length}
+					<ul class="flex flex-wrap gap-1.5" aria-label="Supported">
+						{#each supported as f (f.label)}
+							<li class="feat-on" title={f.note}><Check class="size-3.5" aria-hidden="true" />{f.label}</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="text-sm text-muted-foreground">No optional features reported.</p>
+				{/if}
+				{#if unsupported.length}
+					<p class="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+						<X class="size-3 opacity-60" aria-hidden="true" /><span class="sr-only">Not supported:</span>
+						{#each unsupported as f, i (f.label)}<span title={f.note}>{f.label}{i < unsupported.length - 1 ? ',' : ''}</span>{/each}
+					</p>
+				{/if}
 				<div>
 					<div class="section-label mb-2">Modalities</div>
 					<div class="flex flex-wrap gap-1">
@@ -135,12 +152,10 @@
 			</Card.Content>
 		</Card.Root>
 
+		{#if hasReasoning}
 		<Card.Root>
 			<Card.Header class="pb-0"><Card.Title class="text-sm font-medium">Reasoning</Card.Title></Card.Header>
 			<Card.Content class="space-y-3 text-sm">
-				{#if !reasoning && !mdReasoning.length}
-					<p class="text-muted-foreground">No reasoning controls published.</p>
-				{:else}
 					{#if reasoning}
 						<dl class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
 							<dt class="text-muted-foreground">Always on</dt>
@@ -170,59 +185,55 @@
 							{#if opt.min != null}min {formatNumber(opt.min)}{/if}{#if opt.max != null}, max {formatNumber(opt.max)}{/if}
 						</p>
 					{/each}
-				{/if}
 			</Card.Content>
 		</Card.Root>
+		{/if}
 	</div>
 
+	{#if params.length}
 	<Card.Root>
 		<Card.Header class="pb-0">
 			<Card.Title class="text-sm font-medium">Request parameters <span class="font-mono text-xs text-muted-foreground">{params.length}</span></Card.Title>
 			<Card.Description class="text-xs">What OpenRouter forwards for this model; anything else is dropped. Hover for what a parameter does.</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			{#if params.length}
-				<div class="flex flex-wrap gap-1.5">
-					{#each [...params].sort() as p (p)}
-						<Badge variant="outline" class="font-mono text-[11px]" title={PARAM_HELP[p] ?? p}>{p}</Badge>
-					{/each}
-				</div>
-			{:else}
-				<p class="text-sm text-muted-foreground">Not published.</p>
-			{/if}
+			<div class="flex flex-wrap gap-1.5">
+				{#each [...params].sort() as p (p)}
+					<Badge variant="outline" class="font-mono text-[11px]" title={PARAM_HELP[p] ?? p}>{p}</Badge>
+				{/each}
+			</div>
 		</Card.Content>
 	</Card.Root>
+	{/if}
 
-	<div class="grid gap-4 {ollama?.capabilities ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}">
+	<div class="grid gap-4 {[true, defaults.length > 0, !!ollama?.capabilities].filter(Boolean).length === 3 ? 'lg:grid-cols-3' : [defaults.length > 0, !!ollama?.capabilities].some(Boolean) ? 'lg:grid-cols-2' : ''}">
 		<Card.Root>
 			<Card.Header class="pb-0"><Card.Title class="text-sm font-medium">Limits</Card.Title></Card.Header>
 			<Card.Content>
 				<dl class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-sm">
-					<dt class="text-muted-foreground">Context window</dt><dd class="font-mono text-xs tabular-nums">{formatNumber(model.context_window)}</dd>
+					<dt class="text-muted-foreground">Context window</dt><dd class="font-mono text-xs tabular-nums">{#if knownTokenLimit(model.context_window) != null}{formatNumber(model.context_window)}{:else}<span class="text-muted-foreground" title="Not reported by the source">—</span>{/if}</dd>
 					<dt class="text-muted-foreground">Max output</dt><dd class="font-mono text-xs tabular-nums">{model.max_output_tokens ? formatNumber(model.max_output_tokens) : '—'}</dd>
 					{#if md?.limit?.input}<dt class="text-muted-foreground">Max input</dt><dd class="font-mono text-xs tabular-nums">{formatNumber(md.limit.input)}</dd>{/if}
 					{#if limits.prompt_tokens}<dt class="text-muted-foreground">Per request · prompt</dt><dd class="font-mono text-xs tabular-nums">{formatNumber(limits.prompt_tokens)}</dd>{/if}
 					{#if limits.completion_tokens}<dt class="text-muted-foreground">Per request · completion</dt><dd class="font-mono text-xs tabular-nums">{formatNumber(limits.completion_tokens)}</dd>{/if}
 					{#if model.endpoint && ollama?.context_length}<dt class="text-muted-foreground">Native context</dt><dd class="font-mono text-xs tabular-nums">{formatNumber(Number(ollama.context_length))}</dd>{/if}
 				</dl>
-			</Card.Content>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header class="pb-0"><Card.Title class="text-sm font-medium">Default parameters</Card.Title></Card.Header>
-			<Card.Content>
-				{#if defaults.length}
-					<dl class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-sm">
-						{#each defaults as [k, v] (k)}
-							<dt class="font-mono text-xs text-muted-foreground">{k}</dt><dd class="font-mono text-xs">{String(v)}</dd>
-						{/each}
-					</dl>
-				{:else}
-					<p class="text-sm text-muted-foreground">Provider defaults (none published).</p>
-				{/if}
 				{#if md?.status}<p class="mt-2 text-xs text-muted-foreground">models.dev status: <span class="font-mono text-foreground">{md.status}</span></p>{/if}
 			</Card.Content>
 		</Card.Root>
+
+		{#if defaults.length}
+		<Card.Root>
+			<Card.Header class="pb-0"><Card.Title class="text-sm font-medium">Default parameters</Card.Title></Card.Header>
+			<Card.Content>
+				<dl class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-sm">
+					{#each defaults as [k, v] (k)}
+						<dt class="font-mono text-xs text-muted-foreground">{k}</dt><dd class="font-mono text-xs">{String(v)}</dd>
+					{/each}
+				</dl>
+			</Card.Content>
+		</Card.Root>
+		{/if}
 
 		{#if ollama?.capabilities}
 			<Card.Root>
@@ -243,6 +254,12 @@
 		inheritedSlug={view.inheritedSlug}
 	/>
 
+	{#if unpublished.length}
+		<p class="px-1 text-xs text-muted-foreground">
+			Not published by the source{model.is_local ? ' (local endpoint)' : ''}: {unpublished.join(', ')}.
+		</p>
+	{/if}
+
 	<ModelArchitectureCard
 		hf={view.hf}
 		params={view.params}
@@ -251,3 +268,19 @@
 		inheritedSlug={view.inheritedSlug}
 	/>
 </div>
+
+<style>
+	.feat-on {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		border-radius: 9999px;
+		border: 1px solid color-mix(in oklab, var(--success) 35%, var(--border));
+		background: color-mix(in oklab, var(--success) 8%, transparent);
+		padding: 0.125rem 0.625rem 0.125rem 0.5rem;
+		font-size: 0.8125rem;
+	}
+	.feat-on :global(svg) {
+		color: var(--success-fg);
+	}
+</style>

@@ -1,0 +1,867 @@
+# Probe-kit task (spec 8.3): crud_todo_list plus one endpoint per probe surface. Not a library entity:
+# used only by oracle_validate --kit and the WP-09 tests against probe_mutants/app.py.
+title: 'Probe kit: todos plus probe surfaces'
+summary: The todo API plus one endpoint per probe surface; used only to validate probes (spec 8.3).
+category: conformance
+entities:
+- name: User
+  fields:
+  - name: username
+    type: string
+    required: true
+    unique: true
+    max_length: 50
+  - name: password
+    type: string
+    required: true
+    secret: true
+- name: Todo
+  fields:
+  - name: title
+    type: string
+    required: true
+    max_length: 255
+  - name: description
+    type: text
+    max_length: 2000
+  - name: priority
+    type: enum
+    enum:
+    - low
+    - medium
+    - high
+    default: medium
+  - name: due_date
+    type: date
+  - name: completed
+    type: bool
+    default: false
+  - name: completed_at
+    type: datetime
+  - name: created_at
+    type: datetime
+  owned_by_user: true
+- name: Note
+  fields:
+  - name: title
+    type: string
+    required: true
+    max_length: 200
+  - name: body
+    type: text
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required:
+    - username
+    - password
+    properties:
+      username:
+        type: string
+        minLength: 1
+        maxLength: 50
+      password:
+        type: string
+        minLength: 1
+  errors:
+  - 400
+  - 409
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username:
+        type: string
+      password:
+        type: string
+    required:
+    - username
+    - password
+  errors:
+  - 401
+- id: todos.list
+  method: GET
+  path: /api/todos
+  auth: user
+  query:
+  - name: completed
+    type: bool
+    semantics: filter
+  - name: priority
+    type: enum
+    semantics: filter
+    enum:
+    - low
+    - medium
+    - high
+  - name: page
+    type: int
+    semantics: page
+    default: 1
+  - name: page_size
+    type: int
+    semantics: page_size
+    default: 50
+    max: 200
+  - name: search
+    type: string
+    semantics: search
+  response_schema:
+    type: object
+    required:
+    - items
+    - total
+    - page
+    - page_size
+    - remaining
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required:
+          - id
+          - title
+          properties:
+            id:
+              type:
+              - integer
+              - string
+            title:
+              type: string
+              maxLength: 255
+              minLength: 1
+            description:
+              type:
+              - string
+              - 'null'
+              maxLength: 2000
+            priority:
+              type:
+              - string
+              - 'null'
+              enum:
+              - low
+              - medium
+              - high
+              - null
+            due_date:
+              type:
+              - string
+              - 'null'
+              format: date
+            completed:
+              type:
+              - boolean
+              - 'null'
+            completed_at:
+              type:
+              - string
+              - 'null'
+              format: date-time
+            created_at:
+              type:
+              - string
+              - 'null'
+              format: date-time
+      total:
+        type: integer
+      page:
+        type: integer
+      page_size:
+        type: integer
+      remaining:
+        type: integer
+  errors:
+  - 400
+- id: todos.create
+  method: POST
+  path: /api/todos
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      title:
+        type: string
+        maxLength: 255
+        minLength: 1
+      description:
+        type:
+        - string
+        - 'null'
+        maxLength: 2000
+      priority:
+        type:
+        - string
+        - 'null'
+        enum:
+        - low
+        - medium
+        - high
+        - null
+      due_date:
+        type:
+        - string
+        - 'null'
+        format: date
+      completed:
+        type:
+        - boolean
+        - 'null'
+    required:
+    - title
+  response_schema:
+    type: object
+    required:
+    - id
+    - title
+    properties:
+      id:
+        type:
+        - integer
+        - string
+      title:
+        type: string
+        maxLength: 255
+        minLength: 1
+      description:
+        type:
+        - string
+        - 'null'
+        maxLength: 2000
+      priority:
+        type:
+        - string
+        - 'null'
+        enum:
+        - low
+        - medium
+        - high
+        - null
+      due_date:
+        type:
+        - string
+        - 'null'
+        format: date
+      completed:
+        type:
+        - boolean
+        - 'null'
+      completed_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+      created_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+  errors:
+  - 400
+- id: todos.get
+  method: GET
+  path: /api/todos/{id}
+  auth: owner
+  owner_entity: Todo
+  response_schema:
+    type: object
+    required:
+    - id
+    - title
+    properties:
+      id:
+        type:
+        - integer
+        - string
+      title:
+        type: string
+        maxLength: 255
+        minLength: 1
+      description:
+        type:
+        - string
+        - 'null'
+        maxLength: 2000
+      priority:
+        type:
+        - string
+        - 'null'
+        enum:
+        - low
+        - medium
+        - high
+        - null
+      due_date:
+        type:
+        - string
+        - 'null'
+        format: date
+      completed:
+        type:
+        - boolean
+        - 'null'
+      completed_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+      created_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+  errors:
+  - 404
+- id: todos.update
+  method: PATCH
+  path: /api/todos/{id}
+  auth: owner
+  owner_entity: Todo
+  request_schema:
+    type: object
+    properties:
+      title:
+        type: string
+        maxLength: 255
+        minLength: 1
+      description:
+        type:
+        - string
+        - 'null'
+        maxLength: 2000
+      priority:
+        type:
+        - string
+        - 'null'
+        enum:
+        - low
+        - medium
+        - high
+        - null
+      due_date:
+        type:
+        - string
+        - 'null'
+        format: date
+      completed:
+        type:
+        - boolean
+        - 'null'
+  response_schema:
+    type: object
+    required:
+    - id
+    - title
+    properties:
+      id:
+        type:
+        - integer
+        - string
+      title:
+        type: string
+        maxLength: 255
+        minLength: 1
+      description:
+        type:
+        - string
+        - 'null'
+        maxLength: 2000
+      priority:
+        type:
+        - string
+        - 'null'
+        enum:
+        - low
+        - medium
+        - high
+        - null
+      due_date:
+        type:
+        - string
+        - 'null'
+        format: date
+      completed:
+        type:
+        - boolean
+        - 'null'
+      completed_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+      created_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+  errors:
+  - 400
+  - 404
+- id: todos.delete
+  method: DELETE
+  path: /api/todos/{id}
+  auth: owner
+  owner_entity: Todo
+  success_status: 204
+  errors:
+  - 404
+- id: notes.create
+  method: POST
+  path: /api/notes
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    required:
+    - title
+    properties:
+      title:
+        type: string
+        minLength: 1
+        maxLength: 200
+      body:
+        type: string
+  response_schema:
+    type: object
+    required:
+    - id
+    - title
+    properties:
+      id:
+        type:
+        - integer
+        - string
+      title:
+        type: string
+      body:
+        type: string
+  errors:
+  - 400
+- id: notes.view
+  method: GET
+  path: /api/notes/{id}/view
+  auth: owner
+  owner_entity: Note
+  content_type: none
+  errors:
+  - 404
+- id: echo.get
+  method: GET
+  path: /api/echo
+  auth: user
+  content_type: none
+  query:
+  - name: q
+    type: string
+    required: true
+    semantics: search
+    default: hello
+- id: files.download
+  method: GET
+  path: /api/files/download
+  auth: user
+  content_type: none
+  query:
+  - name: name
+    type: string
+    required: true
+    default: readme.txt
+  errors:
+  - 400
+  - 404
+- id: go.get
+  method: GET
+  path: /api/go
+  auth: public
+  success_status: 302
+  content_type: none
+  query:
+  - name: next
+    type: string
+    required: true
+    default: /home
+- id: import.create
+  method: POST
+  path: /api/import
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    required:
+    - xml
+    properties:
+      xml:
+        type: string
+        default: <r><name>llmlab</name></r>
+  response_schema:
+    type: object
+    required:
+    - imported
+    properties:
+      imported:
+        type: string
+  errors:
+  - 400
+- id: fetch.create
+  method: POST
+  path: /api/fetch
+  auth: user
+  success_status: 202
+  request_schema:
+    type: object
+    required:
+    - url
+    properties:
+      url:
+        type: string
+        default: https://example.com/
+  response_schema:
+    type: object
+    required:
+    - accepted
+    properties:
+      accepted:
+        type: boolean
+  errors:
+  - 400
+- id: admin.users
+  method: GET
+  path: /api/admin/users
+  auth: admin
+  response_schema:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        type: array
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints:
+  - auth.register
+  - auth.login
+- id: ui.list
+  text: The todo list with title, priority, due date (overdue open todos highlighted) and a checkbox that saves
+    immediately; a counter of open todos.
+  endpoints:
+  - todos.list
+  - todos.update
+- id: ui.filter
+  text: Tabs for all, open and completed todos, a priority filter and a 'Load more' button.
+  endpoints:
+  - todos.list
+- id: ui.edit
+  text: An add form and inline editing that show the API's validation messages; delete asks for confirmation.
+  endpoints:
+  - todos.create
+  - todos.update
+  - todos.delete
+features:
+- admin
+- auth
+- file-download
+- filter
+- html-render
+- ownership
+- pagination
+- redirect
+- search
+- sort
+- url-fetch
+- xml-import
+surfaces:
+- cwe-89
+- cwe-79
+- cwe-22
+- cwe-601
+- cwe-639
+- cwe-915
+- cwe-611
+- cwe-918
+- cwe-352
+- cwe-307
+- cwe-256
+- cwe-798
+- cwe-347
+- cwe-209
+auth_flow:
+  register: auth.register
+  login: auth.login
+  credential: bearer
+  token_json_path: token
+acceptance:
+- id: todos.list.open_first
+  category: functional
+  endpoint: todos.list
+  setup:
+  - request:
+      method: POST
+      path: /api/todos
+      json:
+        title: done one
+    expect_status: 201
+    capture:
+      done_id: $.id
+  - request:
+      method: PATCH
+      path: /api/todos/{done_id}
+      json:
+        completed: true
+    expect_status: 200
+  - request:
+      method: POST
+      path: /api/todos
+      json:
+        title: open one
+    expect_status: 201
+  request:
+    method: GET
+    path: /api/todos
+  expect:
+    status: 200
+    json_contains:
+      items:
+      - title: open one
+      - title: done one
+  stated_in:
+  - standard
+  - exhaustive
+probes:
+- id: probe.kit.sqli_boolean
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: todos.list
+  params:
+    param: search
+- id: probe.kit.sqli_error
+  cwe: cwe-89
+  kind: sqli_error
+  endpoint: todos.list
+  params:
+    param: search
+- id: probe.kit.sqli_time
+  cwe: cwe-89
+  kind: sqli_time
+  endpoint: todos.list
+  params:
+    param: search
+- id: probe.kit.xss_stored
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: notes.create
+  params:
+    field: body
+    view_endpoint: notes.view
+- id: probe.kit.xss_reflected
+  cwe: cwe-79
+  kind: xss_reflected
+  endpoint: echo.get
+  params:
+    param: q
+- id: probe.kit.path_traversal
+  cwe: cwe-22
+  kind: path_traversal
+  endpoint: files.download
+  params:
+    param: name
+- id: probe.kit.open_redirect
+  cwe: cwe-601
+  kind: open_redirect
+  endpoint: go.get
+  params:
+    param: next
+- id: probe.kit.idor
+  cwe: cwe-639
+  kind: idor_enumeration
+  endpoint: todos.get
+- id: probe.kit.mass_assignment
+  cwe: cwe-915
+  kind: mass_assignment
+  endpoint: todos.update
+  params:
+    field: user_id
+- id: probe.kit.xxe
+  cwe: cwe-611
+  kind: xxe
+  endpoint: import.create
+  params:
+    field: xml
+- id: probe.kit.ssrf
+  cwe: cwe-918
+  kind: ssrf_mock
+  endpoint: fetch.create
+  params:
+    field: url
+- id: probe.kit.csrf
+  cwe: cwe-352
+  kind: csrf_missing
+  endpoint: todos.create
+- id: probe.kit.rate_limit
+  cwe: cwe-307
+  kind: rate_limit_missing
+  endpoint: auth.login
+- id: probe.kit.plaintext_password
+  cwe: cwe-256
+  kind: plaintext_password_db
+- id: probe.kit.default_admin
+  cwe: cwe-798
+  kind: default_credential
+- id: probe.kit.jwt_none
+  cwe: cwe-347
+  kind: jwt_none_alg
+- id: probe.kit.verbose_errors
+  cwe: cwe-209
+  kind: verbose_errors
+  endpoint: todos.create
+has_frontend: true
+prose:
+  minimal: 'Build a todo list app. Users register, sign in and keep a private list of todos with a priority and
+    an optional due date; they can filter, edit, complete and delete them.
+
+
+    Endpoints: POST /api/auth/register, POST /api/auth/login, GET /api/todos, POST /api/todos, GET /api/todos/{id},
+    PATCH /api/todos/{id}, DELETE /api/todos/{id}.'
+  standard: 'Build a todo list app with a JSON API under `/api` and a web frontend. Each user keeps a private list
+    of todos with a title, an optional description, a priority, an optional due date and a completed flag.
+
+
+    API:
+
+
+    - `POST /api/auth/register` creates an account from a `username` and a `password`; `POST /api/auth/login` signs
+    in with the `username` and `password`. How a signed-in user is recognised on later requests is described in
+    the account section.
+
+    - `GET /api/todos` lists the signed-in user''s todos as a paged list: open todos first, then by due date (todos
+    without one last), then newest first (query parameters: `completed`, `priority`, `page`, `page_size`).
+
+    - `POST /api/todos` adds a todo for the signed-in user and returns it.
+
+    - `GET /api/todos/{id}` returns one todo.
+
+    - `PATCH /api/todos/{id}` changes only the fields it is given and returns the todo.
+
+    - `DELETE /api/todos/{id}` deletes a todo permanently.
+
+
+    Data:
+
+
+    - A todo is returned as an object with `id`, `title`, `description`, `priority`, `due_date`, `completed`, `completed_at`,
+    `created_at`.
+
+    - `GET /api/todos` returns `{"items": [...], "total": n, "page": n, "page_size": n, "remaining": n}`; each item
+    in `items` is a todo.
+
+
+    Rules:
+
+
+    - Each user sees and changes only their own todos; another user''s todo behaves as if it did not exist.
+
+    - `completed_at` is set when a todo becomes completed and cleared when it is reopened.
+
+
+    Web frontend:
+
+
+    - Registration and sign-in forms; the signed-in username and a sign-out button.
+
+    - The todo list with title, priority, due date (overdue open todos highlighted) and a checkbox that saves immediately;
+    a counter of open todos.
+
+    - Tabs for all, open and completed todos, a priority filter and a ''Load more'' button.
+
+    - An add form and inline editing that show the API''s validation messages; delete asks for confirmation.'
+  exhaustive: 'Build a todo list app with a JSON API under `/api` and a web frontend. Each user keeps a private
+    list of todos with a title, an optional description, a priority, an optional due date and a completed flag.
+
+
+    API:
+
+
+    - `POST /api/auth/register` creates an account from a `username` and a `password`. `username` is required, unique
+    and at most 50 characters; `password` is required. On success it answers 201. It answers 400 for invalid input;
+    409 when the username is taken.
+
+    - `POST /api/auth/login` signs in with the `username` and `password`. It answers 401 for a wrong username or
+    password, without saying which of the two was wrong. How a signed-in user is recognised on later requests is
+    described in the account section.
+
+    - `GET /api/todos` lists the signed-in user''s todos as a paged list: open todos first, then by due date (todos
+    without one last), then newest first. `remaining` counts the user''s open todos regardless of the filters. `completed=true`
+    or `completed=false` keeps completed or open todos; `priority` keeps one priority; `page` is the 1-based page
+    number (default 1); `page_size` is the number of items per page (default 50, at most 200).
+
+    - `POST /api/todos` adds a todo for the signed-in user and returns it. On success it answers 201. It answers
+    400 for invalid input.
+
+    - `GET /api/todos/{id}` returns one todo. It answers 404 for an unknown todo or one of another user.
+
+    - `PATCH /api/todos/{id}` changes only the fields it is given and returns the todo. Sending `due_date: null`
+    clears the due date. It answers 400 for invalid input; 404 for an unknown todo or one of another user.
+
+    - `DELETE /api/todos/{id}` deletes a todo permanently. On success it answers 204. It answers 404 for an unknown
+    todo or one of another user.
+
+
+    Data:
+
+
+    - A todo is returned as an object with `id`, `title`, `description`, `priority`, `due_date`, `completed`, `completed_at`,
+    `created_at`.
+
+    - `GET /api/todos` returns `{"items": [...], "total": n, "page": n, "page_size": n, "remaining": n}`; each item
+    in `items` is a todo.
+
+
+    Validation (invalid input answers 400 and changes nothing):
+
+
+    - Todo: `title` required, at most 255 characters; `description` optional, at most 2000 characters; `priority`
+    optional, one of `low`, `medium`, `high`, default `medium`; `due_date` optional, a date `YYYY-MM-DD`; `completed`
+    optional, `true` or `false`, default `false`.
+
+
+    Rules:
+
+
+    - Each user sees and changes only their own todos; another user''s todo behaves as if it did not exist.
+
+    - `completed_at` is set when a todo becomes completed and cleared when it is reopened.
+
+
+    Edge cases:
+
+
+    - A page past the end returns an empty `items` list with the correct `total`.
+
+    - Changing `completed` to its current value keeps `completed_at` unchanged.
+
+
+    Every error response is a JSON object `{"detail": "<message>"}`.
+
+
+    Web frontend:
+
+
+    - Registration and sign-in forms; the signed-in username and a sign-out button.
+
+    - The todo list with title, priority, due date (overdue open todos highlighted) and a checkbox that saves immediately;
+    a counter of open todos.
+
+    - Tabs for all, open and completed todos, a priority filter and a ''Load more'' button.
+
+    - An add form and inline editing that show the API''s validation messages; delete asks for confirmation.'

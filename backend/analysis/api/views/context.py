@@ -1,26 +1,29 @@
 """Analysis-run context endpoints (source LOC by layer, test split, setup line, rule prevalence).
 
-``GET /analysis/runs/{run_id}/context/?scope=experiment|mine`` puts one run in
-context, descriptively (counts and n, no tests):
+``GET /analysis/runs/{run_id}/context/?scope=study|mine`` puts one run in
+context, descriptively (counts and n, no tests). Everything about the analyzed
+generation run is read through ``RunView`` (``backend.generation.runs.view``):
 
-* ``job`` -- the generation setup of the analyzed app: experiment, condition,
-  repeat k of the planned N, model, harness, bundle key, config fingerprint.
-* ``source_loc`` -- the app's size by the study's definition
-  (``reports.services.loc``: non-test source lines by layer, test lines apart)
-  and the stored files in ``NON_SOURCE_DIRS`` -- left out by this run when it
-  recorded them, read by its tools when it predates that rule (``left_out``).
+* ``job`` -- the generation setup of the analyzed app: study, condition,
+  repeat k of the planned N, model, harness, task, stack, fingerprints.
+* ``source_loc`` -- the app's size by the study's definition: the **model**
+  scope's non-test source lines by layer (``reports.services.loc`` rules), test
+  lines apart, and ``app_total`` (the whole app tree the tools read, starter
+  included); plus the stored files in ``NON_SOURCE_DIRS`` -- left out by this
+  run when it recorded them, read by its tools when it predates that rule (``left_out``).
 * ``test_split`` -- per tool, the run's code findings in test files and in the
   app's own source (``is_test_path``; the study counts test code apart), and
   apart from both those in ``NON_SOURCE_DIRS`` files (``findings_in_excluded``:
   read by a run finalized before the exclusion rule; neither test code nor source).
 * ``rule_prevalence`` -- for each rule of this run, in how many analyzed apps
-  of the corpus (the experiment's current attempts, or all the caller's apps)
-  that tool's latest result reports it, over the apps that tool measured
-  (completed or not applicable) -- never over all apps -- and the same for
-  this model's apps. Each tool's latest result per app counts
-  (``ToolResult.latest_ids_per_job``), as in the study tables; a note names
-  this run's tools whose result is not the one counted (superseded, or failed),
-  and ``interim`` flags an experiment corpus while the experiment runs.
+  of the corpus (the study's current runs -- the first usable attempt of each
+  cell -- or all the caller's apps) that tool's latest result reports it, over
+  the apps that tool measured (completed; a not-applicable tool measured
+  nothing) -- never over all apps -- and the same for this model's apps. Each
+  tool's latest result per app counts (``ToolResult.latest_ids_per_job``), as in
+  the study tables; a note names this run's tools whose result is not the one
+  counted (superseded, or not measured), and ``interim`` flags a study corpus
+  while the study runs.
 """
 
 from __future__ import annotations
@@ -46,99 +49,104 @@ from backend.analysis.services import runner
 from backend.analysis.services.base import NON_SOURCE_DIRS
 from backend.analysis.services.base import is_dependency_advisory
 from backend.analysis.services.base import is_non_source_path
-from backend.generation.models import GenerationJob
+from backend.analysis.services.base import non_source_paths
+from backend.generation.models import GenerationRun
+from backend.generation.models import choices
+from backend.generation.runs.view import RunView
+from backend.generation.runs.view import run_view
 from backend.reports.services.loc import is_source_file
-from backend.reports.services.loc import loc_from_result_data
+from backend.reports.services.loc import loc_from_files
+from backend.reports.services.loc import loc_of_test_files
 from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import finding_record
 from backend.statistics.services.dedup import issue_class
-from backend.statistics.services.study import condition_label
-from backend.statistics.services.study import study_jobs
+from backend.statistics.services.runs import study_current_runs
 
-CONTEXT_SCOPES = ("experiment", "mine")
+CONTEXT_SCOPES = ("study", "mine")
 _EXCLUDED_SAMPLE = 20
+# A study in one of these states has all its runs: its counts are final.
+_STUDY_FINAL = frozenset({choices.StudyStatus.COMPLETED, choices.StudyStatus.CANCELLED, choices.StudyStatus.STOPPED})
 
 
 def _is_measured(status: str, skip_reason: Any) -> bool:
-    """A completed result, or one skipped because the app has nothing the tool reads (a measured zero)."""
-    return status == ToolResult.Status.COMPLETED or (
-        status == ToolResult.Status.SKIPPED and skip_reason == runner.SKIP_NOT_APPLICABLE
-    )
+    """A completed result: the only one that measured the code (not applicable is not measured, never 0)."""
+    return runner._is_measurement(status, skip_reason)  # noqa: SLF001
 
 
 # --- Setup ---------------------------------------------------------------------
 
 
-def _harness(job: GenerationJob) -> str | None:
-    """The coding-agent harness of an agent job (job_listing.harness_expression's rule), else None."""
-    agent_config = job.agent_config if isinstance(job.agent_config, dict) else {}
-    resolved = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    harness = resolved.get("harness") if isinstance(resolved.get("harness"), dict) else {}
-    return agent_config.get("harness") or harness.get("name") or None
-
-
-def _setup(job: GenerationJob) -> dict[str, Any]:
-    from backend.generation.services.experiment_results import planned_repeats
-
-    model = job.model if job.model_id else None
-    app = job.app_requirement if job.app_requirement_id else None
-    experiment = job.experiment if job.experiment_id else None
-    resolved = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
+def _setup(gen: GenerationRun, view: RunView) -> dict[str, Any]:
+    """The generation setup of the analyzed run (``RunView`` plus the study/condition rows)."""
+    model = gen.model if gen.model_id else None
+    study = gen.study if gen.study_id else None
+    condition = gen.condition if gen.condition_id else None
+    task = view.task
     return {
-        "id": str(job.id),
-        "mode": job.mode,
-        "status": job.status,
+        "id": view.id,
+        "kind": view.kind,
+        "status": view.status,
+        "outcome": view.outcome,
+        "usable": view.usable,
         "model_pk": model.pk if model else None,
-        "model_id": model.model_id if model else "",
+        "model_id": model.model_id if model else (view.model_slug or ""),
         "model_name": model.model_name if model else "",
         "model_slug": (model.canonical_slug or "") if model else "",
-        "app_id": job.app_requirement_id,
-        "app_slug": app.slug if app else "",
-        "app_name": app.name if app else "",
-        "stack_slug": job.stack_slug or "",
-        "batch_id": str(job.batch_id) if job.batch_id else None,
-        "experiment_id": str(experiment.id) if experiment else None,
-        "experiment_name": experiment.name if experiment else "",
-        "condition_id": job.condition_id,
-        "condition_label": condition_label(job.condition) if job.condition_id else "",
-        "repeat_index": job.repeat_index,
-        "planned_repeats": planned_repeats(experiment) if experiment else None,
-        "harness": _harness(job) if job.mode == GenerationJob.Mode.AGENT else None,
-        "bundle_key": job.bundle_key or "",
-        "config_fingerprint": resolved.get("config_fingerprint") or None,
+        "task_ref": task.ref if task else "",
+        "task_slug": task.slug if task else "",
+        "task_title": task.title if task else "",
+        "prose_variant": task.variant if task else "",
+        "unit_key": view.unit_key or "",
+        "stack_ref": view.stack.ref if view.stack else "",
+        "study_id": view.study_id,
+        "study_name": study.name if study else "",
+        "condition_id": view.condition_id,
+        "condition_label": str(condition) if condition else "",
+        "stage": view.stage or "",
+        "repeat_index": view.repeat_index,
+        "planned_repeats": study.repeats if study else None,
+        "harness": view.harness[0] if view.harness else None,
+        "harness_version": view.harness[1] if view.harness else "",
+        "config_fingerprint": view.fingerprints.get("config_fingerprint") or None,
+        "run_fingerprint": view.fingerprints.get("run_fingerprint") or None,
     }
 
 
 # --- Source size -----------------------------------------------------------------
 
 
+def _loc(files: dict[str, str]) -> dict[str, Any]:
+    return {**loc_from_files(files), **loc_of_test_files(files)}
+
+
 def _source_loc(run: AnalysisRun) -> dict[str, Any] | None:
-    """Source LOC by layer (the study's definition) and the stored files the analysis left out."""
+    """Source LOC by layer (the study's definition: model scope) and the stored files the analysis left out."""
     code = run.get_code_for_analysis()
     if not code:
         return None
-    excluded = sorted(path for path in code if is_non_source_path(path))
+    excluded = non_source_paths(code)
     dirs = Counter(
         next((part for part in path.strip("/").split("/")[:-1] if part in NON_SOURCE_DIRS), "") for path in excluded
     )
-    job = run.generation_job if run.generation_job_id else None
-    if job is not None:
-        loc = loc_from_result_data(job.result_data)
+    gen = run.generation_job if run.generation_job_id and not run.source_code else None
+    if gen is not None:
+        scope = "model"
+        loc = _loc(run_view(gen).code_files("model"))
+        app_total = loc_from_files(code)["total_loc"]
     else:
         # Pasted code is a {path: content} map; bare keys (``backend``) are single blobs.
-        loc = loc_from_result_data({"files": code})
-        if not loc["source_files"]:
-            loc = loc_from_result_data(code)
-    with_paths = loc.get("test_loc") is not None
-    other = (
-        sum(1 for path in code if not is_non_source_path(path) and not is_source_file(path)) if with_paths else None
-    )
+        scope = "code"
+        loc = _loc(runner._materialize(code))  # noqa: SLF001
+        app_total = loc["total_loc"]
+    other = sum(1 for path in code if not is_non_source_path(path) and not is_source_file(path))
     left_out, in_excluded = _excluded_by_run(run, excluded)
     return {
+        "scope": scope,
         "total": loc["total_loc"],
         "files": loc["source_files"],
-        "by_layer": {"backend": loc["backend_loc"], "frontend": loc["frontend_loc"], "tests": loc.get("test_loc")},
-        "test_files": loc.get("test_files"),
+        "by_layer": {"backend": loc["backend_loc"], "frontend": loc["frontend_loc"], "tests": loc["test_loc"]},
+        "test_files": loc["test_files"],
+        "app_total": app_total,
         "other_files": other,
         "excluded_paths": {
             "count": len(excluded),
@@ -247,24 +255,38 @@ def _corpus_scope(run: AnalysisRun, user, requested: str) -> tuple[str | None, l
     """The corpus scope to count prevalence over, the scopes available, and notes on a fallback."""
     if requested and requested not in CONTEXT_SCOPES:
         raise HttpError(400, f"scope must be one of: {', '.join(CONTEXT_SCOPES)}.")
-    job = run.generation_job if run.generation_job_id else None
+    gen = run.generation_job if run.generation_job_id else None
     notes: list[str] = []
-    experiment = job.experiment if job is not None and job.experiment_id else None
-    own_experiment = experiment is not None and (experiment.created_by_id == user.id or user.is_staff)
-    available = ["experiment", "mine"] if own_experiment else ["mine"]
-    if requested == "experiment" and not own_experiment:
+    study = gen.study if gen is not None and gen.study_id else None
+    own_study = study is not None and (study.created_by_id == user.id or user.is_staff)
+    available = ["study", "mine"] if own_study else ["mine"]
+    if requested == "study" and not own_study:
         notes.append(
-            "This app is not part of an experiment of yours: prevalence is counted over all your analyzed apps.",
+            "This app is not part of a study of yours: prevalence is counted over all your analyzed apps.",
         )
         return "mine", available, notes
-    return (requested or ("experiment" if own_experiment else "mine")), available, notes
+    return (requested or ("study" if own_study else "mine")), available, notes
 
 
-def _corpus_jobs(run: AnalysisRun, user, scope: str):
-    """The corpus's jobs: the experiment's current attempts, or every current job of the caller."""
-    if scope == "experiment":
-        return study_jobs(None, experiment_id=run.generation_job.experiment_id)
-    return study_jobs(None).filter(created_by=user)
+def _mine(user):
+    """The caller's current runs: runs outside any study cell, plus each study's current run per cell.
+
+    A cell's current run is its first usable attempt (``current_runs``), never a later one;
+    ``beyond_plan`` runs are left out.
+    """
+    own = GenerationRun.objects.filter(created_by=user, beyond_plan=False)
+    ids = set(own.filter(cell__isnull=True).values_list("id", flat=True))
+    for study_id in own.filter(cell__isnull=False).values_list("study_id", flat=True).distinct():
+        for stage in (choices.Stage.PILOT, choices.Stage.MAIN):
+            ids |= set(study_current_runs(study_id, stage=stage).filter(created_by=user).values_list("id", flat=True))
+    return GenerationRun.objects.filter(id__in=ids)
+
+
+def _corpus_runs(run: AnalysisRun, user, scope: str):
+    """The corpus's generation runs: the study's current runs (main stage), or every current run of the caller."""
+    if scope == "study":
+        return study_current_runs(run.generation_job.study_id, stage=choices.Stage.MAIN)
+    return _mine(user)
 
 
 def _prevalence(
@@ -276,14 +298,14 @@ def _prevalence(
     and the tools of the run's rules whose result here is not the one counted for the app.
 
     The corpus counts an app by each tool's latest measuring result: a result of this run
-    that a later analysis superseded, or that measured nothing (failed), is not among the
-    counts, so its findings may not be either.
+    that a later analysis superseded, or that measured nothing (failed, not applicable), is
+    not among the counts, so its findings may not be either.
     """
-    job = run.generation_job if run.generation_job_id else None
-    model_id = job.model_id if job is not None else None
-    jobs = _corpus_jobs(run, user, scope)
-    label = f"experiment {run.generation_job.experiment.name}" if scope == "experiment" else "all your analyzed apps"
-    model_of = dict(jobs.values_list("id", "model_id"))
+    gen = run.generation_job if run.generation_job_id else None
+    model_id = gen.model_id if gen is not None else None
+    corpus = _corpus_runs(run, user, scope)
+    label = f"study {run.generation_job.study.name}" if scope == "study" else "all your analyzed apps"
+    model_of = dict(corpus.values_list("id", "model_id"))
     results = list(
         ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job(list(model_of))).values_list(
             "id",
@@ -293,10 +315,10 @@ def _prevalence(
             "summary__skip_reason",
         ),
     )
-    analyzed = {job_id for _id, job_id, _slug, _status, _reason in results}
+    analyzed = {gen_id for _id, gen_id, _slug, _status, _reason in results}
     n = len(analyzed)
-    model_n = sum(1 for j in analyzed if model_of.get(j) == model_id) if model_id is not None else None
-    self_in = job is not None and job.id in analyzed
+    model_n = sum(1 for g in analyzed if model_of.get(g) == model_id) if model_id is not None else None
+    self_in = gen is not None and gen.id in analyzed
 
     rules = _run_rules(run)
     if not rules:
@@ -304,30 +326,30 @@ def _prevalence(
     tools = {tool for tool, _rule in rules}
     counted_here = {
         result_id
-        for result_id, job_id, _slug, status, reason in results
-        if job is not None and job_id == job.id and _is_measured(status, reason)
+        for result_id, gen_id, _slug, status, reason in results
+        if gen is not None and gen_id == gen.id and _is_measured(status, reason)
     }
     here = list(run.results.filter(tool_slug__in=tools).values_list("id", "tool_slug"))
     uncounted = sorted({slug for _id, slug in here} - {slug for result_id, slug in here if result_id in counted_here})
     measured_ids: list = []
     apps_measured: Counter = Counter()
     model_measured: Counter = Counter()
-    for result_id, job_id, slug, status, reason in results:
+    for result_id, gen_id, slug, status, reason in results:
         if slug not in tools or not _is_measured(status, reason):
             continue
         measured_ids.append(result_id)
         apps_measured[slug] += 1
-        if model_id is not None and model_of.get(job_id) == model_id:
+        if model_id is not None and model_of.get(gen_id) == model_id:
             model_measured[slug] += 1
 
     # One grouped query: per (tool, rule), the measured apps whose latest result reports the rule.
-    job_field = "result__run__generation_job_id"
+    app_field = "result__run__generation_job_id"
     counted = (
         Finding.objects.filter(result_id__in=measured_ids, rule_id__in=sorted({r for _t, r in rules}))
         .values("result__tool_slug", "rule_id")
         .annotate(
-            apps=Count(job_field, distinct=True),
-            model_apps=Count(job_field, distinct=True, filter=Q(result__run__generation_job__model_id=model_id)),
+            apps=Count(app_field, distinct=True),
+            model_apps=Count(app_field, distinct=True, filter=Q(result__run__generation_job__model_id=model_id)),
         )
     )
     with_rule = {(r["result__tool_slug"], r["rule_id"]): (r["apps"], r["model_apps"]) for r in counted}
@@ -358,16 +380,14 @@ def run_context(
     run_id: str,
     scope: str = Query(
         "",
-        description="Corpus of the rule prevalence: experiment (the app's experiment) | mine (all your analyzed "
-        "apps); empty: the experiment when the app belongs to one of yours, else mine.",
+        description="Corpus of the rule prevalence: study (the app's study: its current runs) | mine (all your "
+        "analyzed apps); empty: the study when the app belongs to one of yours, else mine.",
     ),
 ):
     """A run in context: the setup behind the app, its source size, test-code findings apart, rule prevalence."""
-    from backend.generation.services import experiment_results as er
-
     run = _get_run(request, run_id)
     user = request.auth
-    job = run.generation_job if run.generation_job_id else None
+    gen = run.generation_job if run.generation_job_id else None
     used, available, notes = _corpus_scope(run, user, scope)
     rows, n, model_n, self_in, label, uncounted = _prevalence(run, user, used)
     test_split = _test_split(run)
@@ -377,12 +397,12 @@ def run_context(
             "(dependency, cache and scratch directories such as .tmp or node_modules) that its tools read before "
             "the exclusion rule: the test split counts them apart, neither as test code nor as the app's source.",
         )
-    if job is not None and not self_in:
+    if gen is not None and not self_in:
         notes.append(
-            "This app is not among the corpus's analyzed apps (a superseded attempt, or no finished analysis): "
-            "its rules are compared with the others, but it is not counted in them.",
+            "This app is not among the corpus's analyzed apps (not its cell's current run, or no finished "
+            "analysis): its rules are compared with the others, but it is not counted in them.",
         )
-    elif job is not None and uncounted:
+    elif gen is not None and uncounted:
         notes.append(
             (
                 f"This run's {', '.join(uncounted)} results are not the ones counted for this app (later "
@@ -394,9 +414,9 @@ def run_context(
             + ": the counts use the app's latest measuring result of each tool, so they may not include this "
             "run's findings of " + ("those tools." if len(uncounted) > 1 else "that tool."),
         )
-    # Counts over a running experiment change as its apps finish: interim, not final.
-    experiment = job.experiment if job is not None and job.experiment_id else None
-    interim = used == "experiment" and experiment is not None and experiment.status not in er._TERMINAL  # noqa: SLF001
+    # Counts over a running study change as its runs finish: interim, not final.
+    study = gen.study if gen is not None and gen.study_id else None
+    interim = used == "study" and study is not None and study.status not in _STUDY_FINAL
     return {
         "run_id": str(run.id),
         "scope": used,
@@ -406,7 +426,7 @@ def run_context(
         "model_n": model_n,
         "self_in_corpus": self_in,
         "interim": interim,
-        "job": _setup(job) if job is not None else None,
+        "job": _setup(gen, run_view(gen)) if gen is not None else None,
         "source_loc": _source_loc(run),
         "test_split": test_split,
         "rule_prevalence": rows,

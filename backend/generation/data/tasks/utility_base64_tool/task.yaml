@@ -1,0 +1,184 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Base64 converter
+summary: Encode text to base64 and decode it back, with a personal history for signed-in users.
+category: utility
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Conversion
+  fields:
+  - name: direction
+    type: enum
+    required: true
+    enum: [encode, decode]
+  - {name: input, type: text, required: true}
+  - {name: input_preview, type: string}
+  - {name: output_preview, type: string}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: base64.encode
+  method: POST
+  path: /api/base64/encode
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      text: {type: string, maxLength: 100000}
+    required: [text]
+  response_schema:
+    type: object
+    properties:
+      encoded: {type: string}
+    required: [encoded]
+  errors: [400]
+- id: base64.decode
+  method: POST
+  path: /api/base64/decode
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      encoded: {type: string, maxLength: 140000}
+    required: [encoded]
+  response_schema:
+    type: object
+    properties:
+      text: {type: string}
+    required: [text]
+  errors: [400]
+- id: conversions.create
+  method: POST
+  path: /api/conversions
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      direction:
+        type: string
+        enum: [encode, decode]
+      input: {type: string, minLength: 1}
+    required: [direction, input]
+  response_schema:
+    type: object
+    required: [id, direction, output]
+    properties:
+      id:
+        type: [integer, string]
+      direction:
+        type: string
+        enum: [encode, decode]
+      input_preview:
+        type: [string, 'null']
+      output_preview:
+        type: [string, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      output: {type: string}
+  errors: [400]
+- id: conversions.list
+  method: GET
+  path: /api/conversions
+  auth: user
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, direction]
+          properties:
+            id:
+              type: [integer, string]
+            direction:
+              type: string
+              enum: [encode, decode]
+            input_preview:
+              type: [string, 'null']
+            output_preview:
+              type: [string, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: conversions.delete
+  method: DELETE
+  path: /api/conversions/{id}
+  auth: owner
+  owner_entity: Conversion
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.convert
+  text: Two text areas with 'Encode' and 'Decode' buttons, a copy button and the API's error message for invalid
+    input.
+  endpoints: [base64.encode, base64.decode]
+- id: ui.history
+  text: 'For signed-in users: a ''Save to history'' switch and the history list with delete buttons and paging.'
+  endpoints: [conversions.create, conversions.list, conversions.delete]
+features: [auth, ownership, pagination]
+surfaces: [cwe-20, cwe-400, cwe-639, cwe-79, cwe-116]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: base64.roundtrip.unicode
+  category: functional
+  endpoint: base64.encode
+  request:
+    method: POST
+    path: /api/base64/encode
+    json: {text: zażółć}
+  expect:
+    status: 200
+    json_contains: {encoded: emHFvMOzxYLEhw==}
+  stated_in: [standard, exhaustive]
+- id: base64.decode.no_padding
+  category: validation
+  endpoint: base64.decode
+  request:
+    method: POST
+    path: /api/base64/decode
+    json: {encoded: aGk}
+  expect:
+    status: 200
+    json_contains: {text: hi}
+  stated_in: [exhaustive]
+probes:
+- {id: probe.conversions.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: conversions.delete}

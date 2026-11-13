@@ -1,0 +1,11 @@
+name: 'SQL built by string concatenation (Java)'
+description: 'An SQL string literal is concatenated with a value instead of using PreparedStatement parameters.'
+content:
+  engine: regex
+  languages: [java]
+  rule: '"(?i:\s*(?:SELECT|INSERT|UPDATE|DELETE)\b)[^"\n]*"\s*\+\s*[\w(]|\.(?:executeQuery|executeUpdate|execute|addBatch|prepareStatement|createQuery|createNativeQuery)\(\s*"[^"\n]*"\s*\+\s*[\w(]'
+  tool: {name: re, version: py3.13}
+  feature_key: java-sql-concat
+  polarity: insecure
+  cwe: [cwe-89]
+  description: 'An SQL string literal is concatenated with a non-literal value.'

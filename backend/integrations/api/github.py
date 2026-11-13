@@ -32,13 +32,17 @@ class GitHubStatusSchema(Schema):
 
 
 class GitHubExportIn(Schema):
-    application_id: str = Field(..., description="Generation job UUID (the id used by /api/generation/jobs/{id}/)")
+    application_id: str = Field(..., description="Generation run UUID (the sample's id, /samples/{id})")
     target: Literal["repo", "gist"] = "repo"
     repo_name: str | None = Field(None, description="Required for target=repo")
     private: bool = True
     description: str | None = None
     upload_sarif: bool = False
-    include_scaffold: bool = Field(default=True, description="Repo only: include the stack skeleton so the app builds")
+    scope: Literal["app", "model"] = Field(
+        default="app",
+        description="Repo only: 'app' exports the buildable tree (starter files included), 'model' only the "
+        "files the model wrote. Gists always export 'model'.",
+    )
 
 
 class SarifStatusSchema(Schema):
@@ -67,11 +71,11 @@ def github_status(request):
 def github_export(request, payload: GitHubExportIn):
     """Export an application to a new repository (one commit) or a Gist."""
     try:
-        job = github_service.resolve_application(request.auth, payload.application_id)
+        run = github_service.resolve_application(request.auth, payload.application_id)
         if payload.target == "gist":
             result = github_service.export_to_gist(
                 request.auth,
-                job,
+                run,
                 public=not payload.private,
                 description=payload.description or "",
             )
@@ -82,12 +86,12 @@ def github_export(request, payload: GitHubExportIn):
             raise HttpError(400, "repo_name is required when exporting to a repository.")
         return github_service.export_to_repo(
             request.auth,
-            job,
+            run,
             payload.repo_name,
             private=payload.private,
             description=payload.description or "",
             upload_sarif=payload.upload_sarif,
-            include_scaffold=payload.include_scaffold,
+            scope=payload.scope,
         )
     except GitHubError as exc:
         raise HttpError(exc.status_code, exc.message) from exc

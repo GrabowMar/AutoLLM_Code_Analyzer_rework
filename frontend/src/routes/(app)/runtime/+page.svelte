@@ -17,7 +17,12 @@
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Layers from '@lucide/svelte/icons/layers';
-	import { rowLink, tableFrame } from '$lib/components/table';
+	import { rowLink, tableFrame, TableToolbar } from '$lib/components/table';
+	import FilterMenu, { type FilterMenuOption } from '$lib/components/FilterMenu.svelte';
+	import Search from '@lucide/svelte/icons/search';
+	import X from '@lucide/svelte/icons/x';
+	import Flag from '@lucide/svelte/icons/flag';
+	import Archive from '@lucide/svelte/icons/archive';
 	import {
 		getContainers,
 		startContainer,
@@ -35,7 +40,12 @@
 	let loading = $state(true);
 	let error = $state('');
 	let dockerInfo = $state<DockerInfo | null>(null);
-	let statusFilter = $state<'all' | ContainerStatus>('all');
+	// One fetch of every container (the list is small); filters, counts and search are client-side.
+	// Default view: live containers; removed ones (the bulk of the history) behind a toggle.
+	const LIMIT = 500;
+	let statusFilter = $state<'' | ContainerStatus>('');
+	let showRemoved = $state(false);
+	let query = $state('');
 	let actionLoading = $state<Record<string, boolean>>({});
 
 	async function load() {
@@ -43,7 +53,7 @@
 		error = '';
 		try {
 			const [res, info] = await Promise.all([
-				getContainers({ per_page: 50, ...(statusFilter !== 'all' ? { status: statusFilter } : {}) }),
+				getContainers({ per_page: LIMIT }),
 				getDockerInfo()
 			]);
 			containers = res.containers;
@@ -73,64 +83,106 @@
 	let removeId = $state<string | null>(null);
 	let removeOpen = $state(false);
 
-	// Runs on mount and again whenever the filter changes.
 	$effect(() => {
-		void statusFilter;
 		load();
 	});
+
+	const STATUSES: ContainerStatus[] = ['running', 'building', 'pending', 'stopped', 'failed', 'removed'];
+	const counts = $derived.by(() => {
+		const m = new Map<string, number>();
+		for (const c of containers) m.set(c.status, (m.get(c.status) ?? 0) + 1);
+		return m;
+	});
+	const statusOptions = $derived<FilterMenuOption[]>(
+		STATUSES.filter((st) => counts.has(st) || st === statusFilter).map((st) => ({
+			value: st,
+			label: st.charAt(0).toUpperCase() + st.slice(1),
+			hint: String(counts.get(st) ?? 0),
+		})),
+	);
+	const removedCount = $derived(counts.get('removed') ?? 0);
+	const shown = $derived.by(() => {
+		const q = query.trim().toLowerCase();
+		return containers.filter(
+			(c) =>
+				(statusFilter ? c.status === statusFilter : showRemoved || c.status !== 'removed') &&
+				(!q || `${c.name} ${c.image}`.toLowerCase().includes(q)),
+		);
+	});
+	/** `llmlab/sample:<sha>-<uuid>` → `llmlab/sample:8f829df8…` (full in the title). */
+	function shortImage(image: string): string {
+		const [repo, tag] = image.split(':');
+		return tag && tag.length > 12 ? `${repo}:${tag.slice(0, 8)}…` : image;
+	}
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Runtime" description="Docker containers created by generation jobs.">
+	<PageHeader title="Runtime" description="Docker containers started for generated samples.">
+		{#snippet meta()}
+			{#if dockerInfo}
+				{#if dockerInfo.daemon_available}
+					<StatusBadge status="healthy" label="Docker daemon online" />
+				{:else}
+					<StatusBadge status="unhealthy" label="Docker daemon unavailable" />
+				{/if}
+			{/if}
+		{/snippet}
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
 				<RefreshCw />Refresh
 			</Button>
 		{/snippet}
+		<div class="header-stats">
+			<span class="header-stat"><b>{counts.get('running') ?? 0}</b> running</span>
+			<span class="header-stat"><b>{(counts.get('stopped') ?? 0) + (counts.get('failed') ?? 0)}</b> stopped / failed</span>
+			<span class="header-stat"><b>{total.toLocaleString()}</b> containers recorded</span>
+			{#if dockerInfo?.images != null}<span class="header-stat" title="Images on the apps daemon"><b>{dockerInfo.images}</b> images</span>{/if}
+			{#if dockerInfo?.version}<span class="header-stat">Docker <b>{dockerInfo.version}</b></span>{/if}
+			{#if total > LIMIT}<span class="header-stat text-muted-foreground">(newest {LIMIT} listed)</span>{/if}
+		</div>
 	</PageHeader>
 
-	<!-- Daemon status and the filter share one toolbar line. -->
-	<div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-		<label for="runtime-status-filter" class="sr-only">Filter by status</label>
-		<select id="runtime-status-filter" bind:value={statusFilter} class="std-select">
-			<option value="all">All statuses</option>
-			<option value="pending">Pending</option>
-			<option value="building">Building</option>
-			<option value="running">Running</option>
-			<option value="stopped">Stopped</option>
-			<option value="failed">Failed</option>
-			<option value="removed">Removed</option>
-		</select>
-		{#if dockerInfo}
-			{#if dockerInfo.daemon_available}
-				<StatusBadge status="healthy" label="Docker daemon online" />
-				{#if dockerInfo.version}
-					<span class="font-mono text-xs text-muted-foreground">v{dockerInfo.version}</span>
+	{#if error}<ErrorAlert message={error} onretry={load} />{/if}
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<div class="tb-bar" role="search" aria-label="Search and filter containers">
+			<div class="tb-search">
+				<Search class="tb-search-icon" aria-hidden="true" />
+				<input type="search" placeholder="Search container or image…" aria-label="Search containers" bind:value={query} autocomplete="off" />
+			</div>
+			<div class="tb-menus">
+				<FilterMenu label="Status" icon={Flag} value={statusFilter} options={statusOptions} onChange={(v) => (statusFilter = v as ContainerStatus | '')} anyLabel="Live (not removed)" />
+				<button
+					type="button"
+					class="fm-trigger {showRemoved ? 'fm-trigger-on' : ''}"
+					aria-pressed={showRemoved}
+					disabled={!!statusFilter}
+					onclick={() => (showRemoved = !showRemoved)}
+					title="Removed containers are kept as history"
+				>
+					<Archive class="size-3.5" aria-hidden="true" />Include removed <span class="font-mono text-[11px] opacity-70">{removedCount}</span>
+				</button>
+				{#if statusFilter || query}
+					<button type="button" class="fm-trigger" onclick={() => { statusFilter = ''; query = ''; }}><X class="size-3" />Clear</button>
 				{/if}
-			{:else}
-				<StatusBadge status="unhealthy" label="Docker daemon unavailable" />
-			{/if}
-		{/if}
-		<span class="ml-auto font-mono text-xs text-muted-foreground tabular-nums">
-			{total} container{total === 1 ? '' : 's'}
-			{#if dockerInfo?.containers_running != null}
-				· daemon: {dockerInfo.containers_running} running · {dockerInfo.containers_stopped ?? 0} stopped · {dockerInfo.images ?? 0} images
-			{/if}
-		</span>
-	</div>
-
-	{#if loading}
+			</div>
+		</div>
+	{#if loading && containers.length === 0}
 		<LoadingState label="loading containers" />
-	{:else if error}
-		<ErrorAlert message={error} onretry={load} />
-	{:else if containers.length === 0}
+	{:else if shown.length === 0}
 		<EmptyState
+			compact
 			icon={Layers}
-			title="No containers found"
-			description="Containers are created automatically when generation jobs run."
+			title={containers.length ? 'No container matches' : 'No containers found'}
+			description={containers.length
+				? removedCount && !showRemoved && !statusFilter
+					? `No live container. ${removedCount} removed ones are hidden.`
+					: 'Change or clear the filters.'
+				: 'Containers are created automatically when samples are built and tested.'}
 		/>
 	{:else}
-		<Card.Root class="gap-0 overflow-clip py-0">
+		<TableToolbar>
+			{#snippet summary()}{shown.length} of {containers.length}{/snippet}
+		</TableToolbar>
 			<div class="table-frame" {@attach tableFrame}>
 				<table>
 					<thead>
@@ -144,7 +196,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each containers as c (c.id)}
+						{#each shown as c (c.id)}
 							{@const href = `/runtime/${c.id}`}
 							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
 							<tr class="row-link" onclick={rowLink(href)}>
@@ -155,7 +207,7 @@
 									{/if}
 								</td>
 								<td class="whitespace-nowrap"><StatusBadge status={c.status} tones={containerTones} /></td>
-								<td class="max-w-[22rem] truncate font-mono text-xs text-muted-foreground" title={c.image}>{c.image || '—'}</td>
+								<td class="max-w-[22rem] truncate font-mono text-xs text-muted-foreground" title={c.image}>{c.image ? shortImage(c.image) : '—'}</td>
 								<td class="num text-xs">
 									{#if c.app_url}
 										<a href={c.app_url} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">:{c.app_port}</a>
@@ -191,8 +243,8 @@
 					</tbody>
 				</table>
 			</div>
-		</Card.Root>
 	{/if}
+	</Card.Root>
 </div>
 
 <ConfirmDialog

@@ -1,0 +1,7 @@
+server.port=${PORT:{{ run.port }}}
+server.address=0.0.0.0
+spring.main.banner-mode=off
+{% if has_frontend %}
+# frontend/dist is served by app.FrontendConfig (with the fallback to index.html for client-side routes).
+spring.web.resources.add-mappings=false
+{% endif %}

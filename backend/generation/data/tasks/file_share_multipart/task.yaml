@@ -1,0 +1,227 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: File share
+summary: Upload files with multipart forms, download them and share them through unguessable links.
+category: file-sharing
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: StoredFile
+  fields:
+  - {name: file, type: file, required: true}
+  - {name: description, type: string, max_length: 300}
+  - {name: filename, type: string}
+  - {name: size_bytes, type: int}
+  - {name: content_type, type: string}
+  - {name: uploaded_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: files.upload
+  method: POST
+  path: /api/files
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      file: {type: string, format: binary}
+      description: {type: string, maxLength: 300}
+    required: [file]
+  response_schema:
+    type: object
+    required: [id, download_url]
+    properties:
+      id:
+        type: [integer, string]
+      description:
+        type: [string, 'null']
+        maxLength: 300
+      filename:
+        type: [string, 'null']
+      size_bytes:
+        type: [integer, 'null']
+      content_type:
+        type: [string, 'null']
+      uploaded_at:
+        type: [string, 'null']
+        format: date-time
+      download_url: {type: string}
+  content_type: multipart
+  errors: [400, 413]
+  tags: [upload]
+- id: files.list
+  method: GET
+  path: /api/files
+  auth: user
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, download_url]
+          properties:
+            id:
+              type: [integer, string]
+            description:
+              type: [string, 'null']
+              maxLength: 300
+            filename:
+              type: [string, 'null']
+            size_bytes:
+              type: [integer, 'null']
+            content_type:
+              type: [string, 'null']
+            uploaded_at:
+              type: [string, 'null']
+              format: date-time
+            download_url: {type: string}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: files.get
+  method: GET
+  path: /api/files/{id}
+  auth: owner
+  owner_entity: StoredFile
+  response_schema:
+    type: object
+    required: [id, download_url]
+    properties:
+      id:
+        type: [integer, string]
+      description:
+        type: [string, 'null']
+        maxLength: 300
+      filename:
+        type: [string, 'null']
+      size_bytes:
+        type: [integer, 'null']
+      content_type:
+        type: [string, 'null']
+      uploaded_at:
+        type: [string, 'null']
+        format: date-time
+      download_url: {type: string}
+  errors: [404]
+- id: files.download
+  method: GET
+  path: /api/files/{id}/download
+  auth: owner
+  owner_entity: StoredFile
+  content_type: none
+  errors: [404]
+  tags: [download]
+- id: files.delete
+  method: DELETE
+  path: /api/files/{id}
+  auth: owner
+  owner_entity: StoredFile
+  success_status: 204
+  errors: [404]
+- id: shares.create
+  method: POST
+  path: /api/files/{id}/shares
+  auth: owner
+  owner_entity: StoredFile
+  success_status: 201
+  response_schema:
+    type: object
+    properties:
+      token: {type: string}
+      url: {type: string}
+    required: [token, url]
+  errors: [404]
+- id: shares.delete
+  method: DELETE
+  path: /api/files/{id}/shares/{token}
+  auth: owner
+  owner_entity: StoredFile
+  success_status: 204
+  errors: [404]
+- id: shared.download
+  method: GET
+  path: /api/shared/{token}
+  auth: public
+  content_type: none
+  errors: [404]
+  tags: [download]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.upload
+  text: An upload area with a file picker or drag and drop, an optional description and a progress bar; rejected
+    uploads show the API's message.
+  endpoints: [files.upload]
+- id: ui.list
+  text: The user's files with name, size, type and date, download and delete buttons (delete with confirmation)
+    and paging.
+  endpoints: [files.list, files.download, files.delete]
+- id: ui.share
+  text: A 'Share' action that creates a link with a copy button and lists the file's links with a revoke button.
+  endpoints: [shares.create, shares.delete]
+features: [auth, ownership, upload-multipart, download]
+surfaces: [cwe-22, cwe-434, cwe-73, cwe-639, cwe-862, cwe-400, cwe-113, cwe-330, cwe-79]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: shares.revoked
+  category: functional
+  endpoint: shared.download
+  actor: anon
+  setup:
+  - request:
+      method: POST
+      path: /api/files
+      files:
+        file: {filename: a.txt, content: hello, content_type: text/plain}
+    actor: user_a
+    expect_status: 201
+    capture: {fid: $.id}
+  - request: {method: POST, path: '/api/files/{fid}/shares'}
+    actor: user_a
+    expect_status: 201
+    capture: {tok: $.token}
+  - request: {method: DELETE, path: '/api/files/{fid}/shares/{tok}'}
+    actor: user_a
+    expect_status: 204
+  request: {method: GET, path: '/api/shared/{tok}'}
+  expect: {status: 404}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.files.traversal
+  cwe: cwe-22
+  kind: path_traversal
+  endpoint: files.upload
+  params: {field: file}
+- {id: probe.files.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: files.download}

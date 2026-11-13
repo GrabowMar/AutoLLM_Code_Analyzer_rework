@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-mass_assignment",
+      "cwe": "cwe-915",
+      "kind": "mass_assignment",
+      "status": "exploited",
+      "evidence": "fixture"
+    },
+    {
+      "id": "p-other",
+      "cwe": "cwe-611",
+      "kind": "xxe",
+      "status": "not_exploited"
+    }
+  ]
+}

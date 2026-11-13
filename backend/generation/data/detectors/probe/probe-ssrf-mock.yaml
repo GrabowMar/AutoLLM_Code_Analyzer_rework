@@ -1,0 +1,11 @@
+name: Server-side request forgery probe exploited
+description: Maps the evaluation's ssrf_mock probes (CWE-918) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:ssrf_mock'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-ssrf-mock
+  polarity: insecure
+  cwe: [cwe-918]
+  description: A ssrf_mock probe was exploited against the assembled app.

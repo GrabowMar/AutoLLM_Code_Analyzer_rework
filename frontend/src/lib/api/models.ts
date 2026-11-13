@@ -32,6 +32,18 @@ export interface LLMModelSummary {
   is_local?: boolean;
   /** False once the endpoint stopped listing the model (only with `include_unavailable`). */
   is_available?: boolean;
+  // Facts for the optional table columns (catalog / models.dev / Hugging Face / Epoch); may be empty.
+  /** ISO date the model was released / listed. */
+  released_at?: string | null;
+  open_weights?: boolean | null;
+  tokenizer?: string;
+  /** e.g. ["text", "image", "file"]. */
+  input_modalities?: string[];
+  parameters?: number | null;
+  /** "huggingface" (exact, from the weights) | "epoch" (reported) | "". */
+  parameters_source?: string;
+  /** External research data attached: "lmarena" | "epoch" | "huggingface". */
+  research_data?: string[];
 }
 
 /** `?endpoint=` filter of the models list: an endpoint slug, or every local / OpenRouter row. */
@@ -168,6 +180,18 @@ export async function getModels(
     endpoint?: ModelEndpointFilter;
     /** Also list hidden and unavailable local models. */
     include_unavailable?: boolean;
+    /** Input modalities beyond text, comma list (all must hold): image, file, audio, video. */
+    modality?: string;
+    /** "open" | "closed" per models.dev. */
+    weights?: string;
+    /** "30d" | "90d" | "180d" | "365d" | "older" (catalog release time). */
+    released?: string;
+    tokenizer?: string;
+    max_output_range?: string;
+    /** External research data, comma list (all must hold): epoch, lmarena, huggingface. */
+    coverage?: string;
+    /** Drop "(batch)" price variants and router pseudo-models. */
+    hide_variants?: boolean;
   } = {},
 ): Promise<PaginatedModels> {
   const q = new URLSearchParams();
@@ -184,6 +208,17 @@ export async function getModels(
   if (params.used_in_apps) q.set("used_in_apps", "true");
   if (params.endpoint) q.set("endpoint", params.endpoint);
   if (params.include_unavailable) q.set("include_unavailable", "1");
+  for (const key of [
+    "modality",
+    "weights",
+    "released",
+    "tokenizer",
+    "max_output_range",
+    "coverage",
+  ] as const) {
+    if (params[key]) q.set(key, params[key]!);
+  }
+  if (params.hide_variants) q.set("hide_variants", "true");
   const qs = q.toString();
   const res = await apiFetch(`/models/${qs ? "?" + qs : ""}`);
   return res.json();
@@ -195,6 +230,21 @@ export function getModelsExportUrl(format: "csv" | "json" = "csv"): string {
 
 export async function getModelsStats(): Promise<ModelsStats> {
   const res = await apiFetch("/models/stats/");
+  return res.json();
+}
+
+export interface FacetValue {
+  value: string;
+  count: number;
+}
+export interface ModelFacets {
+  providers: FacetValue[];
+  tokenizers: FacetValue[];
+}
+
+/** Filter values with model counts (providers, tokenizer families). */
+export async function getModelFacets(): Promise<ModelFacets> {
+  const res = await apiFetch("/models/facets/");
   return res.json();
 }
 
@@ -276,9 +326,10 @@ export interface CatalogPercentile {
 
 export interface ModelInsights {
   generation: {
-    jobs_total: number;
+    runs_total: number;
     by_status: Record<string, number>;
-    by_mode: Record<string, number>;
+    /** Run kinds (app_agentic, slot_single_shot, ...). */
+    by_kind: Record<string, number>;
     completed: number;
     success: RateWithCI;
     functional: RateWithCI & {
@@ -300,30 +351,28 @@ export interface ModelInsights {
       mean_lines_of_code: number | null;
       median_output_tps: number | null;
     };
-    repair_rate: number | null;
-    continuations_used: number;
-    engines: Record<string, number>;
+    harnesses: Record<string, number>;
     providers: Record<string, number>;
     terminations: Record<string, number>;
-    first_job_at: string | null;
-    last_job_at: string | null;
+    first_run_at: string | null;
+    last_run_at: string | null;
   };
-  templates: {
+  tasks: {
     slug: string;
     name: string;
-    jobs: number;
+    runs: number;
     completed: number;
     functional: RateWithCI;
   }[];
-  experiments: {
+  studies: {
     id: string;
     name: string;
     status: string;
-    jobs: number;
+    runs: number;
     created_at: string;
   }[];
   analysis: {
-    analyzed_jobs: number;
+    analyzed_runs: number;
     /** Code findings of the static tools (dependency advisories apart), by normalized level. */
     findings_static: NormalizedCounts;
     findings_ai: NormalizedCounts;
@@ -352,20 +401,29 @@ export interface ModelInsights {
     }[];
   };
   ranking: {
+    /** MSS v2 (0–1); null when the input is missing, never 0. `coverage` is the share of MSS weight present. */
     scores: Record<
-      | "composite_score"
-      | "mss_score"
-      | "empirical_quality_score"
-      | "benchmark_score"
-      | "cost_efficiency_score"
-      | "accessibility_score"
-      | "adoption_score",
+      | "composite"
+      | "mss"
+      | "empirical"
+      | "popularity"
+      | "price"
+      | "capability"
+      | "recency"
+      | "coverage",
       number | null
     >;
+    /** MSS and capability positions are among eligible models; empirical among measured ones. */
     positions: Record<
-      "composite" | "mss" | "empirical" | "benchmark",
+      "composite" | "mss" | "empirical" | "capability",
       RankPosition | null
     >;
+    canonical_id: string | null;
+    eligible: boolean | null;
+    /** Why the model is outside the eligible frame (frame step + reason code). */
+    exclusion: { step: string; code: string; detail?: string | null } | null;
+    /** Set when the scores are the canonical model's (a route copy or dated member). */
+    inherited_from: string | null;
     /** Spread over apps: repeats are averaged per (condition, app) first; `n_apps` units, `n_jobs` runs. */
     variance: {
       n_jobs: number;
@@ -390,14 +448,6 @@ export interface ModelInsights {
     catalog_size: number;
     provider_models: number;
   };
-  benchmarks: {
-    benchmark: string;
-    score: number;
-    source: string;
-    fetched_at: string;
-    percentile: number | null;
-    n: number;
-  }[];
 }
 
 export interface ProviderEndpoint {

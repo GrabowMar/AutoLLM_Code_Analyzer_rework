@@ -1,0 +1,21 @@
+name: SQL built with a template literal or concatenation (JS/TS)
+description: A database query() / execute() call receives a string built with an interpolated template literal or by concatenation.
+content:
+  engine: semgrep
+  languages: [javascript, typescript]
+  rule: |
+    rules:
+      - id: js-sql-concat
+        languages: [javascript, typescript]
+        severity: WARNING
+        message: SQL query built from string concatenation
+        pattern-either:
+          - pattern: $DB.query("..." + $X, ...)
+          - pattern: $DB.query(`...${$X}...`, ...)
+          - pattern: $DB.execute("..." + $X, ...)
+          - pattern: $DB.execute(`...${$X}...`, ...)
+  tool: {name: semgrep, version: 1.x}
+  feature_key: js-sql-template-literal
+  polarity: insecure
+  cwe: [cwe-89]
+  description: query()/execute() receives SQL built from concatenation or interpolation.

@@ -9,8 +9,11 @@ from backend.analysis.models import Finding
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models.choices import RunStatus
+from backend.generation.runs.view import source_loc
+from backend.generation.tests.factories import GenerationRunFactory
+from backend.generation.tests.factories import RunFileFactory
+from backend.generation.tests.factories import StudyFactory
 from backend.llm_models.services.insights import model_insights
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
@@ -18,28 +21,58 @@ from backend.users.tests.factories import UserFactory
 pytestmark = pytest.mark.django_db
 
 
-def _job(user, model, **kw):
-    return GenerationJobFactory(created_by=user, model=model, status=GenerationJob.Status.COMPLETED, **kw)
+def _job(user, model, *, files=None, **kw):
+    run = GenerationRunFactory(created_by=user, model=model, tested=True, **kw)
+    for path, text in (files or {}).items():
+        RunFileFactory(run=run, path=path, loc=source_loc(path, text), size=len(text))
+    return run
 
 
-def test_lines_of_code_are_source_loc_not_every_generated_line():
+def test_lines_of_code_are_source_loc_of_the_model_scope():
     user = UserFactory()
     model = LLMModelFactory()
     files = {"app.py": "x = 1\n" * 100, "frontend/package-lock.json": "{}\n" * 5000}
-    _job(user, model, result_data={"files": files}, metrics={"cost": 0.5, "lines_of_code": 5100})
-    # A legacy job without stored code keeps the generation-time count.
-    _job(user, model, result_data={}, metrics={"cost": 0.5, "lines_of_code": 300})
+    run = _job(user, model, files=files, metrics={"cost_usd": 0.5})
+    # Starter files are not the model's code.
+    RunFileFactory(run=run, path="starter/server.py", origin="starter", loc=4000)
+    # The documented bulk key wins when the run recorded it.
+    _job(user, model, metrics={"cost_usd": 0.5, "loc_model": 300})
+    # A run without a collected tree has unknown LOC: left out, never 0.
+    _job(user, model, metrics={"cost_usd": 0.5}, tree_hash="")
 
     resources = model_insights(model, user)["generation"]["resources"]
 
     assert resources["mean_lines_of_code"] == pytest.approx(200.0)
     assert resources["cost_per_kloc"] == pytest.approx(1.0 / 400 * 1000)
+    assert resources["total_cost"] == pytest.approx(1.5)
+
+
+def test_runs_report_kinds_outcomes_studies_and_tasks():
+    user = UserFactory()
+    model = LLMModelFactory()
+    study = StudyFactory(created_by=user, name="Harness study")
+    run = _job(user, model, study=study)
+    GenerationRunFactory(created_by=user, model=model, status=RunStatus.FAILED, outcome="infra_error", usable=False)
+    # Runs beyond a study's plan are never counted.
+    _job(user, model, study=study, beyond_plan=True)
+
+    data = model_insights(model, user)
+
+    assert data["generation"]["runs_total"] == 2
+    assert data["generation"]["by_kind"] == {"app_agentic": 2}
+    assert data["generation"]["by_outcome"] == {"tested": 1, "infra_error": 1}
+    # v2 shapes are gone: no repair/continuation keys, no `experiments`/`templates`.
+    assert not {"repair_rate", "continuations_used", "jobs_total", "by_mode", "engines"} & data["generation"].keys()
+    assert not {"experiments", "templates"} & data.keys()
+    assert [(s["name"], s["runs"]) for s in data["studies"]] == [("Harness study", 1)]
+    slugs = {t["slug"] for t in data["tasks"]}
+    assert run.task_version.task.slug in slugs
 
 
 def test_top_rules_are_one_row_per_rule_with_the_tools_labels():
     user = UserFactory()
     model = LLMModelFactory()
-    job = _job(user, model, result_data={"files": {"app.py": "x = 1\n"}})
+    job = _job(user, model, files={"app.py": "x = 1\n"})
     run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
     semgrep = ToolResultFactory(run=run, tool_slug="semgrep")
     ruff = ToolResultFactory(run=run, tool_slug="ruff", category="lint")
@@ -73,7 +106,7 @@ def test_unrated_findings_are_not_counted_under_a_normalized_level():
     AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
     user = UserFactory()
     model = LLMModelFactory()
-    job = _job(user, model, result_data={"files": {"app.py": "x = 1\n"}})
+    job = _job(user, model, files={"app.py": "x = 1\n"})
     run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
     bandit = ToolResultFactory(run=run, tool_slug="bandit")
     jscpd = ToolResultFactory(run=run, tool_slug="jscpd", category="quality")
@@ -97,7 +130,7 @@ def test_unrated_findings_are_not_counted_under_a_normalized_level():
 def test_dependency_advisories_are_counted_apart_from_code_findings():
     user = UserFactory()
     model = LLMModelFactory()
-    job = _job(user, model, result_data={"files": {"app.py": "x = 1\n"}})
+    job = _job(user, model, files={"app.py": "x = 1\n"})
     run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
     audit = ToolResultFactory(run=run, tool_slug="pip-audit", category="dependency")
     deptry = ToolResultFactory(run=run, tool_slug="deptry", category="dependency")

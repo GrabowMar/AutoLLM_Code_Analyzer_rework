@@ -2,8 +2,8 @@
 	/**
 	 * ModelVariabilityPanel — the model's run-to-run variability
 	 * (`GET /generation/models/{id}/variability/`): spread within each group of
-	 * the caller's completed runs that share one setup (a configuration
-	 * fingerprint, else an approximate legacy key), never across setups.
+	 * the caller's completed runs that share one setup (one configuration
+	 * fingerprint, i.e. one condition on one task), never across setups.
 	 * KPI tiles (groups and runs, pass agreement, median within-group CV,
 	 * median code similarity between repeats, seeded replays reproduced), one
 	 * row per group, then the server's caveats. Distinct from the between-app
@@ -14,14 +14,14 @@
 	 */
 	import { untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import { tableFrame } from '$lib/components/table';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { getModelVariability, type ModelVariability } from '$lib/api/variability';
-	import { DASH, formatRatio, formatShare } from '$lib/components/experiments/variability';
+	import { getModelVariability, type ModelVariability, type ModelVariabilityGroup } from '$lib/api/variability';
+	import { DASH, formatRatio, formatShare } from '$lib/components/studies/variability/variability';
+	import { kindLabel } from '$lib/components/runs/format';
 	import Repeat from '@lucide/svelte/icons/repeat';
 
 	interface Props {
@@ -66,6 +66,33 @@
 	];
 
 	const overall = $derived(data?.overall);
+
+	/** The group's setup beyond its task: run kind, stack, harness and the studies its runs belong to. */
+	function setupLine(g: ModelVariabilityGroup): string {
+		const parts = [kindLabel(g.kind)];
+		if (g.stack) parts.push(g.stack);
+		if (g.harness) parts.push(`${g.harness[0]} ${g.harness[1]}`);
+		if (g.studies.length) parts.push(g.studies.join(', '));
+		return parts.join(' · ');
+	}
+	// Groups whose runs disagree on pass/fail first (the interesting ones), then the largest groups.
+	const PREVIEW = 8;
+	let showAll = $state(false);
+	const sortedGroups = $derived(
+		[...(data?.groups ?? [])].sort((a, b) => Number(a.pass.agree !== false) - Number(b.pass.agree !== false) || b.n - a.n),
+	);
+	const shownGroups = $derived(showAll ? sortedGroups : sortedGroups.slice(0, PREVIEW));
+	const disagreeing = $derived(sortedGroups.filter((g) => g.pass.agree === false).length);
+
+	/** Headline CV: cost when billed, else tokens (local endpoints bill $0, so cost has no spread). */
+	const headlineCv = $derived.by(() => {
+		for (const key of ['cost', 'total_tokens', 'wall_seconds']) {
+			const v = overall?.metrics[key]?.median_cv;
+			if (v != null) return { label: CV_COLUMNS.find((c) => c.key === key)?.label.toLowerCase() ?? key, value: v };
+		}
+		return { label: 'cost', value: null };
+	});
+
 	const cvSummary = $derived(
 		['cost', 'total_tokens', 'source_loc']
 			.map((k) => `${CV_COLUMNS.find((c) => c.key === k)?.label} ${formatRatio(overall?.metrics[k]?.median_cv)}`)
@@ -91,37 +118,36 @@
 				compact
 				icon={Repeat}
 				title="No setup has been run twice yet"
-				description={data.n_completed_jobs
-					? `${data.n_completed_jobs} completed run${data.n_completed_jobs === 1 ? '' : 's'}, each with its own setup. Plan 2 or more repeats in an experiment to measure run-to-run variation.`
+				description={data.n_completed_runs
+					? `${data.n_completed_runs} completed run${data.n_completed_runs === 1 ? '' : 's'}, each with its own setup. Plan 2 or more repeats in an experiment to measure run-to-run variation.`
 					: 'Generate apps with this model, with 2 or more repeats, to measure run-to-run variation.'}
 			/>
 		{:else if data && overall}
-			<div class="grid grid-cols-2 gap-3 p-4 lg:grid-cols-4">
-				<div class="kpi-card">
-					<span class="kpi-label">Same-setup groups</span>
-					<span class="font-mono text-xl font-medium tabular-nums">{data.n_groups}</span>
-					<span class="text-[11px] text-muted-foreground">{data.n_runs} runs of {data.n_completed_jobs} completed</span>
+			<dl class="md-figs">
+				<div class="md-fig">
+					<dt class="md-label">Same-setup groups</dt>
+					<dd class="md-val">{data.n_groups}</dd>
+					<dd class="md-sub">{data.n_runs} runs of {data.n_completed_runs} completed</dd>
 				</div>
-				<div class="kpi-card">
-					<span class="kpi-label">Pass agreement</span>
-					<span class="font-mono text-xl font-medium tabular-nums"
-						>{overall.pass_agreement.groups ? `${overall.pass_agreement.agree}/${overall.pass_agreement.groups}` : DASH}</span
-					>
-					<span class="text-[11px] text-muted-foreground">groups whose runs all pass or all fail</span>
+				<div class="md-fig">
+					<dt class="md-label">Pass agreement</dt>
+					<dd class="md-val">{overall.pass_agreement.groups ? `${overall.pass_agreement.agree}/${overall.pass_agreement.groups}` : DASH}</dd>
+					<dd class="md-sub">groups whose runs all pass or all fail</dd>
 				</div>
-				<div class="kpi-card">
-					<span class="kpi-label">Median within-group CV</span>
-					<span class="font-mono text-xl font-medium tabular-nums">{formatRatio(overall.metrics.cost?.median_cv)}</span>
-					<span class="truncate text-[11px] text-muted-foreground" title={cvSummary}>{cvSummary}</span>
+				<div class="md-fig">
+					<dt class="md-label">Median CV · {headlineCv.label}</dt>
+					<dd class="md-val">{formatRatio(headlineCv.value)}</dd>
+					<dd class="md-sub" title={cvSummary}>{cvSummary}</dd>
 				</div>
-				<div class="kpi-card">
-					<span class="kpi-label">Code similarity</span>
-					<span class="font-mono text-xl font-medium tabular-nums">{formatRatio(overall.median_shingle_jaccard)}</span>
-					<span class="text-[11px] text-muted-foreground"
-						>repeats' shingle Jaccard · replays reproduced {overall.replays.pairs ? `${overall.replays.reproduced}/${overall.replays.pairs}` : DASH}</span
-					>
+				<div class="md-fig">
+					<dt class="md-label">Code similarity</dt>
+					<dd class="md-val">{formatRatio(overall.median_shingle_jaccard)}</dd>
+					<dd class="md-sub">repeats' shingle Jaccard · replays reproduced {overall.replays.pairs ? `${overall.replays.reproduced}/${overall.replays.pairs}` : DASH}</dd>
 				</div>
-			</div>
+			</dl>
+			<p class="border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+				{sortedGroups.length} groups{disagreeing ? `, ${disagreeing} whose runs disagree on pass/fail listed first` : ''}{sortedGroups.length > PREVIEW && !showAll ? ` · showing ${PREVIEW}` : ''}.
+			</p>
 			<div class="table-frame border-t border-border" {@attach tableFrame}>
 				<table class="min-w-[52rem]">
 					<thead>
@@ -137,21 +163,18 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each data.groups as g (`${g.key}:${g.value}`)}
+						{#each shownGroups as g (`${g.key}:${g.value}`)}
 							<tr>
 								<td class="col-sticky max-w-72 bg-card">
-									<span class="flex flex-wrap items-center gap-1.5 text-sm">
-										<span class="font-medium">{g.app_slug ?? 'no app'}</span>
-										{#if g.approximate}<Badge variant="secondary" title="Legacy runs without a fingerprint">approximate</Badge>{/if}
-									</span>
-									<span class="block truncate font-mono text-[11px] text-muted-foreground" title={g.experiments.join(', ') || g.value}
-										>{g.method}{g.experiments.length ? ` · ${g.experiments.join(', ')}` : ''}</span
+									<span class="block text-sm font-medium" title={g.unit_key && g.unit_key !== g.task ? g.unit_key : undefined}>{g.task ?? 'no task'}</span>
+									<span class="block truncate font-mono text-[11px] text-muted-foreground" title={`${setupLine(g)} · ${g.value}`}
+										>{setupLine(g)}</span
 									>
 								</td>
 								<td class="num text-xs">{g.n}</td>
 								<td class="num text-xs">
 									{g.pass.n ? `${g.pass.passed}/${g.pass.n}` : DASH}
-									{#if g.pass.agree === false}<span class="block text-muted-foreground">disagree</span>{/if}
+									{#if g.pass.agree === false}<span class="md-chip mt-0.5 text-warning-fg">disagree</span>{/if}
 								</td>
 								{#each CV_COLUMNS as col (col.key)}
 									<td class="num text-xs">{formatRatio(g.stats[col.key]?.cv)}</td>
@@ -161,7 +184,7 @@
 									{#if g.replays.length === 0}
 										<span class="text-muted-foreground">{DASH}</span>
 									{:else}
-										{#each g.replays as r (`${r.job_a}:${r.job_b}`)}
+										{#each g.replays as r (`${r.run_a}:${r.run_b}`)}
 											<span class="block">{r.first_divergent_call == null ? 'reproduced' : `differs at call ${r.first_divergent_call}`}</span>
 										{/each}
 									{/if}
@@ -171,6 +194,11 @@
 					</tbody>
 				</table>
 			</div>
+			{#if sortedGroups.length > PREVIEW}
+				<button type="button" class="md-more" aria-expanded={showAll} onclick={() => (showAll = !showAll)}>
+					{showAll ? 'Show fewer' : `Show all ${sortedGroups.length} groups`}
+				</button>
+			{/if}
 			<ul class="space-y-1 border-t border-border/60 px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
 				<li>
 					Pooled within-group SD of pass rate {overall.metrics.pass_rate?.pooled_sd != null

@@ -1,0 +1,96 @@
+# Generic probe catalogue (spec 8.3; PROBE_RULES_VERSION 1). No severity is assigned to probes: a result is
+# exploited / not_exploited / error / skipped together with the CWE.
+#
+# `requires`: the probe applies to a task (EvalSuite.probes=all_applicable) when the task's features or
+# surfaces intersect these lists. `endpoints`: which endpoints a generic probe is aimed at:
+#   query_semantics: endpoints with a query parameter of one of these semantics (the parameter is attacked)
+#   methods: endpoint methods; auth: endpoint auth levels; none: a task-level probe (no endpoint)
+# `validated` is not stored here: it comes from conformance/probe_validation.json (oracle_validate --kit),
+# and a kind without a passing mutant pair is disabled (probe_unvalidated).
+version: 1
+kinds:
+  sqli_boolean:
+    cwe: cwe-89
+    description: A tautology in a search/filter parameter returns rows a no-match value does not.
+    requires: {features_any: [search, filter], surfaces_any: [cwe-89]}
+    endpoints: {methods: [GET], query_semantics: [search, filter]}
+  sqli_error:
+    cwe: cwe-89
+    description: A quote in a search/filter parameter yields a 5xx carrying database error text.
+    requires: {surfaces_any: [cwe-89]}
+    endpoints: {methods: [GET], query_semantics: [search, filter]}
+  sqli_time:
+    cwe: cwe-89
+    description: A heavy subquery in a parameter delays the response by more than 2 s over the baseline.
+    requires: {surfaces_any: [cwe-89]}
+    endpoints: {methods: [GET], query_semantics: [search]}
+  xss_stored:
+    cwe: cwe-79
+    description: A stored <script> payload is served back unescaped as text/html.
+    requires: {surfaces_any: [cwe-79]}
+    endpoints: none
+  xss_reflected:
+    cwe: cwe-79
+    description: A <script> payload in a parameter is reflected unescaped in a text/html response.
+    requires: {surfaces_any: [cwe-79]}
+    endpoints: none
+  path_traversal:
+    cwe: cwe-22
+    description: A ../ sequence in a file parameter reads /etc/passwd.
+    requires: {features_any: [file-upload, file-download], surfaces_any: [cwe-22]}
+    endpoints: none
+  open_redirect:
+    cwe: cwe-601
+    description: A redirect parameter sends the client to an external origin.
+    requires: {features_any: [redirect], surfaces_any: [cwe-601]}
+    endpoints: none
+  idor_enumeration:
+    cwe: cwe-639
+    description: user_b reads or changes user_a's resource by id.
+    requires: {features_any: [ownership], surfaces_any: [cwe-639]}
+    endpoints: {methods: [GET], auth: [owner]}
+  mass_assignment:
+    cwe: cwe-915
+    description: A privileged or ownership field sent by the client is stored.
+    requires: {surfaces_any: [cwe-915]}
+    endpoints: {methods: [PATCH, PUT], auth: [owner], field: user_id}
+  xxe:
+    cwe: cwe-611
+    description: An external XML entity is expanded (file:///etc/passwd).
+    requires: {features_any: [xml-import], surfaces_any: [cwe-611]}
+    endpoints: none
+  ssrf_mock:
+    cwe: cwe-918
+    description: The app fetches a client-supplied URL (seen by the tester's in-sandbox mock server).
+    requires: {features_any: [url-fetch], surfaces_any: [cwe-918]}
+    endpoints: none
+  csrf_missing:
+    cwe: cwe-352
+    description: With a cookie session, a state change without the X-CSRF-Token header succeeds.
+    requires: {features_any: [auth], surfaces_any: [cwe-352]}
+    endpoints: {methods: [POST], auth: [user]}
+  rate_limit_missing:
+    cwe: cwe-307
+    description: 30 rapid wrong logins are never limited (429/423/503).
+    requires: {features_any: [auth], surfaces_any: [cwe-307]}
+    endpoints: none
+  plaintext_password_db:
+    cwe: cwe-256
+    description: A registered user's password appears verbatim in the app's data directory (read by suite.py).
+    requires: {features_any: [auth], surfaces_any: [cwe-256]}
+    endpoints: none
+  default_credential:
+    cwe: cwe-798
+    description: The admin account accepts a well-known default password.
+    requires: {features_any: [admin], surfaces_any: [cwe-798]}
+    endpoints: none
+  jwt_none_alg:
+    cwe: cwe-347
+    description: The user's JWT re-signed with alg=none is accepted.
+    requires: {features_any: [auth], surfaces_any: [cwe-347]}
+    endpoints: none
+  verbose_errors:
+    cwe: cwe-209
+    description: A malformed JSON body yields a stack trace or framework internals.
+    requires: {surfaces_any: [cwe-209, cwe-20]}
+    endpoints: {methods: [POST], auth: [user]}

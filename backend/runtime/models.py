@@ -22,7 +22,7 @@ class ContainerInstance(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     generation_job = models.ForeignKey(
-        "generation.GenerationJob",
+        "generation.GenerationRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -243,110 +243,36 @@ class PortAllocation(models.Model):
         raise RuntimeError(msg)
 
 
-class Stack(models.Model):
-    """A runnable code skeleton (Dockerfile, deps, frontend shell) for scaffolding jobs.
+class SampleBuildArtifact(models.Model):
+    """One immutable image generation shared by a sample's evaluation and previews.
 
-    slug+version rows are immutable, mirroring ContentBlock/GenerationProfile:
-    job snapshots pin an exact version so historical runs keep provisioning the
-    skeleton they were generated against. Builtin rows are seeded from
-    ``runtime/scaffolding/manifest.json`` + the skeleton directories; the
-    seeder bumps the version when the on-disk content changes.
+    Refreshing creates another row rather than changing an image tag that an
+    existing container may still reference. The service serializes producers
+    for each build key; multiple generations of that key are intentional.
     """
 
-    class DockerfileMode(models.TextChoices):
-        # Dockerfile ships inside ``files`` (builtin stacks).
-        BUNDLED = "bundled", _("Bundled")
-        # Dockerfile is generated server-side from a pinned template
-        # (user-authored stacks; see Stage 6).
-        GENERATED = "generated", _("Generated")
-
-    slug = models.SlugField(_("slug"), max_length=100)
-    version = models.PositiveIntegerField(
-        _("version"),
-        default=1,
-        help_text="Versions are immutable: content changes create version+1",
-    )
-    name = models.CharField(_("name"), max_length=200, blank=True, default="")
-    description = models.TextField(_("description"), blank=True, default="")
-    is_builtin = models.BooleanField(_("builtin"), default=False)
-    is_archived = models.BooleanField(_("archived"), default=False)
-    is_approved = models.BooleanField(
-        _("approved"),
-        default=True,
-        help_text="Gate for user stacks when STACK_REQUIRE_APPROVAL is on",
-    )
-    created_by = models.ForeignKey(
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    build_key = models.CharField(max_length=64, db_index=True)
+    owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="stacks",
+        related_name="sample_build_artifacts",
     )
-
-    # Runtime config (mirrors the manifest entry shape)
-    has_frontend = models.BooleanField(_("has frontend"), default=False)
-    default_port = models.PositiveIntegerField(_("default port"), default=8000)
-    patch_profile = models.CharField(
-        _("patch profile"),
-        max_length=20,
-        choices=[("flask", "Flask"), ("none", "None")],
-        default="none",
-    )
-    frontend_component = models.CharField(_("frontend component"), max_length=100, blank=True, default="")
-    backend_filename = models.CharField(_("backend filename"), max_length=100, default="app.py")
-    aliases = models.JSONField(_("aliases"), default=list, blank=True)
-
-    # User-stack build config (generated dockerfile_mode only)
-    backend_base_image = models.CharField(
-        _("backend base image"),
-        max_length=100,
-        blank=True,
-        default="",
-        help_text="Must be in settings.STACK_ALLOWED_BASE_IMAGES['python']",
-    )
-    frontend_base_image = models.CharField(
-        _("frontend base image"),
-        max_length=100,
-        blank=True,
-        default="",
-        help_text="Must be in settings.STACK_ALLOWED_BASE_IMAGES['node']",
-    )
-    server_kind = models.CharField(
-        _("server kind"),
-        max_length=20,
-        choices=[("python", "python <backend_filename>"), ("uvicorn", "uvicorn app:app")],
-        default="python",
-        help_text="Constrained start command — user stacks cannot run arbitrary CMDs",
-    )
-
-    # Content
-    files = models.JSONField(
-        _("files"),
-        default=dict,
-        blank=True,
-        help_text="Skeleton tree as {relative_path: text}",
-    )
-    content_hash = models.CharField(_("content hash"), max_length=64, blank=True, default="")
-    dockerfile_mode = models.CharField(
-        _("dockerfile mode"),
-        max_length=20,
-        choices=DockerfileMode.choices,
-        default=DockerfileMode.BUNDLED,
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    image_tag = models.CharField(max_length=250, unique=True)
+    image_id = models.CharField(max_length=100)
+    image_bytes = models.PositiveBigIntegerField(default=0)
+    platform = models.CharField(max_length=80)
+    metadata = models.JSONField(default=dict, blank=True)
+    built_at = models.DateTimeField()
+    expires_at = models.DateTimeField(db_index=True)
+    last_used_at = models.DateTimeField(db_index=True)
+    # Covers the hand-off between returning an image and creating a container.
+    reserved_until = models.DateTimeField(db_index=True)
 
     class Meta:
-        verbose_name = _("Stack")
-        verbose_name_plural = _("Stacks")
-        ordering = ["slug", "-version"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["slug", "version"],
-                name="runtime_stack_slug_version_uniq",
-            ),
-        ]
+        ordering = ["-built_at"]
 
     def __str__(self) -> str:
-        return f"{self.slug} v{self.version}"
+        return self.image_tag

@@ -56,25 +56,30 @@ STUCK_PENDING_AFTER = timedelta(minutes=5)
 # ── event catalog ─────────────────────────────────────────────────────
 
 EVENT_TYPES: dict[str, str] = {
-    "generation.completed": "A generation job finished successfully.",
-    "generation.failed": "A generation job failed.",
-    "generation.cancelled": "A generation job was cancelled.",
+    "run.completed": "A generation run finished (its outcome may still be build_fail, start_fail, ...).",
+    "run.failed": "A generation run failed.",
+    "run.cancelled": "A generation run was cancelled.",
     "analysis.completed": "An analysis run finished (status completed, or partial when some tools failed).",
     "analysis.failed": "An analysis run failed (no tool completed).",
     "analysis.cancelled": "An analysis run was cancelled.",
-    "experiment.completed": "Every job of an experiment reached a terminal status.",
-    "experiment.cancelled": "An experiment was cancelled.",
+    "study.completed": "Every run of a study reached a terminal status.",
+    "study.stopped": "A study was stopped by one of its stop rules.",
+    "study.cancelled": "A study was cancelled.",
     "report.completed": "A report finished generating.",
     "report.failed": "A report failed to generate.",
 }
 TEST_EVENT = "test"
 
-# (app_label.ModelName) -> {status: event type}
+RUN_LABEL = "generation.GenerationRun"
+STUDY_LABEL = "generation.Study"
+
+# (app_label.ModelName) -> {status: event type}. Every key must resolve through ``apps.get_model``
+# (``signals.connect`` runs it in ``ready()``; a stale label breaks ``django.setup()``).
 _STATUS_EVENTS: dict[str, dict[str, str]] = {
-    "generation.GenerationJob": {
-        "completed": "generation.completed",
-        "failed": "generation.failed",
-        "cancelled": "generation.cancelled",
+    RUN_LABEL: {
+        "completed": "run.completed",
+        "failed": "run.failed",
+        "cancelled": "run.cancelled",
     },
     "analysis.AnalysisRun": {
         "completed": "analysis.completed",
@@ -82,9 +87,10 @@ _STATUS_EVENTS: dict[str, dict[str, str]] = {
         "failed": "analysis.failed",
         "cancelled": "analysis.cancelled",
     },
-    "generation.Experiment": {
-        "completed": "experiment.completed",
-        "cancelled": "experiment.cancelled",
+    STUDY_LABEL: {
+        "completed": "study.completed",
+        "stopped": "study.stopped",
+        "cancelled": "study.cancelled",
     },
     "reports.Report": {
         "completed": "report.completed",
@@ -93,9 +99,9 @@ _STATUS_EVENTS: dict[str, dict[str, str]] = {
 }
 # Time columns the sweep looks at, per model.
 _SWEEP_TIME_FIELDS: dict[str, tuple[str, ...]] = {
-    "generation.GenerationJob": ("completed_at", "updated_at"),
+    RUN_LABEL: ("completed_at", "updated_at"),
     "analysis.AnalysisRun": ("completed_at",),
-    "generation.Experiment": ("completed_at", "cancelled_at", "updated_at"),
+    STUDY_LABEL: ("completed_at", "cancelled_at", "updated_at"),
     "reports.Report": ("completed_at",),
 }
 
@@ -147,42 +153,52 @@ def _field(name: str, value: Any) -> dict[str, str] | None:
     return {"name": name, "value": str(value)[:300]}
 
 
-def _generation_payload(job) -> dict[str, Any]:
-    model = job.model
-    model_name = (model.model_name or model.model_id) if model else ""
-    app = job.app_requirement
-    title = (app.name if app else "") or (job.task_description or "").strip()[:80] or f"{job.get_mode_display()} job"
-    metrics = job.metrics if isinstance(job.metrics, dict) else {}
-    functional = metrics.get("functional") if isinstance(metrics.get("functional"), dict) else {}
+def _run_payload(run) -> dict[str, Any]:
+    from backend.generation.runs.view import run_view
+
+    view = run_view(run)
+    model_name = (run.model.model_name or run.model.model_id) if run.model_id else (view.model_slug or "")
+    task_title = view.task.title if view.task is not None else ""
+    title = task_title or f"{run.get_kind_display()} run {str(run.pk)[:8]}"
+    metrics = run.metrics if isinstance(run.metrics, dict) else {}
+    evaluation = metrics.get("eval") if isinstance(metrics.get("eval"), dict) else None
     data: dict[str, Any] = {
         "model": model_name,
-        "mode": job.mode,
-        "app": app.name if app else "",
-        "duration_seconds": job.duration_seconds,
-        "experiment_id": str(job.experiment_id) if job.experiment_id else None,
+        "kind": run.kind,
+        "task": view.task.ref if view.task is not None else None,
+        "outcome": run.outcome or None,
+        "usable": run.usable,
+        "duration_seconds": run.duration_seconds,
+        "study_id": view.study_id,
+        # The latest evaluation's status; a pass rate is only reported when it was measured.
+        "eval_status": evaluation.get("status") if evaluation else "not_measured",
     }
-    if isinstance(metrics.get("cost"), (int, float)):
-        data["cost_usd"] = round(float(metrics["cost"]), 4)
-    if isinstance(metrics.get("total_tokens"), int):
-        data["total_tokens"] = metrics["total_tokens"]
-    if isinstance(functional.get("pass_rate"), (int, float)):
-        data["pass_rate"] = functional["pass_rate"]
-    if job.error_message:
-        data["error"] = job.error_message[:500]
+    if isinstance(view.cost_usd, (int, float)):
+        data["cost_usd"] = round(float(view.cost_usd), 4)
+    if isinstance(view.total_tokens, int):
+        data["total_tokens"] = view.total_tokens
+    if evaluation and evaluation.get("measured") and isinstance(evaluation.get("agent_pass_rate"), (int, float)):
+        data["pass_rate"] = evaluation["agent_pass_rate"]
+    if run.error_message:
+        data["error"] = run.error_message[:500]
     fields = [
         _field("Model", model_name),
-        _field("Mode", job.get_mode_display()),
-        _field("Duration", _duration(job.duration_seconds)),
+        _field("Kind", run.get_kind_display()),
+        _field("Outcome", run.outcome),
+        _field("Duration", _duration(run.duration_seconds)),
         _field("Cost", f"${data['cost_usd']:.4f}" if "cost_usd" in data else None),
-        _field("Pass rate", f"{float(data['pass_rate']) * 100:.0f}%" if "pass_rate" in data else None),
+        _field(
+            "Pass rate",
+            f"{float(data['pass_rate']) * 100:.0f}%" if "pass_rate" in data else data["eval_status"].replace("_", " "),
+        ),
         _field("Error", data.get("error", "")[:300]),
     ]
     return {
-        "object": {"type": "generation_job", "id": str(job.pk), "title": title, "status": job.status},
-        "url": f"{public_base_url()}/applications/{job.pk}",
+        "object": {"type": "generation_run", "id": str(run.pk), "title": title, "status": run.status},
+        "url": f"{public_base_url()}/samples/{run.pk}",
         "fields": fields,
         "data": data,
-        "occurred_at": _iso(job.completed_at),
+        "occurred_at": _iso(run.completed_at),
     }
 
 
@@ -193,7 +209,7 @@ def _analysis_payload(run) -> dict[str, Any]:
     summary = run.summary if isinstance(run.summary, dict) else {}
     counts = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), dict) else {}
     severity_text = " · ".join(f"{counts[s]} {s}" for s in _SEVERITIES if counts.get(s))
-    title = run.name or (f"Analysis of job {str(run.generation_job_id)[:8]}" if run.generation_job_id else "Analysis")
+    title = run.name or (f"Analysis of run {str(run.generation_job_id)[:8]}" if run.generation_job_id else "Analysis")
     data: dict[str, Any] = {
         "total_findings": summary.get("total_findings"),
         "severity_counts": counts,
@@ -201,7 +217,7 @@ def _analysis_payload(run) -> dict[str, Any]:
         "tools_completed": summary.get("tools_completed"),
         "tools_failed": summary.get("tools_failed"),
         "duration_seconds": run.duration_seconds,
-        "generation_job_id": str(run.generation_job_id) if run.generation_job_id else None,
+        "run_id": str(run.generation_job_id) if run.generation_job_id else None,
     }
     if run.error_message:
         data["error"] = run.error_message[:500]
@@ -226,30 +242,31 @@ def _analysis_payload(run) -> dict[str, Any]:
     }
 
 
-def _experiment_payload(experiment) -> dict[str, Any]:
-    counts = {row["status"]: row["n"] for row in experiment.jobs.order_by().values("status").annotate(n=Count("id"))}
-    ended = experiment.completed_at or experiment.cancelled_at
-    seconds = (ended - experiment.launched_at).total_seconds() if ended and experiment.launched_at else None
+def _study_payload(study) -> dict[str, Any]:
+    counts = {row["status"]: row["n"] for row in study.runs.order_by().values("status").annotate(n=Count("id"))}
+    ended = study.completed_at or study.cancelled_at
+    seconds = (ended - study.launched_at).total_seconds() if ended and study.launched_at else None
     data = {
-        "jobs": counts,
+        "runs": counts,
         "duration_seconds": seconds,
-        "mode": experiment.mode,
-        "repeats": experiment.repeats,
+        "kind": study.kind,
+        "mode": study.mode,
+        "repeats": study.repeats,
     }
-    jobs_text = " · ".join(f"{counts[s]} {s}" for s in ("completed", "failed", "cancelled") if counts.get(s))
+    runs_text = " · ".join(f"{counts[s]} {s}" for s in ("completed", "failed", "cancelled") if counts.get(s))
     fields = [
-        _field("Jobs", jobs_text),
+        _field("Runs", runs_text),
         _field("Duration", _duration(seconds)),
-        _field("Repeats", experiment.repeats),
+        _field("Repeats", study.repeats),
     ]
     return {
         "object": {
-            "type": "experiment",
-            "id": str(experiment.pk),
-            "title": experiment.name,
-            "status": experiment.status,
+            "type": "study",
+            "id": str(study.pk),
+            "title": study.name,
+            "status": study.status,
         },
-        "url": f"{public_base_url()}/experiments/{experiment.pk}",
+        "url": f"{public_base_url()}/studies/{study.pk}",
         "fields": fields,
         "data": data,
         "occurred_at": _iso(ended),
@@ -274,16 +291,16 @@ def _report_payload(report) -> dict[str, Any]:
 
 
 _PAYLOAD_BUILDERS = {
-    "generation.GenerationJob": _generation_payload,
+    RUN_LABEL: _run_payload,
     "analysis.AnalysisRun": _analysis_payload,
-    "generation.Experiment": _experiment_payload,
+    STUDY_LABEL: _study_payload,
     "reports.Report": _report_payload,
 }
 
 _HEADLINES = {
-    "generation": "Generation",
+    "run": "Run",
     "analysis": "Analysis",
-    "experiment": "Experiment",
+    "study": "Study",
     "report": "Report",
     "test": "Test notification",
 }
@@ -373,8 +390,8 @@ def _emit(instance, subscriptions) -> int:
         )
     else:
         subscriptions = [s for s in subscriptions if s.user_id == owner_id and event_type in (s.events or [])]
-    if event_type.startswith("generation.") and getattr(instance, "experiment_id", None):
-        subscriptions = [s for s in subscriptions if s.include_experiment_jobs]
+    if event_type.startswith("run.") and getattr(instance, "study_id", None):
+        subscriptions = [s for s in subscriptions if s.include_study_runs]
     if not subscriptions:
         return 0
     event_key = event_key_for(event_type, instance)
@@ -450,12 +467,14 @@ _STATUS_COLORS = {
     "completed": 0x22C55E,
     "partial": 0xF59E0B,
     "failed": 0xEF4444,
+    "stopped": 0xF59E0B,
     "cancelled": 0x6B7280,
 }
 _NTFY_TAGS = {
     "completed": ["white_check_mark"],
     "partial": ["warning"],
     "failed": ["x"],
+    "stopped": ["octagonal_sign"],
     "cancelled": ["no_entry_sign"],
 }
 

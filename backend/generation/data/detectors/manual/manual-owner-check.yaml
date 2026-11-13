@@ -1,0 +1,11 @@
+name: Ownership check present (manual coding)
+description: A human coder marks whether the regenerated handler checks that the caller owns the object.
+content:
+  engine: manual
+  languages: []
+  rule: ''
+  tool: {name: manual, version: '1'}
+  feature_key: manual-owner-check
+  polarity: secure
+  cwe: [cwe-639]
+  description: The handler verifies that the authenticated user owns the object before reading or changing it.

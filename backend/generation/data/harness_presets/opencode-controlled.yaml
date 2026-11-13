@@ -1,0 +1,13 @@
+# Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
+name: opencode (controlled)
+description: opencode 1.18.35 with the equalised knobs of spec 5.5 (command timeout, web tools off, subagents off,
+  turn cap from the budget preset, pinned captured prompt).
+content:
+  harness: opencode
+  harness_version: 1.18.35
+  controlled: true
+  command_timeout_s: 300
+  subagents: false
+  tool_policy:
+    deny: [webfetch, websearch]
+  pin_system_prompt: true

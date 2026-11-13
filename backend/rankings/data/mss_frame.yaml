@@ -1,0 +1,129 @@
+# Curated inputs of the MSS v2 sampling frame (docs/design/MSS_V2.md).
+#
+# Read by backend/rankings/services/frame.py (canonicalisation and eligibility),
+# pricing.py (first-party list prices) and selection.py (OpenCode Go limits).
+# Every entry carries its source and the date it was checked. Nothing here is a
+# score: it is identity, provenance and feasibility data.
+#
+# Sections
+#   vendors       OpenRouter author slug -> models.dev first-party provider id,
+#                 the vendor's own OpenRouter endpoint provider_name, and origin
+#                 (US / CN / EU / CA / ...). Source: models.dev api.json provider
+#                 ids and OpenRouter /api/v1/models/<id>/endpoints, 2026-11-09.
+#   go_limits     OpenCode Go monthly usage limit (USD) per served model on the
+#                 user's plan. Feasibility only (Amendment A1, B-go).
+#   lines         line-key overrides for E7 (canonical id -> line key).
+#   twins         local endpoint row -> canonical model, where the stored
+#                 metadata.catalog_twin is missing (K5).
+#   include       prerelease canonical ids admitted anyway, each with a reason.
+#   exclude       canonical ids excluded, each with a reason.
+#   open_weights  curated open/closed labels; they win over the member records.
+
+vendors:
+  # source: models.dev provider ids + OpenRouter endpoint provider_name, checked 2026-11-09
+  anthropic: {models_dev: anthropic, openrouter_provider: Anthropic, origin: US}
+  openai: {models_dev: openai, openrouter_provider: OpenAI, origin: US}
+  google: {models_dev: google, openrouter_provider: Google AI Studio, origin: US}
+  x-ai: {models_dev: xai, openrouter_provider: xAI, origin: US}
+  meta: {models_dev: meta, openrouter_provider: Meta, origin: US}
+  nvidia: {models_dev: null, openrouter_provider: NVIDIA, origin: US}
+  reflection: {models_dev: reflection, openrouter_provider: Reflection, origin: US}
+  amazon: {models_dev: null, openrouter_provider: Amazon Bedrock, origin: US}
+  microsoft: {models_dev: null, openrouter_provider: Azure, origin: US}
+  ibm-granite: {models_dev: null, openrouter_provider: IBM, origin: US}
+  inception: {models_dev: null, openrouter_provider: Inception, origin: US}
+  thinkingmachines: {models_dev: null, openrouter_provider: Thinking Machines, origin: US}
+  poolside: {models_dev: null, openrouter_provider: Poolside, origin: US}
+  liquid: {models_dev: null, openrouter_provider: Liquid, origin: US}
+  deepseek: {models_dev: deepseek, openrouter_provider: DeepSeek, origin: CN}
+  z-ai: {models_dev: zai, openrouter_provider: Z.AI, origin: CN}
+  moonshotai: {models_dev: moonshotai, openrouter_provider: Moonshot AI, origin: CN}
+  qwen: {models_dev: alibaba, openrouter_provider: Alibaba, origin: CN}
+  minimax: {models_dev: minimax, openrouter_provider: Minimax, origin: CN}
+  xiaomi: {models_dev: xiaomi, openrouter_provider: Xiaomi, origin: CN}
+  tencent: {models_dev: tencent-tokenhub, openrouter_provider: Tencent, origin: CN}
+  stepfun: {models_dev: stepfun, openrouter_provider: StepFun, origin: CN}
+  meituan: {models_dev: longcat, openrouter_provider: Meituan, origin: CN}
+  bytedance-seed: {models_dev: null, openrouter_provider: ByteDance, origin: CN}
+  inclusionai: {models_dev: null, openrouter_provider: inclusionAI, origin: CN}
+  baidu: {models_dev: null, openrouter_provider: Baidu, origin: CN}
+  mistralai: {models_dev: mistral, openrouter_provider: Mistral, origin: EU}
+  cohere: {models_dev: null, openrouter_provider: Cohere, origin: CA}
+  sakana: {models_dev: null, openrouter_provider: Sakana, origin: JP}
+  upstage: {models_dev: null, openrouter_provider: Upstage, origin: KR}
+
+go_limits:
+  # OpenCode Go ($10 plan) monthly usage limit per model, USD.
+  # source: https://opencode.ai/docs/go (fetched 2026-11-09; Amendment A1 table).
+  # The 5-hour and weekly windows are 20% and 50% of the monthly limit.
+  # Free / contributor builds are excluded from the study and have no limit here.
+  plan: Go ($10)
+  source: https://opencode.ai/docs/go
+  fetched: "2026-11-09"
+  five_hour_share: 0.2
+  weekly_share: 0.5
+  monthly_usd:
+    deepseek-v4.1-flash: 100
+    glm-5.3-flash: 60
+    glm-5.2: 60
+    kimi-k2.7-code: 60
+    longcat-2.0: 60
+    mimo-v2.6-flash: 60
+    mimo-v2.5: 60
+    minimax-m3: 60
+    qwen3.7-plus: 60
+    hy4: 60
+    hy3: 60
+    qwen3.8-flash: 30
+    gemini-4-argon: 30
+    hy4-preview: 30
+    minimax-m3.1-flash: 20
+    glm-5.3: 15
+    kimi-k3: 15
+    kimi-k3.1-pro: 15
+    step-5-preview: 15
+    mimo-v2.6-pro: 15
+    mimo-v2.5-pro: 15
+    qwen3.8-max: 15
+    deepseek-v4-pro: 15
+    grok-4.7: 15
+    gpt-6-luna: 15
+    gpt-5.6-luna: 15
+    claude-haiku-5-5: 15
+
+lines: {}
+  # canonical id: line key  (none needed as of 2026-11-09; the computed key is printed)
+
+twins:
+  # Local route rows without a stored metadata.catalog_twin (audit 2026-11-09).
+  # The canonical id is OpenRouter-style; it need not have a catalog row yet.
+  local-opencode-go/qwen3.8-max: qwen/qwen3.8-max          # OpenRouter qwen/qwen3.8-max-0902 (dated)
+  local-opencode-go/minimax-m3.1-flash: minimax/minimax-m3.1-flash
+  local-opencode-go/kimi-k3.1-pro: moonshotai/kimi-k3.1-pro  # models.dev opencode-go canonical id
+  local-opencode-go/hy4: tencent/hy4                         # models.dev opencode-go canonical id
+  local-anthropic/claude-haiku-4-5-20251001: anthropic/claude-haiku-4.5
+  local-anthropic/claude-opus-4-5-20251101: anthropic/claude-opus-4.5
+  local-anthropic/claude-opus-4-6: anthropic/claude-opus-4.6
+  local-anthropic/claude-opus-4-7: anthropic/claude-opus-4.7
+  local-anthropic/claude-opus-4-8: anthropic/claude-opus-4.8
+  local-anthropic/claude-sonnet-4-5-20250929: anthropic/claude-sonnet-4.5
+  local-anthropic/claude-sonnet-4-6: anthropic/claude-sonnet-4.6
+
+include: {}
+  # canonical id: reason   (prerelease models admitted despite E5)
+
+exclude:
+  # canonical id: reason
+  # Speed editions: the same checkpoint served faster, not a separate model. Kept
+  # out so one model cannot take two slots or count twice in the tier cuts and
+  # medians (methodology review 2026-11-09; OpenRouter descriptions checked).
+  xiaomi/mimo-v2.6-pro-ultraspeed: "speed edition of xiaomi/mimo-v2.6-pro (OpenRouter: 'Built from the same 1T MiMo-V2.6-Pro checkpoint')"
+  z-ai/glm-5.3-flashx: "speed edition of z-ai/glm-5.3-flash (OpenRouter: 'high-speed variant of GLM-5.3-Flash')"
+
+open_weights:
+  # Curated open/closed label; it WINS over the stored member records, which can
+  # be stale (:free copies) or describe a merged preview build.
+  # source: models.dev first-party records, checked 2026-11-09
+  moonshotai/kimi-k3.1-pro: true      # models.dev moonshotai
+  minimax/minimax-m3.1-flash: true    # models.dev minimax / opencode-go (the stored :free row says false: stale)
+  tencent/hy4: false                  # models.dev tencent-tokenhub, opencode-go, openrouter: GA hy4 closed (hy4-preview was open)

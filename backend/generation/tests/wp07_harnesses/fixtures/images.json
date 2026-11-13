@@ -1,0 +1,59 @@
+{
+ "built": "2026-11-03",
+ "builder": "host docker (BuildKit), one build per image, tagged llmlab-v3-wt/<image>:dev; agent-* built FROM llmlab-v3-wt/agent-base:dev",
+ "note": "Local verification builds (WP-07, wave 3). Image ids are not reproducible across rebuilds (package mirrors, timestamps): the manifest records the digest of the image a run used; these ids identify the images the smoke runs and the reported versions came from. agent-opencode was rebuilt in the pre-deploy follow-up (pre-baked config directory, no npm at run time).",
+ "images": {
+  "agent-base": {
+   "image_id": "sha256:7a0ed9c1418f75c7572eb77ca90d74a172dda6ab25b8d25f88676aa7a8a50ea3",
+   "toolchains": "go1.25.14, openjdk 21.0.12.1, Apache Maven 3.9.16, node v24.22.1, Python 3.13.5"
+  },
+  "opencode": {
+   "image": "agent-opencode",
+   "version_command": "opencode --version",
+   "reported": "1.18.35",
+   "image_id": "sha256:388f7447c96c4501e33b0cb3dbad0f27074881d1ec2a29a7cbb02416c421c30a"
+  },
+  "mini-swe-agent": {
+   "image": "agent-mini-swe-agent",
+   "version_command": "/opt/harness/venv/bin/python -c \"import importlib.metadata as m; print(m.version('mini-swe-agent'))\"",
+   "reported": "2.4.6",
+   "image_id": "sha256:e9b787fed56214a93fb65adb27052c2fb1d4a25eaac0b58f394cf50f2181df04"
+  },
+  "aider": {
+   "image": "agent-aider",
+   "version_command": "/opt/harness/venv/bin/python -c \"import importlib.metadata as m; print(m.version('aider-chat'))\"",
+   "reported": "0.86.2",
+   "image_id": "sha256:2d883950e74816f585ba1bfc6f50b30d2caf67d3635c6e26e580413103dc316e"
+  },
+  "claude-code": {
+   "image": "agent-claude-code",
+   "version_command": "claude --version",
+   "reported": "2.1.316 (Claude Code)",
+   "image_id": "sha256:acb190c768b96a1e7e8de8d3790f22fdb4ee281612e3f7cf47fca1ab9f9e6132"
+  },
+  "codex": {
+   "image": "agent-codex",
+   "version_command": "codex --version",
+   "reported": "codex-cli 0.166.0",
+   "image_id": "sha256:2b9431e928f238dd57d710a6f45b1be37a06673a57e463ec2d1b4a89c2ad2f70"
+  },
+  "goose": {
+   "image": "agent-goose",
+   "version_command": "goose --version",
+   "reported": "1.57.0",
+   "image_id": "sha256:87da046faf6686c2a22ccca9e0af30177b434884e7cb98f42fe868bf6b63e1a0"
+  },
+  "qwen-code": {
+   "image": "agent-qwen-code",
+   "version_command": "qwen --version",
+   "reported": "0.26.6",
+   "image_id": "sha256:4e45eacc1754904a45bd23361ca45cbc26c450fe25b726f2a05189c2a26abfb4"
+  },
+  "gemini-cli": {
+   "image": "agent-gemini-cli",
+   "version_command": "gemini --version",
+   "reported": "0.66.0",
+   "image_id": "sha256:376baa6f0915a5e410f6b34d54730379a1f2a3225103e6008bde3d29f93604c3"
+  }
+ }
+}

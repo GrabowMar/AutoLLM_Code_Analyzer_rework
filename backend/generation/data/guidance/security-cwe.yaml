@@ -1,0 +1,3 @@
+name: CWE-specific hint
+description: Lists the task's surfaces (CWE ids and names) as weakness classes to watch.
+content: {security_hint: cwe_specific, cwe_source: task_surfaces, fragment: guidance-security-cwe@1}

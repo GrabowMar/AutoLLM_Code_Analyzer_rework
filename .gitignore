@@ -10,6 +10,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+!backend/generation/build/
 develop-eggs/
 dist/
 downloads/
@@ -316,3 +317,10 @@ frontend/svelte-check-full-output.txt
 
 # scripts/deploy.sh writes its log next to itself when run from a checkout
 deploy.log
+
+# Worktree helpers' private state (.wt-test.sh env file, mode 600; holds DB credentials)
+.wt/
+
+# JupyterLite site for the report Notebook tab (built by frontend/jupyterlite/build.sh)
+frontend/static/jupyterlite/
+frontend/jupyterlite/.jupyterlite.doit.db

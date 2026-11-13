@@ -1,0 +1,5 @@
+name: Temperature 0.7
+description: Explicit temperature 0.7; top_p unset (default for slot studies).
+content:
+  policy: explicit
+  params: {temperature: 0.7}

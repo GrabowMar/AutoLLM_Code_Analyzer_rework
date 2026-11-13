@@ -9,7 +9,7 @@
 	import PlayCircle from '@lucide/svelte/icons/play-circle';
 	import StopCircle from '@lucide/svelte/icons/stop-circle';
 	import CircleDashed from '@lucide/svelte/icons/circle-dashed';
-	import { getGenerationJobs } from '$lib/api/generation';
+	import { listSamples } from '$lib/api/v3/samples';
 	import { getContainers, type ContainerInstance } from '$lib/api/runtime';
 
 	interface Props {
@@ -32,11 +32,11 @@
 		loading = true;
 		error = '';
 		try {
-			const [jobsRes, containersRes] = await Promise.all([
-				getGenerationJobs({ model_id: modelId, per_page: 1 }),
+			const [runsRes, containersRes] = await Promise.all([
+				listSamples({ model: modelId, page_size: 1 }),
 				getContainers({ model_id: modelId, per_page: 100 }),
 			]);
-			totalApps = jobsRes.total;
+			totalApps = runsRes.total;
 			containers = containersRes.containers;
 		} catch (e) {
 			error = `Failed to load usage: ${(e as Error).message}`;

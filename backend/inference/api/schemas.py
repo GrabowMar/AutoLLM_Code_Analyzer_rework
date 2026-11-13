@@ -17,7 +17,7 @@ from ninja import Schema
 
 EndpointKind = Literal["openrouter", "ollama", "openai_compatible"]
 EndpointConnection = Literal["direct", "relay"]
-ApiFlavor = Literal["native", "openai"]
+ApiFlavor = Literal["native", "openai", "anthropic"]
 Visibility = Literal["private", "shared"]
 EndpointStatus = Literal["online", "offline", "degraded", "disabled"]
 

@@ -1,4 +1,5 @@
-export COMPOSE_FILE := "docker-compose.local.yml"
+set dotenv-load
+export COMPOSE_FILE := env_var_or_default("COMPOSE_FILE", "docker-compose.local.yml")
 
 ## Just does not yet manage signals for subprocesses reliably, which can lead to unexpected behavior.
 ## Exercise caution before expanding its usage in production environments.

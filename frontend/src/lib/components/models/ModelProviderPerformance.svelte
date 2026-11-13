@@ -24,6 +24,7 @@
 		type ModelCallTelemetry,
 	} from '$lib/api/telemetry';
 	import Gauge from '@lucide/svelte/icons/gauge';
+	import { kindLabel } from '$lib/components/runs/format';
 
 	interface Props {
 		modelId: number;
@@ -32,12 +33,10 @@
 	let { modelId }: Props = $props();
 
 	const ALL = 'all';
-	const MODE_LABELS: Record<string, string> = { agent: 'Agent', scaffolding: 'Scaffolding', custom: 'Single prompt' };
-
-	let mode = $state(ALL);
+	let kind = $state(ALL);
 	let data = $state.raw<ModelCallTelemetry | null>(null);
-	/** Modes present over all calls (kept while a mode filter is applied). */
-	let modesSeen = $state.raw<string[]>([]);
+	/** Run kinds present over all calls (kept while a kind filter is applied). */
+	let kindsSeen = $state.raw<string[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let controller: AbortController | null = null;
@@ -49,10 +48,10 @@
 		loading = true;
 		error = '';
 		try {
-			const res = await getModelCallTelemetry(modelId, { mode: mode === ALL ? undefined : mode, signal: mine.signal });
+			const res = await getModelCallTelemetry(modelId, { kind: kind === ALL ? undefined : kind, signal: mine.signal });
 			if (mine.signal.aborted) return;
 			data = res;
-			if (mode === ALL) modesSeen = Object.keys(res.overall?.modes ?? {});
+			if (kind === ALL) kindsSeen = Object.keys(res.overall?.kinds ?? {});
 		} catch (e) {
 			if (mine.signal.aborted || isAbortError(e)) return;
 			error = formatApiError(e, 'Could not load provider performance.');
@@ -61,28 +60,28 @@
 		}
 	}
 
-	// Another model (the page component is reused across /models/[slug]): start from all modes again.
+	// Another model (the page component is reused across /models/[slug]): start from all run kinds again.
 	let loadedModel = untrack(() => modelId);
 	$effect.pre(() => {
 		const id = modelId;
 		untrack(() => {
 			if (id === loadedModel) return;
 			loadedModel = id;
-			mode = ALL;
-			modesSeen = [];
+			kind = ALL;
+			kindsSeen = [];
 			data = null;
 		});
 	});
 
 	$effect(() => {
-		void [modelId, mode];
+		void [modelId, kind];
 		untrack(() => void load());
 		return () => controller?.abort();
 	});
 
-	const modeItems = $derived([
-		{ value: ALL, label: 'All modes' },
-		...modesSeen.map((m) => ({ value: m, label: MODE_LABELS[m] ?? m })),
+	const kindItems = $derived([
+		{ value: ALL, label: 'All run kinds' },
+		...kindsSeen.map((k) => ({ value: k, label: kindLabel(k) })),
 	]);
 
 	const rows = $derived.by(() => {
@@ -130,12 +129,12 @@
 					<Card.Description class="text-xs">
 						Per-call measurements by the upstream provider that served each call, over your runs of this model.
 						{#if data?.overall}
-							{data.overall.n_calls.toLocaleString()} calls in {data.overall.n_jobs} run{data.overall.n_jobs === 1 ? '' : 's'}.
+							{data.overall.n_calls.toLocaleString()} calls in {data.overall.n_runs} run{data.overall.n_runs === 1 ? '' : 's'}.
 						{/if}
 					</Card.Description>
 				</div>
-				{#if modeItems.length > 2}
-					<Segmented aria-label="Generation mode" size="sm" bind:value={mode} items={modeItems} />
+				{#if kindItems.length > 2}
+					<Segmented aria-label="Run kind" size="sm" bind:value={kind} items={kindItems} />
 				{/if}
 			</div>
 		</Card.Header>
@@ -181,7 +180,7 @@
 									</td>
 									<td class="num">
 										{s.n_calls.toLocaleString()}
-										<span class="cell-sub block text-[11px] text-muted-foreground">{s.n_jobs} run{s.n_jobs === 1 ? '' : 's'}</span>
+										<span class="cell-sub block text-[11px] text-muted-foreground">{s.n_runs} run{s.n_runs === 1 ? '' : 's'}</span>
 									</td>
 									<td class="num {s.ttft_ms?.median == null ? 'text-muted-foreground' : ''}">
 										{quantile(s.ttft_ms)}

@@ -5,7 +5,7 @@
 
 export type EndpointKind = "openrouter" | "ollama" | "openai_compatible";
 export type EndpointConnection = "direct" | "relay";
-export type ApiFlavor = "native" | "openai";
+export type ApiFlavor = "native" | "openai" | "anthropic";
 export type EndpointVisibility = "private" | "shared";
 export type EndpointStatus = "online" | "offline" | "degraded" | "disabled";
 export type RelaySessionRole = "active" | "standby";

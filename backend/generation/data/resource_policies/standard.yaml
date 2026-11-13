@@ -1,0 +1,172 @@
+# Budget preset 'standard' (spec section 4.2, column S). WP-11 owns this file.
+# It MUST equal contracts.resources.preset_content(tier) and pass the policy lint
+# (backend/generation/tests/wp11_budget/test_presets.py). Edit KNOB_META and regenerate together.
+name: Standard
+description: 'Room for typical agentic runs: provider-default reasoning and routing, a pilot over all units, and
+  a pause when the study cap is reached.'
+tier: standard
+content:
+  run:
+    max_cost_usd: 2.0
+    max_total_tokens: 10000000
+    max_uncached_input_tokens: 4000000
+    max_output_tokens: 500000
+    max_llm_requests: 100
+    max_aux_requests: 30
+    max_turns: 100
+    max_workspace_bytes: 524288000
+  call:
+    max_output_tokens: 16384
+    max_input_tokens: 144000
+  context:
+    max_context_tokens: 128000
+    compaction: harness_default
+  reasoning:
+    mode: provider_default
+    effort: null
+    max_tokens: null
+    exclude: false
+  caching:
+    prompt_cache: 'on'
+    ttl: 5m
+    sticky_session: true
+  routing:
+    provider_sort: none
+    max_price: null
+    allow_fallbacks: true
+    only: []
+    ignore: []
+    order: []
+    quantizations:
+    - fp8
+    - bf16
+    - fp16
+    - fp32
+    require_parameters: true
+    data_collection: allow
+    zdr: false
+    preferred_min_throughput: null
+    preferred_max_latency: null
+    serving_tier: standard
+  time:
+    wall_clock_s: 3600
+    idle_timeout_s: 600
+    command_timeout_s: 300
+    llm_call_timeout_s: 600
+  retries:
+    upstream_retries: 4
+    backoff_s: 2.0
+    retry_on:
+    - '408'
+    - '429'
+    - 5xx
+    infra_retries: 2
+    count_failed_calls: false
+  sandbox:
+    memory: 3g
+    nano_cpus: 2000000000
+  network_policy: packages
+  concurrency:
+    study_max_parallel: 4
+    per_endpoint: null
+    per_model: 2
+    per_provider: null
+    rpm_per_model: null
+    max_resident_models: 1
+    eval_parallel: 2
+  cell:
+    max_cost_usd: 4.0
+  study:
+    max_cost_usd: auto
+    max_total_tokens: null
+    max_runs: null
+    max_wall_hours: null
+    cap_basis: auto
+    budget_basis: auto
+    alert_at:
+    - 0.5
+    - 0.8
+    on_budget_exhausted: pause
+    stop_rules:
+    - code: infra_error_rate
+      scope: study
+      window: 20
+      threshold: 0.3
+      action: pause
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: no_provider_rate
+      scope: study
+      window: 20
+      threshold: 0.2
+      action: pause
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: consecutive_failures
+      scope: condition
+      window: 5
+      threshold: 5.0
+      action: pause_condition
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: cost_overrun
+      scope: condition
+      window: 5
+      threshold: 2.0
+      action: pause_condition
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: spend_fraction
+      scope: study
+      window: 20
+      threshold: 1.0
+      action: alert
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+  pilot:
+    enabled: true
+    repeats: 1
+    units: all
+    smoke_first: true
+    reuse_as_main: true
+    gates:
+      max_infra_error_rate: 0.2
+      min_build_rate: 0.5
+      max_cost_overrun: 1.5
+      max_cap_hit_rate: 0.3
+      max_truncation_rate: 0.2
+      max_call_truncation_rate: 0.2
+      max_wall_clock_rate: 0.15
+      max_oom_rate: 0.05
+      usd_cap_binding: 0.05
+    auto_expand: false
+  caches:
+    dependency_cache: shared_ro
+    reuse_sample_images: true
+    reuse_parent_build: true
+    reuse_eval_by_tree: true
+  slot:
+    max_output_tokens: 8192
+  estimate:
+    method: priors
+    require_confirm_above_usd: 20.0

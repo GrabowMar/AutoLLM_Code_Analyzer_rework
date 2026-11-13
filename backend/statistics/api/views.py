@@ -59,15 +59,15 @@ def get_models(
     request,
     limit: int = Query(25, ge=1, le=100),
     prompt_hash: str | None = None,
-    bundle_key: str | None = None,
-    experiment_id: str | None = None,
+    config_fingerprint: str | None = None,
+    study_id: str | None = None,
 ):
     return services.get_model_comparison(
         request.auth,
         limit=limit,
         prompt_hash=prompt_hash,
-        bundle_key=bundle_key,
-        experiment_id=_uuid_param(experiment_id, "experiment_id"),
+        config_fingerprint=config_fingerprint,
+        study_id=_uuid_param(study_id, "study_id"),
     )
 
 
@@ -96,52 +96,54 @@ def get_analyzer_health(request):
     return services.get_analyzer_health()
 
 
-# ── study tables (paper revision: dedup, healing, tool accounting) ──────────
+# ── study tables (paper revision: dedup, tool accounting) ─────────────────
 
 
-def _study_scope(request, experiment_id: str | None, batch_id: str | None):
-    from backend.statistics.services.study import study_jobs
+def _study_scope(request, study_id: str | None):
+    from backend.statistics.services.runs import study_runs
 
-    return study_jobs(
-        request.auth,
-        experiment_id=_uuid_param(experiment_id, "experiment_id"),
-        batch_id=_uuid_param(batch_id, "batch_id"),
-    )
+    return study_runs(request.auth, study_id=_uuid_param(study_id, "study_id"))
+
+
+def _code_scope_param(value: str | None) -> str | None:
+    from backend.reports.services.loc import CODE_SCOPES
+
+    if value is not None and value not in CODE_SCOPES:
+        raise HttpError(400, f"code_scope must be one of {', '.join(CODE_SCOPES)}")
+    return value
 
 
 @router.get("/study/breakdowns/")
 def get_study_breakdowns(
     request,
-    experiment_id: str | None = None,
-    batch_id: str | None = None,
+    study_id: str | None = None,
     include_ai: bool = False,
     line_tolerance: int = Query(2, ge=0, le=20),
     include_issues: bool = False,
     common_tools_only: bool = True,
+    code_scope: str | None = None,
 ):
-    """Raw vs cross-tool-deduplicated issues per app, model, template and tool, plus tool overlap.
+    """Raw vs cross-tool-deduplicated issues per app, model, task and tool, plus tool overlap.
 
-    By default only tools that measured every app in scope are counted (see ``coverage``).
+    ``code_scope`` says what counts as the delivered app: ``app`` (the default: tests and an agent's
+    scratch scripts are counted apart), ``app_named`` (scripts matched only by name stay app code),
+    ``with_scratch`` (only tests are counted apart) or ``all`` (tests count as app code too).
+
+    Scope: the study's current runs (first usable attempt per cell), else every run the caller owns. By
+    default only tools that measured every app in scope are counted (see ``coverage``).
     """
     from backend.statistics.services.study import issue_breakdowns
 
     data = issue_breakdowns(
-        _study_scope(request, experiment_id, batch_id),
+        _study_scope(request, study_id),
         include_ai=include_ai,
         line_tolerance=line_tolerance,
         common_tools_only=common_tools_only,
+        code_scope=_code_scope_param(code_scope),
     )
     if not include_issues:
         data.pop("issues")
     return data
-
-
-@router.get("/study/healing/")
-def get_study_healing(request, experiment_id: str | None = None, batch_id: str | None = None):
-    """Deploy rate with and without build healing, paired on the same model output."""
-    from backend.statistics.services.study import healing_impact
-
-    return healing_impact(_study_scope(request, experiment_id, batch_id))
 
 
 @router.get("/study/tools/")
@@ -153,8 +155,8 @@ def get_study_tools(request):
 
 
 @router.get("/study/accounting/")
-def get_study_accounting(request, experiment_id: str | None = None, batch_id: str | None = None):
-    """Apps, runs and per-tool executions actually recorded (never tools x apps)."""
+def get_study_accounting(request, study_id: str | None = None):
+    """Runs, analyses, per-tool executions and evaluations actually recorded (never tools x apps)."""
     from backend.statistics.services.accounting import run_accounting
 
-    return run_accounting(_study_scope(request, experiment_id, batch_id))
+    return run_accounting(_study_scope(request, study_id))

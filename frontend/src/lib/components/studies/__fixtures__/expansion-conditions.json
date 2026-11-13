@@ -1,0 +1,321 @@
+{
+  "about": "WP-15 factor-expansion fixtures with the full expected condition lists and the refused designs, complementing WP-10's count fixtures (expansion.json, a verbatim copy of backend/generation/tests/wp10_study/fixtures/expansion.json). Read by the builder (builder/expansion.test.ts) and by the backend (backend/generation/tests/wp15_frontend/test_expansion_fixture.py runs study/expand.py:expand_grid on every case). Each case gives the factors and grid of a Design; `expected` is what expand_grid returns, or `error` (a substring of the DesignError message). `counts` cases pin the plan's cell and block arithmetic (conditions x units x repeats, plus pilot cells).",
+  "cases": [
+    {
+      "name": "one fixed model",
+      "factors": [
+        { "key": "model", "role": "fixed", "levels": ["openai/gpt-4o-mini"] }
+      ],
+      "grid": { "type": "full", "fraction": null, "exclude": [] },
+      "expected": {
+        "n_conditions": 1,
+        "full_size": 1,
+        "excluded": 0,
+        "fractional": false,
+        "issues": [],
+        "conditions": [{ "model": "openai/gpt-4o-mini" }]
+      }
+    },
+    {
+      "name": "two models crossed with two stacks",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2"] },
+        {
+          "key": "stack_profile",
+          "role": "crossed",
+          "levels": ["flask-react@1", "fastapi-vue@1"]
+        }
+      ],
+      "grid": { "type": "full", "fraction": null, "exclude": [] },
+      "expected": {
+        "n_conditions": 4,
+        "full_size": 4,
+        "excluded": 0,
+        "fractional": false,
+        "issues": [],
+        "conditions": [
+          { "model": "m1", "stack_profile": "flask-react@1" },
+          { "model": "m1", "stack_profile": "fastapi-vue@1" },
+          { "model": "m2", "stack_profile": "flask-react@1" },
+          { "model": "m2", "stack_profile": "fastapi-vue@1" }
+        ]
+      }
+    },
+    {
+      "name": "prose variants crossed with models, stack fixed",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2"] },
+        {
+          "key": "stack_profile",
+          "role": "fixed",
+          "levels": ["flask-react@1"]
+        },
+        {
+          "key": "prose_variant",
+          "role": "crossed",
+          "levels": ["minimal", "standard", "exhaustive"]
+        }
+      ],
+      "grid": { "type": "full", "fraction": null, "exclude": [] },
+      "expected": {
+        "n_conditions": 6,
+        "full_size": 6,
+        "excluded": 0,
+        "fractional": false,
+        "issues": [],
+        "conditions": [
+          {
+            "model": "m1",
+            "stack_profile": "flask-react@1",
+            "prose_variant": "minimal"
+          },
+          {
+            "model": "m1",
+            "stack_profile": "flask-react@1",
+            "prose_variant": "standard"
+          },
+          {
+            "model": "m1",
+            "stack_profile": "flask-react@1",
+            "prose_variant": "exhaustive"
+          },
+          {
+            "model": "m2",
+            "stack_profile": "flask-react@1",
+            "prose_variant": "minimal"
+          },
+          {
+            "model": "m2",
+            "stack_profile": "flask-react@1",
+            "prose_variant": "standard"
+          },
+          {
+            "model": "m2",
+            "stack_profile": "flask-react@1",
+            "prose_variant": "exhaustive"
+          }
+        ]
+      }
+    },
+    {
+      "name": "designed exclusion",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2"] },
+        {
+          "key": "auth_mode",
+          "role": "crossed",
+          "levels": ["contract_bearer", "cookie_session"]
+        }
+      ],
+      "grid": {
+        "type": "full",
+        "fraction": null,
+        "exclude": [{ "model": "m1", "auth_mode": "cookie_session" }]
+      },
+      "expected": {
+        "n_conditions": 3,
+        "full_size": 4,
+        "excluded": 1,
+        "fractional": false,
+        "issues": ["unbalanced_grid"],
+        "conditions": [
+          { "model": "m1", "auth_mode": "contract_bearer" },
+          { "model": "m2", "auth_mode": "contract_bearer" },
+          { "model": "m2", "auth_mode": "cookie_session" }
+        ]
+      }
+    },
+    {
+      "name": "half fraction C=AB",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2"] },
+        {
+          "key": "stack_profile",
+          "role": "crossed",
+          "levels": ["s1@1", "s2@1"]
+        },
+        { "key": "style", "role": "fraction", "levels": ["plain@1", "bold@1"] }
+      ],
+      "grid": {
+        "type": "fractional",
+        "fraction": { "generator": "C=AB" },
+        "exclude": []
+      },
+      "expected": {
+        "n_conditions": 4,
+        "full_size": 4,
+        "excluded": 0,
+        "fractional": true,
+        "issues": [],
+        "conditions": [
+          { "model": "m1", "stack_profile": "s1@1", "style": "bold@1" },
+          { "model": "m1", "stack_profile": "s2@1", "style": "plain@1" },
+          { "model": "m2", "stack_profile": "s1@1", "style": "plain@1" },
+          { "model": "m2", "stack_profile": "s2@1", "style": "bold@1" }
+        ]
+      }
+    },
+    {
+      "name": "complementary half C=-AB",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2"] },
+        {
+          "key": "stack_profile",
+          "role": "crossed",
+          "levels": ["s1@1", "s2@1"]
+        },
+        { "key": "style", "role": "fraction", "levels": ["plain@1", "bold@1"] }
+      ],
+      "grid": {
+        "type": "fractional",
+        "fraction": { "generator": "C=-AB" },
+        "exclude": []
+      },
+      "expected": {
+        "n_conditions": 4,
+        "full_size": 4,
+        "excluded": 0,
+        "fractional": true,
+        "issues": [],
+        "conditions": [
+          { "model": "m1", "stack_profile": "s1@1", "style": "plain@1" },
+          { "model": "m1", "stack_profile": "s2@1", "style": "bold@1" },
+          { "model": "m2", "stack_profile": "s1@1", "style": "bold@1" },
+          { "model": "m2", "stack_profile": "s2@1", "style": "plain@1" }
+        ]
+      }
+    },
+    {
+      "name": "resolution II fraction aliases main effects",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2"] },
+        {
+          "key": "prose_variant",
+          "role": "crossed",
+          "levels": ["minimal", "standard", "exhaustive"]
+        },
+        {
+          "key": "auth_mode",
+          "role": "fraction",
+          "levels": ["contract_bearer", "cookie_session"]
+        }
+      ],
+      "grid": {
+        "type": "fractional",
+        "fraction": { "generator": "C=A" },
+        "exclude": []
+      },
+      "expected": {
+        "n_conditions": 6,
+        "full_size": 6,
+        "excluded": 0,
+        "fractional": true,
+        "issues": ["aliasing"],
+        "conditions": [
+          {
+            "model": "m1",
+            "prose_variant": "minimal",
+            "auth_mode": "contract_bearer"
+          },
+          {
+            "model": "m1",
+            "prose_variant": "standard",
+            "auth_mode": "contract_bearer"
+          },
+          {
+            "model": "m1",
+            "prose_variant": "exhaustive",
+            "auth_mode": "contract_bearer"
+          },
+          {
+            "model": "m2",
+            "prose_variant": "minimal",
+            "auth_mode": "cookie_session"
+          },
+          {
+            "model": "m2",
+            "prose_variant": "standard",
+            "auth_mode": "cookie_session"
+          },
+          {
+            "model": "m2",
+            "prose_variant": "exhaustive",
+            "auth_mode": "cookie_session"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fixed factor with two levels is refused",
+      "factors": [{ "key": "model", "role": "fixed", "levels": ["m1", "m2"] }],
+      "grid": { "type": "full", "fraction": null, "exclude": [] },
+      "error": "must have exactly one level"
+    },
+    {
+      "name": "fraction role without a fractional grid is refused",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2"] },
+        { "key": "style", "role": "fraction", "levels": ["plain@1", "bold@1"] }
+      ],
+      "grid": { "type": "full", "fraction": null, "exclude": [] },
+      "error": "need grid.type 'fractional'"
+    },
+    {
+      "name": "generator letter on a three-level factor is refused",
+      "factors": [
+        { "key": "model", "role": "crossed", "levels": ["m1", "m2", "m3"] },
+        { "key": "style", "role": "fraction", "levels": ["plain@1", "bold@1"] }
+      ],
+      "grid": {
+        "type": "fractional",
+        "fraction": { "generator": "B=A" },
+        "exclude": []
+      },
+      "error": "two-level crossed factor"
+    },
+    {
+      "name": "excluding every combination is refused",
+      "factors": [{ "key": "model", "role": "fixed", "levels": ["m1"] }],
+      "grid": {
+        "type": "full",
+        "fraction": null,
+        "exclude": [{ "model": "m1" }]
+      },
+      "error": "no condition left"
+    }
+  ],
+  "counts": [
+    {
+      "name": "app: 4 conditions x 3 tasks x 5 repeats, no pilot",
+      "n_conditions": 4,
+      "n_units": 3,
+      "repeats": 5,
+      "pilot": { "enabled": false, "repeats": 1, "units": "all" },
+      "expected": { "main": 60, "pilot": 0, "total": 60, "blocks": 15 }
+    },
+    {
+      "name": "app: pilot of 1 repeat on 2 units",
+      "n_conditions": 4,
+      "n_units": 3,
+      "repeats": 5,
+      "pilot": { "enabled": true, "repeats": 1, "units": 2 },
+      "expected": { "main": 60, "pilot": 8, "total": 68, "blocks": 17 }
+    },
+    {
+      "name": "slot: 2 conditions x 4 targets x 30 repeats, pilot 3 repeats on all units",
+      "n_conditions": 2,
+      "n_units": 4,
+      "repeats": 30,
+      "pilot": { "enabled": true, "repeats": 3, "units": "all" },
+      "expected": { "main": 240, "pilot": 24, "total": 264, "blocks": 132 }
+    },
+    {
+      "name": "pilot repeats are capped by the study repeats",
+      "n_conditions": 1,
+      "n_units": 2,
+      "repeats": 2,
+      "pilot": { "enabled": true, "repeats": 5, "units": "all" },
+      "expected": { "main": 4, "pilot": 4, "total": 8, "blocks": 8 }
+    }
+  ]
+}

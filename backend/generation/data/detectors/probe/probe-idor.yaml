@@ -1,0 +1,11 @@
+name: Broken object-level authorization probe exploited
+description: Maps the evaluation's IDOR / missing-owner-check probes (CWE-639) of the variant to a feature.
+content:
+  engine: probe
+  languages: []
+  rule: ''
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-idor
+  polarity: insecure
+  cwe: [cwe-639]
+  description: A CWE-639 probe (another user's object) was exploited against the assembled app.

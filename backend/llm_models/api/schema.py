@@ -1,5 +1,8 @@
 """Django Ninja schemas for LLM models."""
 
+from datetime import UTC
+from datetime import datetime
+
 from ninja import ModelSchema
 from ninja import Schema
 
@@ -177,6 +180,14 @@ class LLMModelListSchema(Schema):
     parameter_size: str = ""
     is_local: bool = False
     is_available: bool = True
+    # Catalog / external facts for the optional table columns (all may be empty).
+    released_at: str | None = None
+    open_weights: bool | None = None
+    tokenizer: str = ""
+    input_modalities: list[str] = []
+    parameters: int | None = None
+    parameters_source: str = ""
+    research_data: list[str] = []
 
     @staticmethod
     def from_model(obj: LLMModel, online_cache: dict[int, bool] | None = None) -> "LLMModelListSchema":
@@ -227,7 +238,44 @@ class LLMModelListSchema(Schema):
             parameter_size=obj.parameter_size,
             is_local=obj.is_local,
             is_available=obj.is_available,
+            **list_column_facts(obj.metadata or {}),
         )
+
+
+def list_column_facts(meta: dict) -> dict:
+    """Release date, weights, tokenizer, input types, parameter count and research-data coverage.
+
+    Parameters come from the Hugging Face weights (exact) before Epoch AI's reported figure.
+    """
+    released = None
+    created = meta.get("openrouter_created")
+    if isinstance(created, (int, float)) and created > 0:
+        released = datetime.fromtimestamp(created, tz=UTC).date().isoformat()
+    else:
+        md_date = (meta.get("models_dev") or {}).get("release_date")
+        if isinstance(md_date, str) and md_date:
+            released = md_date[:10]
+
+    weights = (meta.get("models_dev") or {}).get("open_weights")
+    modalities = meta.get("architecture_input_modalities")
+    tokenizer = meta.get("architecture_tokenizer")
+
+    params, source = None, ""
+    for key in ("huggingface", "epoch"):
+        value = (meta.get(key) or {}).get("parameters") if isinstance(meta.get(key), dict) else None
+        if isinstance(value, (int, float)) and value > 0:
+            params, source = int(value), key
+            break
+
+    return {
+        "released_at": released,
+        "open_weights": weights if isinstance(weights, bool) else None,
+        "tokenizer": tokenizer if isinstance(tokenizer, str) and tokenizer != "Router" else "",
+        "input_modalities": [m for m in modalities if isinstance(m, str)] if isinstance(modalities, list) else [],
+        "parameters": params,
+        "parameters_source": source,
+        "research_data": [k for k in ("lmarena", "epoch", "huggingface") if isinstance(meta.get(k), dict)],
+    }
 
 
 REASONING_PARAMETERS = frozenset({"reasoning", "include_reasoning"})
@@ -244,6 +292,16 @@ def model_supports_reasoning(obj: LLMModel) -> bool:
 class SyncResultSchema(Schema):
     fetched: int
     upserted: int
+
+
+class FacetValueSchema(Schema):
+    value: str
+    count: int
+
+
+class ModelFacetsSchema(Schema):
+    providers: list[FacetValueSchema]
+    tokenizers: list[FacetValueSchema]
 
 
 class StatsSchema(Schema):

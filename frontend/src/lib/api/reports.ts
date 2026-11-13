@@ -2,6 +2,12 @@ import { apiFetch } from "./core";
 
 export type ReportStatus = "pending" | "generating" | "completed" | "failed";
 
+/**
+ * Stored report type values (unchanged in v3, so existing rows keep working). Two of them
+ * have new meanings: `template_comparison` is the **task comparison** (config `task_slug`,
+ * optional `task_version`, `filter_models`, `treatment_hash`, `prompt_hash`) and
+ * `experiment_report` the **study conditions report** (config `study_id`).
+ */
 export type ReportType =
   | "model_analysis"
   | "template_comparison"
@@ -10,6 +16,67 @@ export type ReportType =
   | "comprehensive"
   | "experiment_report"
   | "study_report";
+
+/** Display labels of the report types (the backend `Report.Type` labels). */
+export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
+  model_analysis: "Model analysis",
+  template_comparison: "Task comparison",
+  tool_analysis: "Tool analysis",
+  generation_analytics: "Generation analytics",
+  comprehensive: "Comprehensive",
+  experiment_report: "Experiment conditions",
+  study_report: "Experiment report",
+};
+
+/** `config` of a task comparison (`template_comparison`). */
+export interface TaskComparisonConfig {
+  task_slug: string;
+  task_version?: number;
+  filter_models?: string[];
+  treatment_hash?: string;
+  prompt_hash?: string;
+  /** Sensitivity analysis: leave truncated runs out. Omit for intention-to-treat (the default). */
+  exclude_truncated?: boolean;
+}
+
+/** `config` of a study conditions report (`experiment_report`). */
+export interface StudyConditionsConfig {
+  study_id: string;
+  /**
+   * Sensitivity analysis: leave truncated runs out. Omit for intention-to-treat; a locked
+   * analysis plan's `exclusions.truncated` wins over it.
+   */
+  exclude_truncated?: boolean;
+}
+
+/** `config` of a study report: a study and/or explicit runs (none: all my apps). */
+export interface StudyReportConfig {
+  study_id?: string;
+  run_ids?: string[];
+  /**
+   * Sensitivity analysis: leave truncated runs out. Send it only when the researcher chose it
+   * (an explicit value that differs from a locked plan's exclusions adds a validity note).
+   */
+  exclude_truncated?: boolean;
+  ranking_criteria?: unknown;
+  /**
+   * What counts as the delivered app. Unset: tests and the agent's scratch scripts are counted apart.
+   * `with_scratch` counts scratch scripts as app code, `all` counts test code too.
+   */
+  code_scope?: "app" | "app_named" | "with_scratch" | "all";
+}
+
+/**
+ * The exclude-truncated part of a report config: `{exclude_truncated: true}` when the researcher
+ * ticked the sensitivity option, else nothing. An untouched option must not send `false`: the
+ * backend treats any explicit value that differs from a locked plan's exclusions as an override
+ * and notes it in the report.
+ */
+export function excludeTruncatedConfig(excludeTruncated: boolean): {
+  exclude_truncated?: true;
+} {
+  return excludeTruncated ? { exclude_truncated: true } : {};
+}
 
 export type ReportExportFormat = "md" | "tex" | "json";
 
@@ -93,7 +160,7 @@ function summaryValue(key: string, v: unknown): string {
 
 /**
  * The groups sharing the top of a report's ranking, re-read from its data:
- * an experiment report's leaderboard (the top mean pass rate; none when
+ * a study conditions report's leaderboard (the top mean pass rate; none when
  * nothing is graded), or a study report's TOPSIS ranking (every row ranked
  * 1). null when the data has neither.
  */
@@ -136,7 +203,7 @@ function topGroups(
 /**
  * A report's summary card: unmeasured values read "—" (never 0), rates as
  * percentages, and a report with tied leaders says so instead of naming the
- * first group. With the experiment or study report's data, the leader is
+ * first group. With the study conditions or study report's data, the leader is
  * re-read from its leaderboard or ranking, so summaries stored before ties
  * were detected are right too.
  */
@@ -168,7 +235,7 @@ export function summaryItems(
       });
       continue;
     }
-    if (key === "experiment_id" && typeof v === "string" && v) {
+    if (key === "study_id" && typeof v === "string" && v) {
       items.push({
         label: "Experiment",
         value: v.slice(0, 8),
@@ -229,6 +296,7 @@ export interface ReportSummary {
   created_at: string;
   completed_at: string | null;
   expires_at: string | null;
+  /** The GenerationRun the report is about (the field keeps its v2 name, D5). */
   generation_job_id: string | null;
   analysis_task_id: string | null;
 }

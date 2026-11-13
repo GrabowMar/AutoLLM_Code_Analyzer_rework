@@ -1,0 +1,4 @@
+{% set layout = "- `backend/`: the Express app in TypeScript. `backend/src/server.ts` is the entry file (Node.js 24 runs `.ts` files directly); dependencies go in `backend/package.json`." %}
+{% set manifest = "package.json" %}
+{% set entry = "`node backend/src/server.ts`, which must start the server on port " ~ run.port %}
+{% include "common/README.md.jinja2" %}

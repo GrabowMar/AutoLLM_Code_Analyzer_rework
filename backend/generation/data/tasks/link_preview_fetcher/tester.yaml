@@ -1,0 +1,30 @@
+schema: 1
+notes: |
+  Only one entry: samples.url. Everything else is the compiler-v2 plan unchanged (no expectation change, no skip).
+
+  Sources. task.yaml: previews.create request_schema {url: string, maxLength 2048, format uri}, required [url],
+  tag `outbound`; entity Preview.url required, max_length 2048, NOT unique.
+  Standard prose (what the models saw): "`POST /api/previews` fetches the page at `url`, stores the preview and
+  returns it"; the preview is "built from its title, description and image (from `<title>`,
+  `<meta name="description">` and the Open Graph `og:title`, `og:description` and `og:image` tags)".
+  Exhaustive prose: "Preview: `url` required, an absolute `http` or `https` URL, at most 2048 characters."
+
+  samples.url = "{upstream_base}/page/llmlab-{rand}"
+    * Why a sample at all: the task's core feature is an outbound fetch. The generic sample
+      https://example.com/llmlab/{rand} cannot be fetched from the no-egress eval network (and the mock upstream
+      serves plain http only), so with it no implementation can show the stated behaviour "fetches the page at
+      `url`"; the create check would then measure the unfetchable-page case, which the standard prose does not
+      describe and only the exhaustive prose regulates, and every check that needs a preview would cascade.
+    * Scheme: {upstream_base} is the tester's public-looking mock upstream, an absolute http URL with an ordinary
+      host name and the default port; http is valid by the exhaustive sentence above.
+    * Path: "/page/<slug>" (GENERATORS.md) answers 200 text/html with <title>, a meta description,
+      og:title / og:description equal to the plain values and an ABSOLUTE og:image: the page shape the standard
+      prose describes, independent of the two exhaustive-only edge rules (Open Graph wins; relative og:image).
+    * Normal form: lower-case host, no port, non-empty path of unreserved characters, no query, no fragment, no
+      trailing slash, so an app that stores a normalised address returns the same `url` string
+      (previews.get.persists compares it).
+    * {rand}: Preview.url is not unique by spec; the value is still distinct per check context and per `fresh`
+      setup step, because the prose is silent on saving the same link twice and an app may reasonably return the
+      existing preview or refuse the duplicate.
+samples:
+  url: "{upstream_base}/page/llmlab-{rand}"

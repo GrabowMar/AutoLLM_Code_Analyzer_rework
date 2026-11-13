@@ -10,6 +10,8 @@
 		/** Display size in px — used for both the img and fallback badge */
 		size?: number;
 		class?: string;
+		/** Next to visible provider text: hidden from assistive tech (no duplicate "x logo"). */
+		decorative?: boolean;
 	}
 
 	// Map known AI provider slugs → their website domains
@@ -48,7 +50,7 @@
 		'gryphe': 'gryphe.com',
 	};
 
-	let { provider, size = 20, class: cls = '' }: Props = $props();
+	let { provider, size = 20, class: cls = '', decorative = false }: Props = $props();
 
 	const key = $derived(provider.toLowerCase().trim());
 	const domain = $derived(DOMAINS[key] ?? null);
@@ -71,7 +73,8 @@
 {#if faviconUrl && !failed}
 	<img
 		src={faviconUrl}
-		alt="{provider} logo"
+		alt={decorative ? '' : `${provider} logo`}
+		aria-hidden={decorative ? 'true' : undefined}
 		width={size}
 		height={size}
 		loading="lazy"
@@ -83,8 +86,9 @@
 	<span
 		class="inline-flex shrink-0 items-center justify-center rounded-sm border border-border bg-muted font-bold text-muted-foreground leading-none {cls}"
 		style="width:{size}px; height:{size}px; font-size:{Math.max(11, Math.round(size * 0.42))}px;"
-		role="img"
-		aria-label="{provider} logo"
+		role={decorative ? undefined : 'img'}
+		aria-label={decorative ? undefined : `${provider} logo`}
+		aria-hidden={decorative ? 'true' : undefined}
 	>
 		{initials}
 	</span>

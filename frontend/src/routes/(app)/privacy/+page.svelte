@@ -2,8 +2,8 @@
 	/**
 	 * Privacy — what this LLM Lab instance actually keeps about you, where, and
 	 * what leaves it. Kept in step with Settings → Privacy & data
-	 * (PrivacyDataSection), CookieBanner, the preferences store and the drafts
-	 * kept in sessionStorage.
+	 * (PrivacyDataSection), CookieBanner, the preferences store and the other
+	 * local/session storage keys (analysis form, evaluation portal, human-eval wizard).
 	 */
 	import { modeStorageKey } from 'mode-watcher';
 	import * as Card from '$lib/components/ui/card';
@@ -18,13 +18,16 @@
 		{ name: 'llm-lab-preferences', where: 'Local storage', purpose: 'Sidebar state, table density and avatar color.' },
 		{ name: modeStorageKey.current, where: 'Local storage', purpose: 'Light, dark or system theme.' },
 		{ name: 'llm_lab_stay_logged_in', where: 'Local storage', purpose: 'Your last "Stay signed in" choice on the sign-in form.' },
-		{ name: 'sample-generator:draft:…, experiment-composer:…', where: 'Session storage', purpose: 'Unsaved generator and experiment drafts; gone when the tab closes.' },
+		{ name: 'analysis.lastTools', where: 'Local storage', purpose: 'The analyzers you picked last on the new-analysis form.' },
+		{ name: 'heval.console.…, heval.workbench.split', where: 'Local storage', purpose: 'Evaluation portal: per-assignment request history (and, only if you tick it, the auth header) and the panel split. The console entries are cleared when you sign out of the portal.' },
+		{ name: 'llmlab:human-eval:new-task:v3', where: 'Session storage', purpose: 'The unsaved new human-evaluation task; gone when the tab closes.' },
+		{ name: 'llm_lab_chunk_reload', where: 'Session storage', purpose: 'Stops the page reloading more than once after an update.' },
 	]);
 
 	const server = [
 		{ title: 'Your account', desc: 'Email address, name and profile details. Passwords are stored only as salted hashes.' },
 		{ title: 'Keys and secrets', desc: 'OpenRouter, Hugging Face and provider API keys, your GitHub token and notification-channel secrets, encrypted at rest. Personal API tokens are stored only as a hash.' },
-		{ title: 'Your work', desc: 'Generated applications, analyses and their findings, experiments and reports you create. Staff of this instance can see every job and run.' },
+		{ title: 'Your work', desc: 'Generated applications, analyses and their findings, experiments (drafts included: they are saved on the server) and reports you create. Staff of this instance can see every run.' },
 	];
 
 	const outbound = [

@@ -1,0 +1,8 @@
+name: Plain CSS
+description: Hand-written CSS files; no framework, preprocessor or component library.
+content:
+  system: plain-css
+  fragment: style-plain-css@1
+  adherence:
+    forbidden_markers: [tailwindcss, bootstrap, '@mui/material', vuetify, primevue, daisyui, sass]
+  compatible_frontends: [react, vue, svelte, none, free]

@@ -31,13 +31,13 @@ def get_task_apps(request, task_id: uuid.UUID):
 
 @router.post("tasks/{uuid:task_id}/apps/", response={200: list[TaskAppSchema], **error_responses(400, 404, 409)})
 def post_task_apps(request, task_id: uuid.UUID, payload: TaskAppsAddIn):
-    """Add jobs and/or an experiment's current attempts to a draft task; returns the whole pool."""
+    """Add runs and/or a study's current runs to a draft task; returns the whole pool."""
     task = access.researcher_task(request, task_id, for_update=True)
-    pool_service.add_jobs(
+    pool_service.add_runs(
         task,
         request.auth,
-        job_ids=payload.job_ids,
-        experiment_id=payload.experiment_id,
+        run_ids=payload.run_ids,
+        study_id=payload.study_id,
         current_only=payload.current_only,
     )
     return pool_service.list_task_apps(task)
