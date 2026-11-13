@@ -142,13 +142,19 @@ def save_dns(state: Path, result: dict) -> None:
         "| --- | --- | --- |",
     ]
     rows += [f"| {r['type']} | {r['name']} | `{r['value']}` |" for r in result["records"]]
+    ptr_note = (
+        f"Set the server's reverse DNS (PTR) for **{result['public_ip']}** to **{result['hostname']}** "
+        "in your hosting provider's panel."
+    )
+    txt_note = (
+        "TXT values longer than 255 bytes must be split into quoted chunks within a single DNS record; "
+        "most DNS panels do this automatically."
+    )
     rows += [
         "",
-        f"Set the server's reverse DNS (PTR) for **{result['public_ip']}** to **{result['hostname']}** "
-        "in your hosting provider's panel.",
+        ptr_note,
         "",
-        "TXT values longer than 255 bytes must be split into quoted chunks within a single DNS record; "
-        "most DNS panels do this automatically.",
+        txt_note,
         "",
         "After propagation, run `python3 scripts/postal.py verify`, then `python3 scripts/postal.py configure-app`.",
         "",
