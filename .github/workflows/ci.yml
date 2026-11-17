@@ -89,7 +89,15 @@ jobs:
         run: docker compose -f docker-compose.local.yml run --rm django python manage.py migrate
 
       - name: Run Django Tests
-        run: docker compose -f docker-compose.local.yml run django pytest
+        run: docker compose -f docker-compose.local.yml run django pytest --junitxml=test-results/backend.xml
+
+      - name: Upload backend test results
+        if: always() && hashFiles('test-results/backend.xml') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-test-results
+          path: test-results/backend.xml
+          if-no-files-found: error
 
       - name: Tear down the Stack
         if: always()

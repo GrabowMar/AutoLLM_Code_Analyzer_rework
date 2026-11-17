@@ -85,7 +85,7 @@ def test_conditional_deployment_uses_the_selected_evaluation_stage_evidence():
         stages={"build": {"status": "fail"}},
         eval_suite=SimpleNamespace(ref="suite@1"),
     )
-    view = SimpleNamespace(latest_evaluation=lambda: evaluation)
+    view = SimpleNamespace(latest_evaluation=lambda: evaluation, task_dict=lambda: {"variant": "standard"})
     run = SimpleNamespace(outcome="tested", outcome_reason="")
     fields = _evaluation_fields(view, run)
     assert fields["deployed"] is False
