@@ -57,6 +57,7 @@
 	let days = $state<number | null>(30);
 	let toolDays = $state<number | null>(null);
 	let studyId = $state('');
+	let evalSuite = $state('');
 	let includeAi = $state(false);
 	let countScratch = $state(false);
 	let countTests = $state(false);
@@ -80,6 +81,7 @@
 		const type = page.url.searchParams.get('type');
 		if (type && REPORT_TYPES.some((t) => t.key === type)) selectedType = type as ReportType;
 		studyId = page.url.searchParams.get('study_id') ?? '';
+		evalSuite = page.url.searchParams.get('eval_suite') ?? '';
 	}
 
 	onMount(async () => {
@@ -174,6 +176,7 @@
 				break;
 			case 'study_report':
 				out.push(['Scope', selectedStudy?.name ?? 'all my apps']);
+				out.push(['Evaluation', evalSuite.trim() || 'Planned suite']);
 				out.push(['Seed', String(seed ?? 0)]);
 				break;
 		}
@@ -229,6 +232,7 @@
 			// Unset unless ticked: an explicit value differing from a locked plan adds a validity note.
 			const c: StudyReportConfig = excludeTruncatedConfig(excludeTruncated);
 			if (studyId) c.study_id = studyId;
+			if (evalSuite.trim()) c.eval_suite = evalSuite.trim();
 			// Unset by default: tests and the agent's scratch scripts are counted apart from the app.
 			if (countTests) c.code_scope = 'all';
 			else if (countScratch) c.code_scope = 'with_scratch';
@@ -414,8 +418,13 @@
 					{@render excludeTruncatedOption("If the experiment's analysis plan is locked, its truncated-runs rule applies instead.")}
 				{:else if selectedType === 'study_report'}
 					<div class="space-y-1.5">
-						{@render field('rep-study-scope', 'Experiment', 'Optional. With an experiment, its locked analysis plan decides which comparisons are confirmatory (and its exclusions win over the option below).')}
+						{@render field('rep-study-scope', 'Experiment', 'Choose one experiment for comparable runs and task coverage. Its locked analysis plan determines confirmatory comparisons and exclusions. All my apps is an exploratory rollup that can mix experiments.')}
 						<Select.Simple id="rep-study-scope" bind:value={studyId} placeholder="All my apps" items={[{ value: '', label: 'All my apps' }, ...studyItems]} />
+					</div>
+					<p class="text-xs text-muted-foreground">After generation, open Notebook → Run all to export the complete analysis, figures and evidence checks.</p>
+					<div class="space-y-1.5">
+						{@render field('rep-eval-suite', 'Evaluation suite', 'Leave blank to use each app’s planned suite. For a versioned reanalysis, choose one suite for every app; unavailable evaluations remain missing. Changing the planned instrument makes the reanalysis exploratory.')}
+						<Input id="rep-eval-suite" bind:value={evalSuite} placeholder="Planned suite, or a version such as eval-v2@2" />
 					</div>
 					{@render excludeTruncatedOption("With an experiment whose analysis plan is locked, the plan's truncated-runs rule applies; leave this off to follow it.")}
 					<div class="grid gap-4 @xl:grid-cols-[12rem_minmax(0,1fr)] @xl:items-start">
@@ -423,7 +432,7 @@
 						<div class="space-y-2 @xl:pt-6">
 							<label class="flex cursor-pointer items-center gap-2 text-sm">
 								<Checkbox bind:checked={bootstrap} />
-								Bootstrap rank intervals over apps <span class="text-xs text-muted-foreground">(slower)</span>
+								Bootstrap rank intervals over shared tasks <span class="text-xs text-muted-foreground">(slower)</span>
 							</label>
 							<label class="flex cursor-pointer items-center gap-2 text-sm">
 								<Checkbox bind:checked={includeAi} />

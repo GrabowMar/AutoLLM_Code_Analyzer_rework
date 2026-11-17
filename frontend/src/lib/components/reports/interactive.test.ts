@@ -268,17 +268,21 @@ describe("notebook", () => {
     };
     const nb = buildNotebook(report, doc, "https://lab.example");
     expect(notebookPaths(report)).toEqual({
-      dir: "reports/RPT-7DF60BD5",
-      notebook: "reports/RPT-7DF60BD5/report.ipynb",
-      data: "reports/RPT-7DF60BD5/report.json",
+      dir: "reports/RPT-7DF60BD5-rpt_7df60bd5d38755b6",
+      notebook: "reports/RPT-7DF60BD5-rpt_7df60bd5d38755b6/report.ipynb",
+      data: "reports/RPT-7DF60BD5-rpt_7df60bd5d38755b6/report.json",
     });
     const src = nb.cells.map((c) => c.source).join("\n");
     expect(src).toContain("open('report.json')");
     expect(src).toContain("## Table 1 · Plan metrics by model");
-    expect(src).toContain('col = "Pass rate"');
+    expect(src).toContain("run_report_workflow(report");
     expect(src).toContain("## Table 2 · Empty");
     expect(src).toContain("What if: re-rank");
     expect(src).toContain("/api/reports/rpt_7df60bd5d38755b6/tables/");
     expect(nb.metadata.kernelspec).toMatchObject({ name: "python" });
+    expect(new Set(nb.cells.map((c) => c.id)).size).toBe(nb.cells.length);
+    expect(src).toContain("async def fetch_live_tables():");
+    expect(src).not.toContain("live = await");
+    expect(src).toContain("report = json.loads(");
   });
 });

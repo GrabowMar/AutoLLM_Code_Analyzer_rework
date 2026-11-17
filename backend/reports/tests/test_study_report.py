@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
 from backend.analysis.models import ToolResult
+from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import FindingFactory
 from backend.analysis.tests.factories import ToolResultFactory
 from backend.generation.models import GenerationRun
@@ -158,7 +159,8 @@ def test_study_report_sections(study):
     overall = data["funnel"]["overall"]
     assert (overall["runs"], overall["evaluated"]) == (12, 12)
     assert overall["deployed"] == sum(1 for i in range(12) if STATUSES[i % 6] in ("passed", "failed"))
-    assert overall["deploy_rate"]["ci95"][0] < overall["deploy_rate"]["rate"] < overall["deploy_rate"]["ci95"][1]
+    assert overall["deploy_rate"]["ci95"] is None
+    assert "fixed endpoint/condition" in overall["deploy_rate"]["ci_assumptions"]
 
     # Bandit B105 + Ruff S105 on the same line are one issue.
     totals = data["issues"]["totals"]
@@ -166,7 +168,7 @@ def test_study_report_sections(study):
 
     sev = {r["severity"]: r for r in data["security_bounds"]["overall"]}
     assert sev["critical"]["issues"] == 0
-    assert sev["critical"]["zero_rate_upper95"] == pytest.approx(1 - 0.05 ** (1 / 12), abs=1e-4)
+    assert sev["critical"]["zero_rate_upper95"] is None
 
     corr = data["correlations"]
     assert corr["status"] == "exploratory"
@@ -177,6 +179,12 @@ def test_study_report_sections(study):
     )
     assert test["n_models"] == 4
     assert "p_holm" in test
+
+    tool_rows = data["issues"]["by_group_tool"]
+    bandit = next(row for row in tool_rows if row["tool"] == "bandit")
+    assert bandit["raw_findings_per_app"] == 1
+    assert bandit["apps_measured"] == 3
+    assert bandit["complete_coverage"]
 
     assert data["ranking"]["models_ranked"] == 4
     assert data["ranking"]["data_uncertainty"]["draws"] > 0
@@ -352,6 +360,9 @@ def test_truncated_runs_are_kept_by_default_and_the_plan_governs_exclusion(study
     data = study_report.generate_study_report({"study_id": str(study.id)}, user=user)
     assert data["funnel"]["overall"]["runs"] == 12
     assert data["funnel"]["overall"]["truncated"] == 1
+    warning = next(v["message"] for v in data["validity"] if v["code"] == "truncated")
+    assert "1 remain in this analysis and 0 were excluded" in warning
+    assert "hit max_tokens" not in warning
 
     _set_plan(study, exclusions={"truncated": False})
     data = study_report.generate_study_report({"study_id": str(study.id), "exclude_truncated": True}, user=user)
@@ -364,6 +375,8 @@ def test_truncated_runs_are_kept_by_default_and_the_plan_governs_exclusion(study
     data = study_report.generate_study_report({"study_id": str(study.id)}, user=user)
     assert data["funnel"]["overall"]["runs"] == 11
     assert data["protocol"]["truncated_excluded"] == 1
+    warning = next(v["message"] for v in data["validity"] if v["code"] == "truncated")
+    assert "0 remain in this analysis and 1 were excluded" in warning
     assert "plan_exclusions" not in {v["code"] for v in data["validity"]}
 
 
@@ -378,7 +391,7 @@ def test_one_correction_covers_every_declared_metric(study):
     planned = data["planned_comparisons"]
     tested = _tested(planned)
     assert (planned["multiplicity"], planned["comparisons_tested"]) == ("all", 6)  # 2 metrics x 3 conditions
-    # The family size is the m Holm corrected over: comparisons with no non-zero delta have no p and are not in it.
+    # All eligible comparisons remain in the correction, including all-zero differences with p=1.
     with_p = [c for c in tested if c["p_wilcoxon"] is not None]
     assert planned["family_size"] == len(with_p)
     smallest = min(with_p, key=lambda c: c["p_wilcoxon"])
@@ -483,6 +496,7 @@ def test_security_bounds_count_code_security_issues_only(study):
     assert (sev["critical"]["issues"], sev["high"]["issues"]) == (0, 0)
     zero = next(v for v in data["validity"] if v["code"] == "zero_severe")
     assert "No critical or high code security issues" in zero["message"]
+    assert "pooled binomial confidence bound is withheld" in zero["message"]
     assert data["issues"]["totals"]["dependency_unique"] == 12
     starter = next(v for v in data["validity"] if v["code"] == "starter_dependencies")
     assert starter["section"] == "issues, security_bounds"
@@ -562,7 +576,25 @@ def test_the_latest_evaluation_counts_and_not_measured_is_not_evaluated(repeats_
     row = next(r for r in data["per_app"] if r["run_id"] == str(run.id))
     assert (row["evaluation_status"], row["evaluated"], row["pass_rate"]) == ("not_measured", False, None)
     assert data["funnel"]["overall"]["evaluated"] == 2
-    assert "infra_errors" in {v["code"] for v in data["validity"]}
+    assert "unmeasured_evaluations" in {v["code"] for v in data["validity"]}
+
+
+def test_missing_grade_warning_separates_known_application_failure_from_unknown_outcome(repeats_study):
+    user, study = repeats_study
+    run = GenerationRun.objects.filter(study=study).order_by("created_at").first()
+    evaluate(run, measured=False)
+    failed = _evaluated_run(
+        make_cell(run.condition, make_unit(study.active_plan), block_index=3),
+        user,
+        "build_failed",
+    )
+    evaluate(failed, measured=False)
+    data = study_report.generate_study_report({"study_id": str(study.id)}, user=user)
+    warning = next(v for v in data["validity"] if v["code"] == "unmeasured_evaluations")
+    assert "2 evaluation(s) have no measured grade" in warning["message"]
+    assert "1 have a known output/build/start failure" in warning["message"]
+    assert "1 have an unknown all-check-pass outcome" in warning["message"]
+    assert data["funnel"]["overall"]["end_to_end_functional_bounds"]["unknown_runs"] == 1
 
 
 def test_mixed_repeats_use_a_cluster_bootstrap():
@@ -734,7 +766,7 @@ def test_protocol_names_the_study_baseline_and_plan(study):
     assert f"vs baseline {baseline}" in md
     assert "## Plan metrics by model" in md
     tex = renderers.render_latex(report)
-    assert "Correct \\textbar{} deployed" in tex
+    assert "All checks passed \\textbar{} deployed" in tex
     assert "\\textless{} 0.05" in tex
 
 
@@ -892,3 +924,88 @@ def test_uncovered_ai_findings_are_not_counted(study):
         "| AI-reviewer findings | requested, but none counted (no AI reviewer reviewed every analyzed run) |"
         in _md(data)
     )
+
+
+def test_group_tool_measurements_average_repeats_and_keep_missing_cells():
+    user = UserFactory()
+    model = LLMModelFactory()
+    runs = [make_run(user, model) for _ in range(5)]
+    rows = [
+        {
+            "run_id": str(run.pk),
+            "model": model.model_id,
+            "group": "A" if i < 3 else "B",
+            "condition_id": 1 if i < 3 else 2,
+            "unit_key": "repeat" if i < 2 else str(i),
+        }
+        for i, run in enumerate(runs)
+    ]
+    for run, count in zip(runs[:3], [2, 6, 10], strict=True):
+        analyze(run, {"bandit": [{"severity": "low"}] * count})
+    analyze(runs[3], {"bandit": []}, statuses={"bandit": "failed"})
+    analyze(runs[0], {"ruff": []})
+    # A rerun replaces this tool only; a later failed attempt retains the completed result.
+    analyze(runs[0], {"bandit": [{"severity": "low"}] * 4})
+    analyze(runs[0], {"bandit": [{"severity": "low"}] * 20}, statuses={"bandit": "failed"})
+    outsider = make_run(user, model)
+    analyze(outsider, {"unrelated": []})
+
+    data = study_report.group_tool_measurements(rows, "condition", common_tools=["bandit"])
+    cells = {(r["group"], r["tool"]): r for r in data}
+    assert set(cells) == {("A", "bandit"), ("B", "bandit"), ("A", "ruff"), ("B", "ruff")}
+    bandit = cells[("A", "bandit")]
+    assert bandit["raw_findings"] == 20
+    assert bandit["raw_findings_per_app"] == 7.5  # mean(mean(4, 6), 10), not mean(4, 6, 10)
+    assert bandit["apps_measured"] == bandit["apps_total"] == 2
+    assert bandit["runs_measured"] == 3
+    assert bandit["complete_coverage"] is True
+    assert bandit["counted_in_comparison"] is True
+    assert bandit["condition_id"] == 1
+    clean = cells[("A", "ruff")]
+    assert clean["raw_findings_per_app"] == 0
+    assert clean["apps_measured"] == 1
+    assert clean["complete_coverage"] is False
+    for slug, with_result in [("bandit", 1), ("ruff", 0)]:
+        missing = cells[("B", slug)]
+        assert missing["raw_findings_per_app"] is None
+        assert missing["raw_findings"] is None
+        assert missing["runs_with_result"] == with_result
+        assert missing["runs_total"] == 2
+
+
+def test_group_tool_measurements_classify_tools_and_skip_unmeasured_results():
+    user = UserFactory()
+    model = LLMModelFactory()
+    run = make_run(user, model)
+    rows = [{"run_id": str(run.pk), "model": model.model_id, "group": model.model_id}]
+    AnalyzerToolFactory(slug="runtime-probe", analysis_mode="dynamic")
+    AnalyzerToolFactory(slug="pip-audit", analysis_mode="static", category="dependencies")
+    AnalyzerToolFactory(slug="ai-audit", kind="ai", category="ai")
+    analysis = analyze(run, {"pip-audit": [], "runtime-probe": [], "ai-audit": [], "bandit": []})
+    ToolResult.objects.filter(run=analysis, tool_slug="bandit").update(
+        summary={"measurement": "not_measured", "skip_reason": "not_applicable"},
+    )
+    data = study_report.group_tool_measurements(rows, "model")
+    tools = {r["tool"]: r for r in data}
+    assert "ai-audit" not in tools
+    assert tools["pip-audit"]["is_dependency_scanner"] is True
+    assert tools["runtime-probe"]["analysis_mode"] == "dynamic"
+    assert tools["pip-audit"]["analysis_mode"] == "static"
+    assert tools["bandit"]["raw_findings_per_app"] is None
+    assert tools["bandit"]["apps_measured"] == 0
+    data = study_report.group_tool_measurements(rows, "model", include_ai=True)
+    assert next(r for r in data if r["tool"] == "ai-audit")["is_ai"] is True
+
+
+def test_group_tool_measurements_do_not_assume_deleted_tools_are_static():
+    user = UserFactory()
+    run = make_run(user, LLMModelFactory())
+    analysis = analyze(run, {"legacy-probe": [], "legacy-reviewer": []})
+    ToolResult.objects.filter(run=analysis, tool_slug="legacy-reviewer").update(category="ai")
+    rows = [{"run_id": str(run.pk), "group": "model", "model": "model"}]
+    data = study_report.group_tool_measurements(rows, "model")
+    assert [row["tool"] for row in data] == ["legacy-probe"]
+    assert data[0]["analysis_mode"] == "unknown"
+    assert data[0]["raw_findings_per_app"] == 0
+    data = study_report.group_tool_measurements(rows, "model", include_ai=True)
+    assert next(row for row in data if row["tool"] == "legacy-reviewer")["is_ai"] is True

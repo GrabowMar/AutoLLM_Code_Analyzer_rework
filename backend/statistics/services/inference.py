@@ -99,6 +99,7 @@ def spearman_permutation_p(
     *,
     seed: int = 0,
     draws: int = PERMUTATION_DRAWS,
+    digits: int | None = 4,
 ) -> float | None:
     """Two-sided permutation p for Spearman's rho: exact up to n = 8, Monte Carlo above.
 
@@ -106,9 +107,9 @@ def spearman_permutation_p(
     with ties). The Monte Carlo p counts the observed statistic, so it is
     never 0. The threshold is the unrounded rho (the rounded one that
     :func:`spearman` returns for display can sit above the arrangements that
-    equal it, which made p too small). The p is rounded to 4 significant
-    figures, not 4 decimals, so a correction applied to it starts from the
-    real value.
+    equal it, which made p too small). Set ``digits=None`` to retain the raw
+    probability for multiplicity correction; the default rounds to four
+    significant figures for display.
     """
     if len(xs) < 3 or len(xs) != len(ys):
         return None
@@ -124,7 +125,8 @@ def spearman_permutation_p(
             r = _pearson(rx, perm)
             total += 1
             hits += r is not None and abs(r) >= observed
-        return round_p(hits / total)
+        p = hits / total
+        return p if digits is None else round_p(p, digits)
     rng = random.Random(seed)  # noqa: S311 - reproducible resampling, not crypto
     shuffled = list(ry)
     hits = 0
@@ -132,7 +134,8 @@ def spearman_permutation_p(
         rng.shuffle(shuffled)
         r = _pearson(rx, shuffled)
         hits += r is not None and abs(r) >= observed
-    return round_p((hits + 1) / (draws + 1))
+    p = (hits + 1) / (draws + 1)
+    return p if digits is None else round_p(p, digits)
 
 
 def spearman_bootstrap_ci(

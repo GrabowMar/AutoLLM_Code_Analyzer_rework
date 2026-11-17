@@ -463,3 +463,18 @@ export function turnTools(turn: TrajectoryTurn): string {
     .map(([name, k]) => (k > 1 ? `${name} ×${k}` : name))
     .join(" · ");
 }
+
+/** New evaluations become current after finalization; unfinished work does not replace the reading. */
+export function currentEvaluation(
+  rows: RunEvaluationOut[],
+): RunEvaluationOut | null {
+  const candidates = rows.filter((row) => row.retest_of === null);
+  const final = candidates.filter((row) =>
+    ["measured", "not_measured", "error"].includes(row.status),
+  );
+  return (
+    [...(final.length ? final : candidates)].sort(
+      (a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id,
+    )[0] ?? null
+  );
+}

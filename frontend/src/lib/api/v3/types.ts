@@ -2326,6 +2326,10 @@ export interface RunListOut {
 }
 
 export interface RunListQuery {
+  /** Recorded evaluation deployment, independent of generation lifecycle status. */
+  deployment?: "started" | "failed" | "unknown";
+  /** Preview container state recorded by the runtime service. */
+  preview_running?: boolean;
   study?: string;
   condition?: number;
   kind?: RunKind | string;
@@ -2371,6 +2375,34 @@ export interface RunFacetsOut {
   harnesses: RunFacetValue[];
   stacks: RunFacetValue[];
   studies: RunFacetValue[];
+  deployments?: RunFacetValue[];
+}
+
+export interface FeatureCheckScanItem {
+  run_id: string;
+  deployment: "started" | "failed" | "unknown";
+  evaluation_id: number | null;
+  eval_suite: string | null;
+  evaluation_status: string;
+  measured: boolean;
+  checks: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  failed_checks: Pick<
+    EvalCheckResult,
+    "id" | "category" | "endpoint" | "status" | "note"
+  >[];
+  skipped_checks: Pick<
+    EvalCheckResult,
+    "id" | "category" | "endpoint" | "status" | "note"
+  >[];
+  uncovered_requirements: { id: string; kind: string; description: string }[];
+  excluded_flaky_checks: string[];
+}
+
+export interface FeatureCheckScanOut extends Page<FeatureCheckScanItem> {
+  note: string;
 }
 
 export interface RunAttemptOut {
@@ -2628,6 +2660,7 @@ export interface RunOut extends RunListOut {
   /** `contracts.outcome.RunMetrics` */
   metrics: Record<string, unknown>;
   latest_evaluation: RunEvaluationOut | null;
+  evaluation_in_progress?: boolean;
   error_message: string;
   started_at: string | null;
   completed_at: string | null;

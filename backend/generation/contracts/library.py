@@ -357,6 +357,12 @@ class TaskOracleEntry(ContractModel):
     run_id: str | None = None
     eval_suite_ref: str | None = None
     at: str | None = None
+    validation_run_ids: list[str] = Field(default_factory=list)
+    reference_pass_rates: list[float | None] = Field(default_factory=list)
+    starter_run_id: str | None = None
+    starter_pass_rate: float | None = None
+    starter_measured: bool | None = None
+    flaky_checks: list[str] = Field(default_factory=list)
 
 
 # =====================================================================================

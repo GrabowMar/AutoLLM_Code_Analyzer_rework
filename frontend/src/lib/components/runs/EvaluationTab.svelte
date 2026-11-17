@@ -3,7 +3,7 @@
 	 * EvaluationTab — a sample's RunEvaluations (spec 8, 10.4): the stage strip, `ChecksTable` (grouped by
 	 * category; infra and flaky checks apart and never counted; the starter baseline shown), `ProbesTable`
 	 * (CWE, exploited / not exploited / skipped with reason, evidence), the adherence record, and reuse /
-	 * retest markers. Evaluations are append-only: the latest non-retest row per suite is the reading;
+	 * retest markers. Evaluations are append-only: the newest final non-retest row is the current reading;
 	 * anything not measured says so and is never shown as a 0 or a clean result.
 	 *
 	 * Props: `run`, `version` (bump to reload), `oncreated` (after "Re-evaluate").
@@ -26,6 +26,7 @@
 	import { evaluateSample, listSampleEvaluations } from '$lib/api/v3/samples';
 	import { EVAL_STAGE_KEYS, type RunEvaluationOut, type RunOut } from '$lib/api/v3/types';
 	import {
+		currentEvaluation,
 		evaluationSummary,
 		fmtRate,
 		fmtSeconds,
@@ -52,10 +53,11 @@
 	async function load(signal?: AbortSignal) {
 		loading = untrack(() => evaluations.length === 0);
 		error = '';
+		const followCurrent = untrack(() => !selectedId || selectedId === String(currentEvaluation(evaluations)?.id));
 		try {
 			evaluations = await listSampleEvaluations(run.id, { signal });
-			const reading = readingOf(evaluations);
-			if (!selectedId || !evaluations.some((e) => String(e.id) === selectedId)) {
+			const reading = currentEvaluation(evaluations);
+			if (followCurrent || !evaluations.some((e) => String(e.id) === selectedId)) {
 				selectedId = reading ? String(reading.id) : '';
 			}
 		} catch (e) {
@@ -65,11 +67,6 @@
 		}
 	}
 
-	/** The reading: the newest non-retest evaluation (append-only rows; readers take the latest). */
-	function readingOf(rows: RunEvaluationOut[]): RunEvaluationOut | null {
-		const candidates = rows.filter((e) => e.retest_of === null);
-		return candidates.sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
-	}
 
 	$effect(() => {
 		void version;

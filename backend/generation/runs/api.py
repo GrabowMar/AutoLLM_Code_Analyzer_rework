@@ -44,6 +44,7 @@ from backend.generation.agentic import actions
 from backend.generation.agentic import evidence
 from backend.generation.agentic.runner import attempt_number
 from backend.generation.contracts import ErrorOut
+from backend.generation.evaluation.supersede import current_evaluation
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationRun
 from backend.generation.models import RunAttempt
@@ -51,6 +52,9 @@ from backend.generation.models import RunEvaluation
 from backend.generation.models import TaskSpecVersion
 from backend.generation.models.choices import Outcome
 from backend.generation.models.choices import RunStatus
+from backend.generation.runs.application_checks import feature_check_summary
+from backend.generation.runs.application_checks import with_deployment
+from backend.generation.runs.application_checks import with_preview_status
 from backend.generation.runs.view import RunView
 from backend.generation.runs.view import run_view
 from backend.generation.runs.view import run_views
@@ -155,6 +159,7 @@ class RunOut(RunListOut):
     result: dict[str, Any]
     metrics: dict[str, Any]
     latest_evaluation: RunEvaluationOut | None = None
+    evaluation_in_progress: bool = False
     error_message: str
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -248,6 +253,8 @@ class RunFilters(Schema):
     outcome: str | None = None
     model: str | None = None
     usable: bool | None = None
+    deployment: Literal["started", "failed", "unknown"] | None = None
+    preview_running: bool | None = None
     beyond_plan: bool | None = None
     task: str | None = None  # task slug
     harness: str | None = None  # harness preset ``slug@version`` (or a bare slug: every version)
@@ -281,6 +288,15 @@ class RunFacetsOut(Schema):
     harnesses: list[FacetValueOut]
     stacks: list[FacetValueOut]
     studies: list[FacetValueOut]
+    deployments: list[FacetValueOut]
+
+
+class FeatureCheckScanOut(Schema):
+    items: list[dict[str, Any]]
+    total: int
+    page: int
+    page_size: int
+    note: str
 
 
 # =====================================================================================
@@ -474,6 +490,10 @@ def _filtered(request: HttpRequest, filters: RunFilters) -> QuerySet[GenerationR
         runs = runs.filter(model__model_id=filters.model)
     if filters.usable is not None:
         runs = runs.filter(usable=filters.usable)
+    if filters.deployment:
+        runs = with_deployment(runs).filter(_deployment=filters.deployment)
+    if filters.preview_running is not None:
+        runs = with_preview_status(runs).filter(_preview_running=filters.preview_running)
     if filters.beyond_plan is not None:
         runs = runs.filter(beyond_plan=filters.beyond_plan)
     if filters.task:
@@ -553,6 +573,17 @@ def run_facets(request: HttpRequest, filters: Query[RunFilters]) -> Any:
         for v, n in counts(scope(study=None), "study_id", "study__name")
     ]
 
+    deployment_scope = scope(deployment=None)
+    deployment_counts = dict(counts(with_deployment(deployment_scope), "_deployment"))
+    deployments = [
+        {"value": value, "label": label, "count": deployment_counts.get((value,), 0)}
+        for value, label in (
+            ("started", "Built and started"),
+            ("failed", "Failed or invalid"),
+            ("unknown", "Start unconfirmed"),
+        )
+    ]
+
     measured = base.filter(metrics__eval__status="measured", metrics__eval__measured=True)
     agg = measured.aggregate(
         n=Count("id"),
@@ -573,6 +604,53 @@ def run_facets(request: HttpRequest, filters: Query[RunFilters]) -> Any:
         "harnesses": harnesses,
         "stacks": stacks,
         "studies": studies,
+        "deployments": deployments,
+    }
+
+
+@router.get("/runs/feature-scan/", response={200: FeatureCheckScanOut, 400: ErrorOut})
+def scan_feature_checks(request: HttpRequest, filters: Query[RunFilters]) -> Any:
+    """Scan recorded checks on the requested page; no generation or evaluation is launched."""
+    runs = _filtered(request, filters)
+    if isinstance(runs, Status):
+        return runs
+    key = (filters.sort or "-created").strip()
+    expr = _sort_expr(key.lstrip("-"))
+    if expr is None:
+        return Status(400, {"detail": f"unknown sort: {key}", "code": "invalid_filter"})
+    runs = with_deployment(runs).order_by(
+        expr.desc(nulls_last=True) if key.startswith("-") else expr.asc(nulls_last=True),
+        "-created_at",
+        "pk",
+    )
+    total = runs.count()
+    start = (filters.page - 1) * filters.page_size
+    rows = list(runs.select_related("task_version")[start : start + filters.page_size])
+    evaluations = RunEvaluation.objects.select_related("eval_suite").in_bulk(
+        row._selected_evaluation  # noqa: SLF001
+        for row in rows
+        if row._selected_evaluation is not None  # noqa: SLF001
+    )
+    return {
+        "items": [
+            {
+                "run_id": str(row.pk),
+                "deployment": row._deployment,  # noqa: SLF001
+                **feature_check_summary(
+                    row.task_version.content if row.task_version is not None else {},
+                    evaluations.get(row._selected_evaluation),  # noqa: SLF001
+                ),
+            }
+            for row in rows
+        ],
+        "total": total,
+        "page": filters.page,
+        "page_size": filters.page_size,
+        "note": "Recorded agent checks from the current final non-retest evaluation; "
+        "infrastructure and flaky checks excluded. "
+        "Failures can indicate incorrect behavior or blocked prerequisites, not necessarily absent features. "
+        "Uncovered requirements are unverified; passing checks do not establish complete feature coverage. "
+        "API checks do not verify the UI requirements that use those endpoints.",
     }
 
 
@@ -583,7 +661,7 @@ def get_run(request: HttpRequest, run_id: UUID) -> Any:
     if run is None:
         return _not_found()
     view = run_view(run)
-    latest = view.latest_evaluation()
+    latest = current_evaluation(run) or view.latest_evaluation()
     out = _list_item(view)
     out.update(
         {
@@ -611,6 +689,10 @@ def get_run(request: HttpRequest, run_id: UUID) -> Any:
             "result": run.result or {},
             "metrics": run.metrics or {},
             "latest_evaluation": _evaluation_out(latest) if latest is not None else None,
+            "evaluation_in_progress": run.evaluations.filter(
+                retest_of__isnull=True,
+                status__in=["pending", "running"],
+            ).exists(),
             "error_message": run.error_message,
             "started_at": run.started_at,
             "completed_at": run.completed_at,

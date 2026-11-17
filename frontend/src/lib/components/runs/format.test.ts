@@ -294,3 +294,38 @@ describe("groupTurns", () => {
     ).toBe(3.5);
   });
 });
+
+describe("current evaluation selection", () => {
+  it("uses the newest final suite upgrade and ignores pending evaluations and retests", async () => {
+    const { currentEvaluation } = await import("./format");
+    const rows = [
+      {
+        id: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        status: "error",
+        retest_of: null,
+      },
+      {
+        id: 2,
+        created_at: "2026-01-02T00:00:00Z",
+        status: "measured",
+        retest_of: null,
+      },
+      {
+        id: 3,
+        created_at: "2026-01-03T00:00:00Z",
+        status: "pending",
+        retest_of: null,
+      },
+      {
+        id: 4,
+        created_at: "2026-01-04T00:00:00Z",
+        status: "error",
+        retest_of: 2,
+      },
+    ] as RunEvaluationOut[];
+    expect(currentEvaluation(rows)?.id).toBe(2);
+    expect(currentEvaluation([rows[2]])?.id).toBe(3);
+    expect(currentEvaluation([])).toBeNull();
+  });
+});

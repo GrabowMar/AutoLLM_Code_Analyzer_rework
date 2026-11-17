@@ -173,6 +173,7 @@ def test_run_accounting_counts_actual_executions(scope):
         "by_status": {"completed": 2},
         "by_outcome": {"tested": 2},
         "usable": 2,
+        "completed_runs": 2,
         "generated": 2,
         "analyzed": 2,
         "evaluated": 2,

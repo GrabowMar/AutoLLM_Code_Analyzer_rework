@@ -44,6 +44,7 @@ export class SampleLive {
     const evaluation = run.latest_evaluation?.status;
     return (
       isActiveStatus(run.status) ||
+      run.evaluation_in_progress === true ||
       evaluation === "pending" ||
       evaluation === "running"
     );
@@ -167,5 +168,9 @@ export class SampleLive {
 
 function isEvalActive(run: RunOut): boolean {
   const status = run.latest_evaluation?.status;
-  return status === "pending" || status === "running";
+  return (
+    run.evaluation_in_progress === true ||
+    status === "pending" ||
+    status === "running"
+  );
 }

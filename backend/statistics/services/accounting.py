@@ -21,6 +21,7 @@ from backend.analysis.models import ToolKind
 from backend.analysis.models import ToolResult
 from backend.generation.models import GenerationRun
 from backend.generation.models import RunEvaluation
+from backend.generation.models.choices import Outcome
 from backend.generation.models.choices import RunStatus
 
 if TYPE_CHECKING:
@@ -200,7 +201,8 @@ def run_accounting(runs: QuerySet[GenerationRun] | Iterable[GenerationRun]) -> d
             "by_status": dict(sorted(status.items())),
             "by_outcome": dict(sorted(Counter(r.outcome or "" for r in run_list).items())),
             "usable": sum(1 for r in run_list if r.usable),
-            "generated": status.get(RunStatus.COMPLETED, 0),
+            "completed_runs": status.get(RunStatus.COMPLETED, 0),
+            "generated": sum(1 for r in run_list if r.usable and r.outcome != Outcome.OUTPUT_INVALID),
             "analyzed": len(latest_ids),
             "evaluated": evaluations["suite"]["evaluated"],
             "deployed": evaluations["suite"]["deployed"],

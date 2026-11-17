@@ -9,7 +9,7 @@
 * ``run_kit(stack, suite)``: one conformance reference run per kit task from the task's reference tree
   (``data/tasks/<slug>/reference/<stack slug>/``), evaluated inline; a missing tree is recorded ``missing``.
 * ``validate_oracle(task_version, stack, suite, runs=3)``: the reference must pass 100% in every run, the
-  bare starter must score ``agent_pass_rate < 0.5``; checks with mixed results across the runs become the
+  runnable starter without task features must score ``agent_pass_rate < 0.5``; checks with mixed results become the
   suite's ``flaky_checks`` (a new suite version). The verdict goes to ``TaskSpecVersion.oracle``.
 * ``validate_probe_kinds()``: each probe kind's vulnerable mutant of the bundled reference app
   (``probe_mutants/app.py``, ``LLMLAB_VULN=<kind>``) must be ``exploited`` and the fixed app
@@ -185,17 +185,21 @@ def validate_oracle(
     auth_mode: str = "contract_bearer",
     write_flaky: bool = True,
 ) -> dict[str, Any]:
-    """Run the task's reference ``runs`` times and the bare starter once (spec 8.5); store the verdict."""
+    """Run the reference repeatedly and a measured starter negative control; store all run identities."""
     from django.utils import timezone
 
     from backend.generation.evaluation import baseline
     from backend.generation.evaluation import suite as suite_mod
     from backend.generation.models import GenerationRun
     from backend.generation.models import Starter
+    from backend.generation.models.choices import EvaluationStatus
     from backend.generation.models.choices import FileOrigin
     from backend.generation.models.choices import ReferenceOf
     from backend.generation.models.choices import RunStatus
 
+    if isinstance(runs, bool) or not isinstance(runs, int) or runs < 1:
+        msg = "oracle validation requires at least one positive-control run"
+        raise ValueError(msg)
     tree = reference if reference is not None else baseline.reference_tree(task_version.task.slug, stack.slug)
     key = baseline.oracle_key(stack)
     if tree is None:
@@ -222,17 +226,23 @@ def validate_oracle(
             status=RunStatus.COMPLETED,
             outcome=outcome,
             outcome_reason=reason,
+            completed_at=timezone.now(),
         )
         run_ids.append(str(run.pk))
         result = evaluation.result or {}
-        rates.append((result.get("metrics") or {}).get("agent_pass_rate") if result.get("measured") else None)
+        measured = evaluation.status == EvaluationStatus.MEASURED and result.get("measured")
+        rates.append((result.get("metrics") or {}).get("agent_pass_rate") if measured else None)
         for check in result.get("checks") or []:
             statuses.setdefault(check["id"], []).append(check["status"])
     flaky = sorted(cid for cid, seen in statuses.items() if len(set(seen)) > 1)
     starter_rate: float | None = None
+    starter_run_id: str | None = None
+    starter_measured = False
     starter_files = starter_tree
     if starter_files is None:
-        starter = Starter.objects.filter(stack_profile=stack, is_archived=False).order_by("level", "-version").first()
+        starters = Starter.objects.filter(stack_profile=stack, is_archived=False).order_by("-version")
+        # A bare scaffold may contain no executable app; it cannot validate a tester's negative discrimination.
+        starter = starters.filter(level="minimal").first() or starters.first()
         starter_files = baseline.starter_tree(starter) if starter is not None else None
     if starter_files:
         bare = baseline.reference_run(
@@ -247,11 +257,19 @@ def validate_oracle(
             extra={"validation_round": "starter"},
         )
         bare_eval = suite_mod.evaluate(bare, suite, eval_level="functional", runtime=runtime)
+        starter_run_id = str(bare.pk)
+        outcome, reason = suite_mod.outcome_of(bare_eval)
+        GenerationRun.objects.filter(pk=bare.pk).update(
+            status=RunStatus.COMPLETED,
+            outcome=outcome,
+            outcome_reason=reason,
+            completed_at=timezone.now(),
+        )
         result = bare_eval.result or {}
-        # A starter that does not even start scores nothing: it satisfies "< 0.5" but has no pass rate.
-        starter_rate = (result.get("metrics") or {}).get("agent_pass_rate") if result.get("measured") else None
+        starter_measured = bare_eval.status == EvaluationStatus.MEASURED and bool(result.get("measured"))
+        starter_rate = (result.get("metrics") or {}).get("agent_pass_rate") if starter_measured else None
     passing = all(r == 1.0 for r in rates if r is not None) and len([r for r in rates if r is not None]) == runs
-    ok = passing and (starter_rate is None or starter_rate < 0.5)
+    ok = passing and starter_measured and starter_rate is not None and starter_rate < 0.5
     status = "pass" if ok else "fail"
     baseline._set_oracle(  # noqa: SLF001
         task_version,
@@ -261,11 +279,25 @@ def validate_oracle(
             "run_id": run_ids[-1] if run_ids else None,
             "eval_suite_ref": suite.pinned_ref,
             "at": timezone.now().isoformat(),
+            "validation_run_ids": run_ids,
+            "reference_pass_rates": rates,
+            "starter_run_id": starter_run_id,
+            "starter_pass_rate": starter_rate,
+            "starter_measured": starter_measured,
+            "flaky_checks": flaky,
         },
     )
     if flaky and write_flaky:
         _write_flaky(suite, flaky)
-    return {"status": status, "runs": run_ids, "rates": rates, "flaky": flaky, "starter_pass_rate": starter_rate}
+    return {
+        "status": status,
+        "runs": run_ids,
+        "rates": rates,
+        "flaky": flaky,
+        "starter_run_id": starter_run_id,
+        "starter_pass_rate": starter_rate,
+        "starter_measured": starter_measured,
+    }
 
 
 def _write_flaky(suite: EvalSuite, flaky: list[str]) -> Any:

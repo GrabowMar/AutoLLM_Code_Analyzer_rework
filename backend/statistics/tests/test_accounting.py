@@ -85,3 +85,14 @@ def test_not_measured_and_errored_evaluations_are_not_counted_as_evaluated():
     assert data["apps"]["evaluated"] == 3
     assert (data["apps"]["runs"], data["apps"]["usable"]) == (5, 5)
     assert data["executions"]["dynamic"] == 6
+
+
+def test_completion_does_not_imply_valid_generated_output():
+    user = UserFactory()
+    valid = make_run(user, outcome="tested", status="completed")
+    invalid = make_run(user, outcome="output_invalid", status="completed")
+    failed_build = make_run(user, outcome="build_fail", status="completed")
+    data = accounting.run_accounting([valid, invalid, failed_build])
+    assert data["apps"]["completed_runs"] == 3
+    assert data["apps"]["generated"] == 2
+    assert data["apps"]["usable"] == 3

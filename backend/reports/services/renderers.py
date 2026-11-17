@@ -230,6 +230,16 @@ def _protocol_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
         ("Data fingerprint", (protocol.get("data_fingerprint") or "")[:16]),
         ("Resampling seed (bootstrap/permutation)", settings.get("seed")),
     ]
+    selection = protocol.get("evaluation_selection") or {}
+    if selection:
+        kv += [
+            ("Evaluation selection", selection.get("suite_ref") or "Each run's planned suite"),
+            ("Runs using a different evaluation suite than planned", selection.get("changed_from_plan_runs", 0)),
+            (
+                "Generated runs without an evaluation under the selected suite",
+                selection.get("generated_without_evaluation", 0),
+            ),
+        ]
     return kv
 
 
@@ -380,6 +390,12 @@ def _skip_note(family: dict[str, Any], planned: dict[str, Any]) -> str:
 
 
 def _no_p_note(family: dict[str, Any]) -> str:
+    all_zero = sum(1 for c in family["comparisons"] if not c.get("skipped") and c.get("all_zero"))
+    if all_zero:
+        return (
+            f"{all_zero} all-zero comparison(s) remain in the correction with p=1; "
+            "this does not establish equivalence."
+        )
     n = sum(1 for c in family["comparisons"] if not c.get("skipped") and c.get("in_family") is False)
     return (
         f"{n} comparison(s) here have no p-value (no non-zero difference) and are not in the correction." if n else ""
@@ -428,17 +444,71 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 ("runs", "Runs"),
                 ("generated", "Generated"),
                 ("evaluated", "Evaluated"),
-                ("deploy", "Deployed [95% CI]"),
-                ("functional", "Correct [95% CI]"),
-                ("given", "Correct | deployed"),
+                ("deploy", "Deployed | evaluated [95% CI]"),
+                ("functional", "All checks passed [95% CI]"),
+                ("given", "All checks passed | deployed"),
                 ("pass", "Mean pass rate"),
             ],
             funnel_rows,
             "Rates are over evaluated apps, each app's repeats averaged first (the app is the unit); counts are "
             "runs. Intervals are Wilson 95% over apps when every app's repeats agree, else a cluster bootstrap over "
-            "apps (none below 3 apps).",
+            "apps (none below 3 apps). Per-group intervals assume independent exchangeable tasks under a fixed "
+            "endpoint and instrument; the convenience cohort does not establish population representativeness.",
         ),
     )
+
+    full_cohort = [
+        {
+            "group": row.get("model", "All"),
+            "apps": row.get("apps"),
+            "deployment": _rate(row.get("end_to_end_deploy_rate")),
+            "functional_lower": (row.get("end_to_end_functional_bounds") or {}).get("lower"),
+            "functional_upper": (row.get("end_to_end_functional_bounds") or {}).get("upper"),
+            "unknown_apps": (row.get("end_to_end_functional_bounds") or {}).get("unknown_apps"),
+        }
+        for row in [*(funnel.get("by_model") or []), {**(funnel.get("overall") or {}), "model": "All"}]
+        if "end_to_end_deploy_rate" in row
+    ]
+    if full_cohort:
+        tables.append(
+            Table(
+                f"End-to-end outcomes by {group_word}",
+                [
+                    ("group", group),
+                    ("apps", "Usable apps"),
+                    ("deployment", "Observed deployment [95% CI]"),
+                    ("functional_lower", "Functional lower bound"),
+                    ("functional_upper", "Functional upper bound"),
+                    ("unknown_apps", "Apps with unmeasured grades"),
+                ],
+                full_cohort,
+                "Deployment uses final outcomes across the full usable cohort, including output/build/start failures. "
+                "Functional bounds vary unknown grades from failure to success; they are not confidence intervals. "
+                "Missing grades remain unknown. Repeats are averaged within apps. Pooled intervals across "
+                "endpoint groups are withheld; per-group intervals assume exchangeable task units.",
+            ),
+        )
+
+    alignment = data.get("requirement_alignment") or {}
+    if alignment:
+        tables.append(
+            Table(
+                "Prompt-tagged check sensitivity",
+                [
+                    ("group", group),
+                    ("runs", "Selected runs"),
+                    ("strict_measured_runs", "Measured runs"),
+                    ("strict_all_pass_runs", "All strict checks passed (runs)"),
+                    ("stated_all_pass_runs", "All stated-tagged checks passed (runs)"),
+                    ("stated_measured_runs", "Runs with stated-tagged checks"),
+                    ("strict_mean_pass_rate", "Strict mean pass fraction"),
+                    ("stated_mean_pass_rate", "Stated-tagged mean pass fraction"),
+                    ("unstated_mean_pass_rate", "Unstated-tagged mean pass fraction"),
+                ],
+                [*alignment.get("by_group", []), alignment.get("overall", {})],
+                " ".join(alignment.get("notes") or []),
+            ),
+        )
 
     outcomes = data.get("model_outcomes") or []
     if outcomes:
@@ -469,7 +539,10 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         "Security and secret issues in the app's own non-test code; dependency advisories, runtime (DAST) "
         "issues and test code are left out. Severity is the platform's normalized level (a heuristic; many "
         "tools print none). Apps are app units (affected when any repeat has the issue); issues total the runs. "
-        "For a zero count the per-app rate is bounded (exact one-sided 95%), not zero."
+        + security.get(
+            "interval_assumptions",
+            "A zero count does not establish zero risk. Any binomial bound assumes independent exchangeable apps.",
+        )
     )
     tables.append(
         Table(
@@ -594,6 +667,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         for r in ranking.get("ranking") or []
     ]
     weights = ", ".join(f"{c['label']} {c['weight']:.2f} ({c['direction']})" for c in ranking.get("criteria") or [])
+    simulation_note = ranking.get("simulation_note") or ""
     tables.append(
         Table(
             f"Ranking ({ranking.get('status', 'exploratory')})",
@@ -611,7 +685,9 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
             ],
             rank_rows,
             f"Weights: {weights}. TOPSIS vs WSM Kendall tau = {_fmt(ranking.get('topsis_vs_wsm_kendall_tau'))}. "
-            f"{ranking.get('weights_note', '')}"
+            f"{ranking.get('weights_note', '')} "
+            + (((ranking.get("data_uncertainty") or {}).get("design") or {}).get("note") or "")
+            + (f" {simulation_note}" if simulation_note else "")
             + (
                 f" Tied: {'; '.join(' = '.join(g) for g in ranking.get('tied_groups') or [])}."
                 f" {ranking.get('ties_note', '')}"
@@ -622,22 +698,29 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
     )
 
     planned = data.get("planned_comparisons") or {}
+    comparison_kind = "Planned"
+    if not planned:
+        planned = data.get("exploratory_comparisons") or {}
+        comparison_kind = "Exploratory"
     baseline = planned.get("baseline_condition")
     for family in planned.get("families") or []:
         tables.append(
             Table(
-                f"Planned comparison: {family['metric']} ({family['role']}, {family['status']}, "
+                f"{comparison_kind} comparison: {family['metric']} ({family['role']}, {family['status']}, "
                 f"{family.get('alternative', 'two-sided')})" + (f" vs baseline {baseline}" if baseline else ""),
                 [
                     ("condition", "Condition"),
                     ("n_pairs", "Apps"),
                     ("mean_delta", "Mean delta"),
+                    ("mean_delta_ci95", "95% CI (paired apps)"),
                     ("median_delta", "Median delta"),
                     # Sign counts of (condition - baseline): "above" is worse for cost-type metrics.
                     ("wins", "Above baseline"),
                     ("losses", "Below baseline"),
                     ("p_wilcoxon", "p (Wilcoxon)"),
                     ("p_adjusted", f"p ({planned.get('correction')})"),
+                    ("p_sign", "p (sign sensitivity)"),
+                    ("p_sign_adjusted", "p (sign, adjusted)"),
                     ("significant", f"< {planned.get('alpha')}"),
                 ],
                 family["comparisons"],
@@ -645,18 +728,71 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                     note
                     for note in (
                         "Deltas are condition minus baseline, per app (repeats averaged).",
+                        planned.get("effect_interval", ""),
                         "Interim: p-values are withheld until the study finishes." if planned.get("interim") else "",
                         "Stopped early: planned cells were cancelled or stopped, so these p-values are exploratory."
                         if planned.get("stopped_early")
                         else "",
-                        f"Adjusted over all {planned.get('family_size')} planned tests (every declared metric)."
+                        f"Adjusted over all {planned.get('family_size')} {comparison_kind.lower()} tests "
+                        "in this comparison family."
                         if planned.get("multiplicity") == "all"
                         else "Adjusted within this metric only.",
                         _no_p_note(family),
                         _skip_note(family, planned),
+                        *(planned.get("notes") or []),
                     )
                     if note
                 ),
+            ),
+        )
+
+    supplemental = data.get("supplemental_evidence") or {}
+    locks = supplemental.get("lock_materialization") or {}
+    if locks:
+        tables.append(
+            Table(
+                "Matched dependency-lock experiment",
+                [
+                    ("metric", "Outcome"),
+                    ("pairs_known", "Known pairs"),
+                    ("pairs_missing", "Unknown pairs"),
+                    ("fail_to_pass", "Failure to success"),
+                    ("pass_to_fail", "Success to failure"),
+                    ("paired_success_rate_difference", "Paired rate difference"),
+                ],
+                [
+                    {"metric": metric, **(locks.get("summary") or {}).get(metric, {})}
+                    for metric in ("build", "deployment", "all_checks")
+                ],
+                "Separate matched replay of frozen source with original versus recorded platform lock files. "
+                "Finite-cohort differences; no independent-pair confidence interval. Primary grades are unchanged. "
+                f"Protocol SHA-256: {locks.get('protocol_sha256')}",
+            ),
+        )
+    features = supplemental.get("feature_lifecycle") or {}
+    if features:
+        feature_rows = [
+            {"run_id": row["run_id"], "group": row.get("group"), "task": row.get("task"), **check}
+            for row in features.get("observations", [])
+            for check in row.get("checks")
+            or [{"id": "Unmeasured", "status": row.get("status", "unavailable"), "reason": row.get("reason")}]
+        ]
+        tables.append(
+            Table(
+                "Supplemental stateful feature checks",
+                [
+                    ("group", "Group"),
+                    ("task", "Task"),
+                    ("run_id", "Run"),
+                    ("id", "Check"),
+                    ("endpoint", "Endpoint"),
+                    ("status", "Status"),
+                    ("reason", "Detail"),
+                ],
+                feature_rows,
+                "Separate versioned checks of the declared selected tasks. Blocked checks are unobserved, "
+                "not passes or proof that a feature is absent. These checks do not replace the primary suite "
+                f"or validate interactive UI requirements. Protocol SHA-256: {features.get('protocol_sha256')}",
             ),
         )
 

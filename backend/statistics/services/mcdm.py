@@ -11,8 +11,8 @@ choice. So every ranking comes with:
   (concentration 20) and from a flat Dirichlet (any weights at all),
   summarised as each model's median rank, 95% rank interval, P(rank 1) and
   P(top 3),
-* **Data uncertainty** (optional): criteria recomputed from apps resampled
-  with replacement within each model; the same rank summary.
+* **Data uncertainty** (optional): criteria recomputed by the supplied
+  resampling design; the same rank summary with its design metadata.
 
 Ties are ranks, not alphabet: models whose scores are equal (within
 :data:`TIE_TOLERANCE`) share the best rank of their group (competition
@@ -190,13 +190,17 @@ def _rank_summary(rankings: list[dict[str, int]], alts: list[str]) -> list[dict[
         if not ranks:
             continue
         counts = Counter(ranks)
+        p_first = counts.get(1, 0) / n
+        p_top = sum(v for k, v in counts.items() if k <= 3) / n
         out.append(
             {
                 "model": a,
                 "median_rank": percentile(ranks, 0.5),
                 "rank_ci95": [percentile(ranks, 0.025), percentile(ranks, 0.975)],
-                "p_rank_1": round(counts.get(1, 0) / n, 4),
-                "p_top_3": round(sum(v for k, v in counts.items() if k <= 3) / n, 4),
+                "p_rank_1": round(p_first, 4),
+                "p_top_3": round(p_top, 4),
+                "p_rank_1_mcse": round(math.sqrt(p_first * (1 - p_first) / n), 6),
+                "p_top_3_mcse": round(math.sqrt(p_top * (1 - p_top) / n), 6),
             },
         )
     return sorted(out, key=lambda r: (r["median_rank"], r["model"]))
@@ -233,6 +237,7 @@ def rank_models(
     seed: int = 0,
     resample: Callable[[random.Random], dict[str, dict[str, float | None]]] | None = None,
     draws: int = WEIGHT_DRAWS,
+    data_draws: int | None = None,
 ) -> dict[str, Any]:
     """TOPSIS + WSM rankings of *matrix* (``{model: {criterion: value}}``) with sensitivity analyses.
 
@@ -295,11 +300,26 @@ def rank_models(
     data_uncertainty = None
     if resample is not None and rows:
         boot_ranks = []
-        for _ in range(max(200, draws // 4)):
+        target = data_draws if data_draws is not None else max(200, draws // 4)
+        attempts = 0
+        for _ in range(target * 5 if data_draws is not None else target):
+            attempts += 1
             boot_rows, _ = _complete(resample(rng), criteria)
-            if len(boot_rows) == len(rows):
+            if set(boot_rows) == set(rows):
                 boot_ranks.append(_ranks(topsis_scores(boot_rows, criteria, weights)))
-        data_uncertainty = {"draws": len(boot_ranks), "ranks": _rank_summary(boot_ranks, alts)} if boot_ranks else None
+            if len(boot_ranks) >= target:
+                break
+        data_uncertainty = (
+            {
+                "draws": len(boot_ranks),
+                "attempted_draws": attempts,
+                "target_draws": target,
+                "ranks": _rank_summary(boot_ranks, alts),
+                "design": getattr(resample, "design", None),
+            }
+            if boot_ranks
+            else None
+        )
 
     return {
         "criteria": [
@@ -307,6 +327,11 @@ def rank_models(
         ],
         "weights_note": (
             "Weights are researcher-chosen; the sensitivity sections show how far the order depends on them."
+        ),
+        "simulation_note": (
+            "Rank probabilities are Monte Carlo frequencies; *_mcse estimates simulation standard error, "
+            "not task-sampling uncertainty. Resolution is 1/draws; frequencies 0 or 1 and their zero estimated "
+            "MCSE do not establish impossible or certain ranks. Data draws missing a base alternative are rejected."
         ),
         "models_ranked": len(rows),
         "dropped_missing_criteria": dropped,
