@@ -66,6 +66,29 @@ def test_data_uncertainty_uses_the_resampler():
     assert result["data_uncertainty"]["draws"] == len(calls)
 
 
+def test_data_uncertainty_requires_the_same_alternatives_in_every_retained_draw():
+    matrix = {"a": {"x": 1}, "b": {"x": 2}, "missing": {"x": None}}
+    replacement = {"a": {"x": 1}, "b": {"x": None}, "missing": {"x": 2}}
+    criteria = mcdm.criteria_from_config([{"key": "x", "weight": 1}])
+    result = mcdm.rank_models(matrix, criteria, draws=10, resample=lambda rng: replacement)
+    assert result["data_uncertainty"] is None
+
+
+def test_targeted_data_draws_count_rejections_and_report_simulation_error():
+    calls = []
+
+    def resample(rng):
+        calls.append(1)
+        return {} if len(calls) % 2 else _matrix()
+
+    result = mcdm.rank_models(_matrix(), CRITERIA, draws=10, data_draws=40, resample=resample)
+    data = result["data_uncertainty"]
+    assert data["draws"] == data["target_draws"] == 40
+    assert data["attempted_draws"] == 80
+    assert all(r["p_rank_1_mcse"] == 0 for r in data["ranks"])
+    assert "simulation standard error" in result["simulation_note"]
+
+
 def test_reproducible_with_seed():
     a = mcdm.rank_models(_matrix(), CRITERIA, seed=5, draws=100)
     b = mcdm.rank_models(_matrix(), CRITERIA, seed=5, draws=100)

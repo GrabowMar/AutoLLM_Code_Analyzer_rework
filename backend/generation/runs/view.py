@@ -276,17 +276,24 @@ class RunView:
 
     # -- evaluation, task, manifest ------------------------------------------------------------------
 
-    def latest_evaluation(self, suite_ref: str | None = None) -> RunEvaluation | None:
+    def latest_evaluation(self, suite_ref: str | None = None, *, final_only: bool = False) -> RunEvaluation | None:
         """The latest evaluation (any status) under ``suite_ref`` (``slug@version``), retests excluded.
 
         Without ``suite_ref`` the manifest's planned suite is used, else the latest row of any suite.
         ``None`` when the run was never evaluated under that suite.
         """
         qs = self._run.evaluations.filter(retest_of__isnull=True).select_related("eval_suite")
+        if final_only:
+            from backend.generation.models import RunEvaluation
+
+            qs = qs.filter(status__in=RunEvaluation.FINAL_STATUSES)
         ref = suite_ref or _planned_suite_ref(self.manifest())
         if ref:
-            slug, _, version = ref.split("#", 1)[0].partition("@")
+            versioned, _, content_hash = ref.partition("#")
+            slug, _, version = versioned.partition("@")
             qs = qs.filter(eval_suite__slug=slug)
+            if content_hash and suite_ref is not None:
+                qs = qs.filter(eval_suite__content_hash__startswith=content_hash)
             if version:
                 if not version.isdigit():
                     return None

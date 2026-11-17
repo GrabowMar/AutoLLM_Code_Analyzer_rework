@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+# The source bind mount hides image assets; seed the generated site on first start.
+if [ ! -f /app/frontend/static/jupyterlite/lab/index.html ]; then
+  mkdir -p /app/frontend/static/jupyterlite
+  cp -R /opt/jupyterlite/. /app/frontend/static/jupyterlite/
+fi
+
+exec "$@"

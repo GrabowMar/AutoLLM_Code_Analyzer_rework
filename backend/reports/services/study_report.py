@@ -59,6 +59,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 from typing import Any
 
+from django.db.models import Count
 from django.utils import timezone
 
 from backend.analysis.models import AnalyzerTool
@@ -72,10 +73,13 @@ from backend.reports.services.plan_stats import MIN_APPS_FOR_CI
 from backend.reports.services.plan_stats import PLAN_METRICS
 from backend.reports.services.plan_stats import cluster_bootstrap_ci
 from backend.reports.services.plan_stats import declared_metrics
+from backend.reports.services.plan_stats import paired_difference
+from backend.reports.services.plan_stats import paired_mean_ci
 from backend.reports.services.plan_stats import plan_multiplicity
 from backend.reports.services.plan_stats import sign_test_p
 from backend.reports.services.plan_stats import wilcoxon_p
 from backend.statistics.services import inference as inf
+from backend.statistics.services.dedup import VULN_TOOLS
 from backend.statistics.services.mcdm import criteria_from_config
 from backend.statistics.services.mcdm import rank_models
 from backend.statistics.services.runs import app_unit
@@ -88,20 +92,21 @@ from backend.statistics.services.study import SEVERITIES
 from backend.statistics.services.study import code_metrics_by_run
 from backend.statistics.services.study import group_summary
 from backend.statistics.services.study import issue_breakdowns
+from backend.statistics.services.study import tool_measured
 
 if TYPE_CHECKING:
     from backend.generation.runs.view import RunView
 
-# 3: v3 runs (current runs of a study, intention-to-treat by default, attrition apart, evaluation from
-# RunEvaluation, task/unit instead of template).
-REPORT_VERSION = 3
+# 4: exact paired inference, fixed correction families, shared-task ranking resampling,
+# conditional interval assumptions and explicit attempt/instrument provenance.
+REPORT_VERSION = 5
 SMALL_N_MODELS = 10
 MIN_APPS_PER_MODEL = 5
 RunStatus = choices.RunStatus
 _TERMINAL = (choices.StudyStatus.COMPLETED, choices.StudyStatus.CANCELLED, choices.StudyStatus.STOPPED)
 _IN_FLIGHT = (RunStatus.PENDING, RunStatus.RUNNING)
-# Evaluations that produced no measurement about the sample (tester or platform error).
-_EVAL_INFRA = frozenset({choices.EvaluationStatus.NOT_MEASURED, choices.EvaluationStatus.ERROR})
+# These statuses do not provide a grade; they do not identify the cause of the missing grade.
+_EVAL_UNMEASURED = frozenset({choices.EvaluationStatus.NOT_MEASURED, choices.EvaluationStatus.ERROR})
 # Cells stopped before they ran: the planned sample was not collected.
 _STOPPED_CELLS = (
     choices.CellExclusionReason.BUDGET_STOP,
@@ -132,9 +137,26 @@ DEFINITIONS = {
         "default (intention-to-treat)."
     ),
     "analyzed": "The app has a finished static-analysis run (each tool's latest result is counted).",
-    "evaluated": "The latest evaluation under the planned suite measured the app (tester errors excluded).",
+    "source_loc": (
+        "A file-scope size heuristic: nonblank lines excluding language-specific comment-prefix lines in "
+        "eligible authored, modified and slot source files. Entire modified files are counted, not net added "
+        "lines. This is not a parser-based logical SLOC measure; multiline comments and docstrings can remain."
+    ),
+    "evaluated": "The selected evaluation suite measured the app (tester errors excluded).",
     "deployed": "The app built and started, and the tester ran against it (outcome tested).",
-    "functionally_correct": "The app passed every functional check (agent pass rate 1).",
+    "end_to_end_deploy_rate": (
+        "Observed deployment across model-attributable outcomes (output/build/start failures included). "
+        "Static/build-only tested outcomes without an observed start remain unknown; "
+        "a point rate is withheld when deployment is unknown for any run."
+    ),
+    "conditional_deploy_rate": (
+        "The existing deploy_rate and ranking criterion are conditional on a measured evaluation. "
+        "Read end_to_end_deploy_rate for success across the full usable cohort."
+    ),
+    "functionally_correct": (
+        "The app passed every counted instrument check (agent pass rate 1). This includes unstated conventions; "
+        "it is not a measure of complete prompt compliance. Read requirement_alignment for the tagged subset."
+    ),
     "pass_rate": (
         "Share of functional checks passed (0..1; infra and flaky checks excluded); 0 for evaluated apps that "
         "did not build or start."
@@ -166,18 +188,30 @@ DEFINITIONS = {
 # ── per-app table ────────────────────────────────────────────────────────
 
 
-def _evaluation_fields(view: RunView, run: GenerationRun) -> dict[str, Any]:
-    """The evaluation columns of a run row, from its latest evaluation under the planned suite."""
-    evaluation = view.latest_evaluation()
+def _evaluation_fields(view: RunView, run: GenerationRun, *, eval_suite=None) -> dict[str, Any]:
+    """The evaluation columns of a run row, from its selected evaluation instrument."""
+    from backend.reports.services.evaluation_selection import evaluation_for_report
+    from backend.reports.services.requirement_alignment import alignment_fields
+
+    evaluation = evaluation_for_report(view, eval_suite)
     status = evaluation.status if evaluation is not None else ""
     result = (evaluation.result if evaluation is not None else None) or {}
     evaluated = status == choices.EvaluationStatus.MEASURED and bool(result.get("measured", True))
-    deployed = run.outcome == choices.Outcome.TESTED if evaluated else None
+    stages = (evaluation.stages if evaluation is not None else None) or {}
+    start_status = (stages.get("start") or {}).get("status")
+    deployed = None
+    if evaluated:
+        if any((stages.get(stage) or {}).get("status") == "fail" for stage in ("build", "start")):
+            deployed = False
+        elif start_status == "ok":
+            deployed = True
+        elif not str(getattr(run, "outcome_reason", "") or "").startswith("not_tested:"):
+            deployed = run.outcome == choices.Outcome.TESTED
     metrics = result.get("metrics") or {}
     rate = metrics.get("agent_pass_rate")
     if not evaluated:
         pass_rate = None
-    elif not deployed:
+    elif deployed is False:
         pass_rate = 0.0  # built or started nothing: every functional check fails
     else:
         pass_rate = float(rate) if rate is not None else None
@@ -190,6 +224,8 @@ def _evaluation_fields(view: RunView, run: GenerationRun) -> dict[str, Any]:
         "deployed": deployed,
         "functional_passed": (pass_rate == 1.0) if evaluated and pass_rate is not None else None,
         "pass_rate": pass_rate,
+        "start_stage_status": start_status,
+        **alignment_fields(result, (view.task_dict() or {}).get("variant"), measured=evaluated),
     }
 
 
@@ -209,9 +245,11 @@ def app_table(
     *,
     include_ai: bool = False,
     line_tolerance: int = 2,
+    eval_suite=None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """One row per run with every per-run quantity the report aggregates; plus the issue breakdowns."""
     from backend.generation.runs.view import run_views
+    from backend.reports.services.evaluation_selection import planned_suite_ref
 
     by_id = GenerationRun.objects.select_related("model", "condition", "starter").in_bulk([r.pk for r in runs])
     runs = [by_id[r.pk] for r in runs if r.pk in by_id]
@@ -271,9 +309,11 @@ def app_table(
                 "loc_frontend": frontend,
                 # None when the tree was never collected: unknown, not zero.
                 "loc": total,
+                "tree_hash": run.tree_hash or None,
                 "test_loc": loc.get("test_loc"),
                 "backend_share": round(backend / total, 4) if total else None,
-                **_evaluation_fields(view, run),
+                **_evaluation_fields(view, run, eval_suite=eval_suite),
+                "planned_eval_suite": planned_suite_ref(view),
                 "analyzed": analyzed is not None,
                 "raw_findings": counted("raw_findings"),
                 "unique_issues": counted("unique_issues"),
@@ -421,6 +461,7 @@ def _app_rate(items, value, seed: int) -> dict[str, Any]:
     independent, so a Wilson interval over runs would be too narrow.
     """
     by_app: dict[tuple, list[float]] = defaultdict(list)
+    groups = {r.get("group") or r.get("condition_id") or r.get("model") for r in items}
     for r in items:
         v = value(r)
         if v is not None:
@@ -433,8 +474,15 @@ def _app_rate(items, value, seed: int) -> dict[str, Any]:
         "rate": round(sum(means) / len(means), 4) if means else None,
         "ci95": None,
         "ci_method": None,
+        "ci_assumptions": (
+            "Descriptive pooled rate: intervals withheld across fixed endpoint/condition groups; "
+            "shared tasks do not provide independent endpoint-by-task trials."
+            if len(groups) > 1
+            else "Conditional on this endpoint/condition and measured task cohort. Intervals assume independent, "
+            "exchangeable task units; a convenience cohort does not establish population representativeness."
+        ),
     }
-    if not means:
+    if not means or len(groups) > 1:
         return out
     if all(m in (0.0, 1.0) for m in means):
         out.update(ci95=inf.wilson_interval(int(sum(means)), len(means)), ci_method="wilson_apps")
@@ -447,6 +495,51 @@ def _app_rate(items, value, seed: int) -> dict[str, Any]:
 def _app_mean(items, key: str) -> float | None:
     """Mean over apps of each app's mean *key* (repeats averaged first)."""
     return _mean(_avg(r[key] for r in v) for v in _units(items).values())
+
+
+def _end_to_end_functional_bounds(rows) -> dict[str, Any]:
+    """Observed success bounds over the whole usable cohort; unknown grades are not failures."""
+    failures = {choices.Outcome.OUTPUT_INVALID, choices.Outcome.BUILD_FAIL, choices.Outcome.START_FAIL}
+
+    def value(row):
+        if row.get("outcome") in failures:
+            return False
+        return row.get("functional_passed") if row.get("evaluated") else None
+
+    units = list(_units(rows).values())
+    lower = [_avg(0.0 if value(row) is None else float(value(row)) for row in unit) for unit in units]
+    upper = [_avg(1.0 if value(row) is None else float(value(row)) for row in unit) for unit in units]
+    return {
+        "apps": len(units),
+        "runs": len(rows),
+        "unknown_runs": sum(value(row) is None for row in rows),
+        "unknown_apps": sum(any(value(row) is None for row in unit) for unit in units),
+        "lower": _mean(lower),
+        "upper": _mean(upper),
+        "note": "Bounds from unmeasured functional outcomes, not confidence intervals. "
+        "Known output/build/start failures cannot pass all checks; missing grades remain unknown.",
+    }
+
+
+def deployment_outcome(row) -> bool | None:
+    """Deployment evidence from final outcomes; evaluation levels can finish without starting an app."""
+    outcome = row.get("outcome")
+    if outcome in {choices.Outcome.OUTPUT_INVALID, choices.Outcome.BUILD_FAIL, choices.Outcome.START_FAIL}:
+        return False
+    if outcome == choices.Outcome.TESTED:
+        if str(row.get("outcome_reason") or "").startswith("not_tested:"):
+            return True if row.get("start_stage_status") == "ok" else None
+        return True
+    return None
+
+
+def _end_to_end_deploy_rate(rows, seed):
+    result = _app_rate(rows, deployment_outcome, seed)
+    result["unknown_runs"] = sum(deployment_outcome(row) is None for row in rows)
+    if result["unknown_runs"]:
+        # A rate over the known subset would be another conditional rate, not a whole-cohort rate.
+        result.update(rate=None, ci95=None, ci_method=None)
+    return result
 
 
 def _funnel_row(rows, seed: int = 0) -> dict[str, Any]:
@@ -465,6 +558,8 @@ def _funnel_row(rows, seed: int = 0) -> dict[str, Any]:
         "deployed": len(deployed),
         "functionally_correct": len(passed),
         "generation_rate": _app_rate(rows, lambda r: r["generated"], seed),
+        "end_to_end_deploy_rate": _end_to_end_deploy_rate(rows, seed),
+        "end_to_end_functional_bounds": _end_to_end_functional_bounds(rows),
         "deploy_rate": _app_rate(evaluated, lambda r: r["deployed"], seed),
         "functional_rate": _app_rate(evaluated, lambda r: r["functional_passed"], seed),
         # Of the apps that run, how many do what was asked.
@@ -501,6 +596,7 @@ def security_bounds_section(rows, grouped_by: str = "model") -> dict[str, Any]:
 
     def severity_rows(items):
         units = list(_units(items).values())
+        pooled = len({r.get("group") or r.get("model") for r in items}) > 1
         out = []
         for s in SEVERITIES:
             key = f"security_normalized_{s}"
@@ -513,9 +609,9 @@ def security_bounds_section(rows, grouped_by: str = "model") -> dict[str, Any]:
                     "apps_affected": apps,
                     "apps": len(units),
                     "runs": len(items),
-                    "apps_affected_ci95": inf.wilson_interval(apps, len(units)),
+                    "apps_affected_ci95": None if pooled else inf.wilson_interval(apps, len(units)),
                     # Zero is not "none": with n apps the rate is only bounded.
-                    "zero_rate_upper95": inf.zero_count_upper_bound(len(units)) if apps == 0 else None,
+                    "zero_rate_upper95": inf.zero_count_upper_bound(len(units)) if apps == 0 and not pooled else None,
                 },
             )
         return out
@@ -544,6 +640,11 @@ def security_bounds_section(rows, grouped_by: str = "model") -> dict[str, Any]:
         "runs_analyzed": len(analyzed),
         "overall": severity_rows(analyzed),
         "by_model": by_model,
+        "interval_assumptions": (
+            "Pooled endpoint-by-task counts are descriptive; pooled intervals are withheld. Per-group bounds "
+            "assume independent exchangeable task units under a fixed endpoint and instrument, concern detected "
+            "issues only, and do not establish population vulnerability risk or scanner sensitivity."
+        ),
     }
 
 
@@ -586,13 +687,15 @@ def _app_rows(items) -> list[dict[str, Any]]:
 def _app_correlation(rows, x, y, seed) -> dict[str, Any]:
     pairs = [(r[x], r[y]) for r in rows if r[x] is not None and r[y] is not None]
     xs, ys = [p[0] for p in pairs], [p[1] for p in pairs]
+    pooled = len({r.get("group") for r in rows}) > 1
     return {
         "x": x,
         "y": y,
         "n_apps": len(pairs),
         "rho": inf.spearman(xs, ys),
-        "p_permutation": inf.spearman_permutation_p(xs, ys, seed=seed, draws=2000),
-        "ci95": inf.spearman_bootstrap_ci(xs, ys, seed=seed, draws=1000),
+        "p_permutation": None if pooled else inf.spearman_permutation_p(xs, ys, seed=seed, draws=2000),
+        "ci95": None if pooled else inf.spearman_bootstrap_ci(xs, ys, seed=seed, draws=1000),
+        "inference": "descriptive_crossed_groups" if pooled else "conditional_exchangeable_tasks",
     }
 
 
@@ -650,27 +753,71 @@ def code_metrics_section(rows, seed: int, grouped_by: str = "model") -> dict[str
             _app_correlation([r for r in apps if r["evaluated"]], "loc", "pass_rate", seed),
         ],
         "note": (
-            "Per app (repeats averaged; LOC excludes test files). App-level correlations treat apps as "
-            "independent; apps of one model or task are clustered."
+            "Per app (repeats averaged; LOC excludes test files). Pooled correlations across fixed groups are "
+            "descriptive: p-values and intervals are withheld because tasks cross groups and within-group and "
+            "between-group associations are mixed. Single-group inference assumes exchangeable independent tasks."
         ),
     }
 
 
 def _model_parameters(runs) -> dict[str, dict[str, Any]]:
-    params: dict[str, dict[str, Any]] = {}
+    """One predictor per model, preferring recorded endpoint policies and prices.
+
+    Different observed values under one model cannot form one model-level predictor.
+    Nominal catalog specifications are labelled as current metadata, not historical facts.
+    """
+    from backend.generation.models import RunManifest
+
+    manifests = dict(RunManifest.objects.filter(run_id__in=[r.id for r in runs]).values_list("run_id", "manifest"))
+    observed: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for run in runs:
         m = run.model
-        if m is None or m.model_id in params:
+        if m is None:
             continue
         caps = m.capabilities_json if isinstance(m.capabilities_json, dict) else {}
         nominal = caps.get("context_length") or m.context_window or None
-        effective = m.num_ctx_override or m.context_window or nominal
-        params[m.model_id] = {
+        frozen = manifests.get(run.id) or {}
+        model = frozen.get("model") or {}
+        endpoint = model.get("endpoint") or {}
+        pricing = model.get("pricing") or {}
+        policy = ((frozen.get("resources") or {}).get("effective") or {}).get("content") or {}
+        values = {
             "context_window_nominal": float(nominal) if nominal else None,
-            "context_window_effective": float(effective) if effective else None,
+            "context_window_effective": endpoint.get("num_ctx")
+            if frozen
+            else (m.num_ctx_override or m.context_window or nominal),
             "max_output_tokens": float(m.max_output_tokens) if m.max_output_tokens else None,
-            "input_price_per_mtok": round(m.input_price_per_token * 1e6, 4) if m.input_price_per_token else None,
-            "output_price_per_mtok": round(m.output_price_per_token * 1e6, 4) if m.output_price_per_token else None,
+            "context_budget_tokens": (policy.get("context") or {}).get("max_context_tokens"),
+            "call_output_cap_tokens": (policy.get("call") or {}).get("max_output_tokens"),
+            "input_price_per_mtok": pricing.get("input_per_mtok")
+            if frozen
+            else (round(m.input_price_per_token * 1e6, 4) if m.input_price_per_token is not None else None),
+            "output_price_per_mtok": pricing.get("output_per_mtok")
+            if frozen
+            else (round(m.output_price_per_token * 1e6, 4) if m.output_price_per_token is not None else None),
+        }
+        sources = dict.fromkeys(values, "current_catalog")
+        for key in ("context_window_effective", "input_price_per_mtok", "output_price_per_mtok"):
+            sources[key] = "run_manifest" if frozen else "current_catalog"
+        sources.update(context_budget_tokens="run_manifest", call_output_cap_tokens="run_manifest")
+        observed[m.model_id].append({"values": values, "sources": sources})
+    params = {}
+    for model, entries in sorted(observed.items()):
+        row: dict[str, Any] = {}
+        values_seen = {}
+        source = {}
+        for key in entries[0]["values"]:
+            values = [entry["values"][key] for entry in entries]
+            distinct = sorted({float(v) for v in values if v is not None})
+            values_seen[key] = distinct
+            # A partially recorded or varying predictor cannot represent every run of a model.
+            row[key] = distinct[0] if len(distinct) == 1 and all(v is not None for v in values) else None
+            source[key] = sorted({entry["sources"][key] for entry in entries})
+        params[model] = {
+            **row,
+            "sources": source,
+            "observed_values": values_seen,
+            "varying_predictors": [key for key, values in values_seen.items() if len(values) > 1],
         }
     return params
 
@@ -699,6 +846,8 @@ PREDICTORS = (
     "context_window_nominal",
     "context_window_effective",
     "max_output_tokens",
+    "context_budget_tokens",
+    "call_output_cap_tokens",
     "input_price_per_mtok",
     "output_price_per_mtok",
 )
@@ -718,7 +867,7 @@ def correlations_section(params, criteria_by_model, seed: int, *, arms_averaged:
             pairs = [
                 (params[m][predictor], criteria_by_model[m][outcome], m)
                 for m in models
-                if params[m][predictor] is not None and criteria_by_model[m][outcome] is not None
+                if params[m].get(predictor) is not None and criteria_by_model[m][outcome] is not None
             ]
             xs, ys, labels = [p[0] for p in pairs], [p[1] for p in pairs], [p[2] for p in pairs]
             tests.append(
@@ -727,13 +876,14 @@ def correlations_section(params, criteria_by_model, seed: int, *, arms_averaged:
                     "outcome": outcome,
                     "n_models": len(pairs),
                     "rho": inf.spearman(xs, ys),
-                    "p_permutation": inf.spearman_permutation_p(xs, ys, seed=seed),
+                    "p_permutation": inf.spearman_permutation_p(xs, ys, seed=seed, digits=None),
                     "ci95_bootstrap": inf.spearman_bootstrap_ci(xs, ys, seed=seed),
                     "leave_one_out": inf.leave_one_out(xs, ys, labels),
                 },
             )
     p_values = [t["p_permutation"] for t in tests]
     for t, holm_p, bh_q in zip(tests, inf.holm(p_values), inf.benjamini_hochberg(p_values), strict=True):
+        t["p_permutation"] = inf.round_p(t["p_permutation"])
         t["p_holm"] = holm_p
         t["q_bh"] = bh_q
     differs = sorted(
@@ -753,7 +903,20 @@ def correlations_section(params, criteria_by_model, seed: int, *, arms_averaged:
         "effective_context_differs": differs,
         "arms_averaged": arms_averaged,
         "notes": [
-            "Observational, model-level (n = number of models): association, not cause.",
+            "Observational, model-level (n = number of models): association, not cause. Inference assumes "
+            "exchangeable endpoint/model units; the selected convenience sample is not a random model population.",
+            (
+                "Predictor sources are exported per model. Current-catalog specifications are not frozen "
+                "historical measurements."
+            ),
+            (
+                "Endpoint context is unknown when a manifest does not record it. Context policy and output caps "
+                "are separate predictors, not nominal model capacities."
+            ),
+            (
+                "Varying or incompletely recorded predictors are excluded from model-level tests; "
+                "observed values remain in the export."
+            ),
             *(
                 [
                     "A model that ran under several conditions is one point: the mean of its conditions' values "
@@ -764,8 +927,9 @@ def correlations_section(params, criteria_by_model, seed: int, *, arms_averaged:
             ),
             "Predictors are not independent (larger, newer models tend to have larger windows and prices).",
             (
-                "p_holm controls the familywise error across all predictor x outcome tests; "
-                "q_bh the false discovery rate."
+                "p_holm is the primary familywise correction across all predictor x outcome tests. q_bh is "
+                "a sensitivity summary: its FDR guarantee requires independence or appropriate positive "
+                "dependence, which is not established for these correlated predictors and outcomes."
             ),
             "leave_one_out.sign_flips marks a correlation that rests on a single model.",
         ],
@@ -773,13 +937,42 @@ def correlations_section(params, criteria_by_model, seed: int, *, arms_averaged:
 
 
 def _resampler(rows_by_model):
-    """App bootstrap for the ranking: resample each group's apps (repeats stay together), recompute its criteria."""
-    stats = {group: [_app_stats(v) for v in _units(rows).values()] for group, rows in rows_by_model.items()}
+    """Resample shared task/slot blocks jointly across the fixed groups, retaining observed missingness.
+
+    A block contains every observed group's app on that task; repeats remain
+    averaged within app. Incomplete blocks remain incomplete, so this assesses
+    the observed cohort's task-composition sensitivity, not missing outcomes.
+    """
+    stats = {
+        group: {
+            (v[0].get("kind"), v[0].get("unit_key") or v[0]["run_id"]): _app_stats(v) for v in _units(rows).values()
+        }
+        for group, rows in rows_by_model.items()
+    }
+    blocks = sorted({key for apps in stats.values() for key in apps}, key=str)
 
     def resample(rng: random.Random) -> dict[str, dict[str, float | None]]:
-        return {group: _combine([rng.choice(apps) for _ in apps]) for group, apps in stats.items()}
+        selected = [rng.choice(blocks) for _ in blocks]
+        return {group: _combine([apps[key] for key in selected if key in apps]) for group, apps in stats.items()}
+
+    resample.design = {
+        "method": "shared_task_block_bootstrap",
+        "blocks": len(blocks),
+        "complete_blocks": sum(all(key in apps for apps in stats.values()) for key in blocks),
+        "note": "Task/slot blocks are sampled jointly across fixed groups; repeats stay averaged within app. "
+        "This assumes exchangeable tasks and retains observed missingness; it does not generalize to new endpoints.",
+    }
 
     return resample
+
+
+def ranking_draws(config):
+    """Bound report simulation work while retaining useful probability precision."""
+    value = config.get("ranking_draws", 5000)
+    if isinstance(value, bool) or not isinstance(value, int) or not 500 <= value <= 20_000:
+        msg = "ranking_draws must be an integer between 500 and 20000"
+        raise ValueError(msg)
+    return value
 
 
 def _conditions(study: Study) -> list:
@@ -824,6 +1017,8 @@ def exploratory_reasons(plan: dict[str, Any], design: dict[str, Any] | None) -> 
         out.append("interim: the study has not finished")
     if design["stopped_early"]:
         out.append("stopped early: planned cells were cancelled")
+    if design.get("evaluation_suite_changed"):
+        out.append("the evaluation suite differs from the planned instrument")
     return out
 
 
@@ -837,6 +1032,8 @@ def planned_comparisons_section(
     study: Study | None,
     plan: dict[str, Any],
     design: dict[str, Any] | None = None,
+    *,
+    seed: int = 0,
 ) -> dict[str, Any] | None:
     """Every declared plan metric, each condition vs the pre-registered baseline, blocked on the app.
 
@@ -844,8 +1041,8 @@ def planned_comparisons_section(
     (``declared_metrics``). With the plan's ``multiplicity = "all"`` one
     correction covers every tested (metric, condition) pair (the default);
     ``per_metric`` corrects each metric apart.
-    ``family_size`` is the m the correction used: tests without a p-value
-    (no non-zero delta) are not in it. The correction and ``significant``
+    ``family_size`` is the m the correction used: eligible comparisons with
+    all-zero differences receive p=1 and remain in it. The correction and ``significant``
     use the unrounded p-values; the stored ones are rounded.
 
     A comparison that cannot be run is listed but not tested and stays out
@@ -942,20 +1139,23 @@ def planned_comparisons_section(
                 n_valued = len({key[0] for key in valued.get(cid, {})})
                 comparisons.append({**untested, "n_apps": n_valued, "n_pairs": 0, "skipped": "no_pairs"})
                 continue
-            deltas = [other[a] - base[a] for a in common]
+            deltas = [paired_difference(base[a], other[a]) for a in common]
             wins = sum(1 for d in deltas if d > 0)
             losses = sum(1 for d in deltas if d < 0)
-            p_raw = wilcoxon_p(deltas, alternative)
+            all_zero = not wins and not losses
+            p_raw = 1.0 if all_zero else wilcoxon_p(deltas, alternative)
             comparisons.append(
                 {
                     "condition_id": cid,
                     "condition": labels.get(cid, str(cid)),
                     "n_pairs": len(common),
                     "mean_delta": _mean(deltas),
+                    "mean_delta_ci95": paired_mean_ci(deltas, seed=seed),
                     "median_delta": inf.percentile(deltas, 0.5),
                     "wins": wins,
                     "losses": losses,
-                    "p_sign": inf.round_p(sign_test_p(wins, losses)),
+                    "all_zero": all_zero,
+                    "p_sign": 1.0 if all_zero else inf.round_p(sign_test_p(wins, losses)),
                     "p_wilcoxon": inf.round_p(p_raw),
                     "_p": p_raw,
                 },
@@ -984,7 +1184,6 @@ def planned_comparisons_section(
         raw = [c.pop("_p") for c in tested]
         family_size += inf.family_size(raw)
         for c, p_raw, adj in zip(tested, raw, adjust(raw), strict=True):
-            # A test without a p (no non-zero delta) is outside the correction's m.
             c["in_family"] = p_raw is not None
             c["p_adjusted"] = inf.round_p(adj)
             c["significant"] = adj is not None and adj < alpha
@@ -999,6 +1198,9 @@ def planned_comparisons_section(
         "multiplicity": multiplicity,
         "family_size": family_size,
         "comparisons_tested": sum(len(g) for g in groups),
+        "effect_interval": (
+            f"95% paired-app percentile bootstrap, seed {seed}; not multiplicity-adjusted; absent below 3 apps"
+        ),
         "min_apps_per_condition": min_apps,
         "interim": interim,
         "planned_repeats": planned,
@@ -1006,6 +1208,13 @@ def planned_comparisons_section(
         "stopped_early": stopped_early,
         "common_cells": len(all_common),
         "families": families,
+        "notes": [
+            "Paired differences are rounded to twelve decimals before ranking. Signed ranks use the exact "
+            "conditional sign-flip distribution through 50 nonzero pairs, retaining tied midranks; larger "
+            "samples use a tie/continuity-corrected normal approximation.",
+            "Signed-rank inference assumes independent symmetric task differences. All-zero eligible "
+            "comparisons receive p=1 and remain in the correction family; this does not establish equivalence.",
+        ],
     }
 
 
@@ -1158,6 +1367,8 @@ def protocol_section(
             "code_scope": config.get("code_scope"),
             "exclude_truncated": bool(config.get("exclude_truncated", False)),
             "seed": int(config.get("seed", 0)),
+            "ranking_draws": ranking_draws(config),
+            "eval_suite": config.get("eval_suite"),
         },
         "data_fingerprint": _fingerprint(rows),
     }
@@ -1202,6 +1413,24 @@ def validity_section(
     def add(code, level, section, message):
         out.append({"code": code, "level": level, "section": section, "message": message})
 
+    selection = protocol.get("evaluation_selection") or {}
+    if selection.get("changed_from_plan_runs"):
+        add(
+            "evaluation_suite_changed",
+            "info",
+            "protocol",
+            f"{selection['changed_from_plan_runs']} run(s) are reanalyzed under {selection['suite_ref']} "
+            "instead of the originally planned instrument. This is a versioned exploratory reanalysis; "
+            "the original generation sample and source remain unchanged, and other suites never fill missing grades.",
+        )
+    if ((protocol.get("execution") or {}).get("coverage") or {}).get("mixed_study_scope"):
+        add(
+            "mixed_study_scope",
+            "warning",
+            "all",
+            "This scope combines runs from different studies or ad hoc runs. Their tasks, conditions and "
+            "selection rules can differ; inspect the coverage grid and report each planned cohort separately.",
+        )
     n_models = len(protocol["models"])
     if n_models and n_models < SMALL_N_MODELS:
         plural = "" if n_models == 1 else "s"
@@ -1240,8 +1469,11 @@ def validity_section(
             "truncated",
             "warning",
             "all",
-            f"{truncated} generation(s) hit max_tokens"
-            + (" and were excluded." if config.get("exclude_truncated", True) else "; their code is incomplete."),
+            f"{truncated} run(s) were recorded as truncated: "
+            f"{sum(1 for r in rows if r['truncated'])} remain in this analysis and "
+            f"{protocol.get('truncated_excluded', 0)} were excluded. "
+            "A truncation flag can indicate a token, turn, budget or time limit; "
+            "it does not identify a single cause or establish that every output is incomplete.",
         )
     route_errors = sum(1 for r in rows if r.get("route_error_terminated"))
     if route_errors:
@@ -1253,13 +1485,21 @@ def validity_section(
             "after at least one successful call and were evaluated as the model's result; compare the rates "
             "with and without them (validity note route_error_terminated).",
         )
-    infra = sum(1 for r in rows if r["evaluation_status"] in _EVAL_INFRA)
-    if infra:
+    unmeasured = [r for r in rows if r["evaluation_status"] in _EVAL_UNMEASURED]
+    if unmeasured:
+        known_failures = sum(
+            r.get("outcome")
+            in {choices.Outcome.OUTPUT_INVALID, choices.Outcome.BUILD_FAIL, choices.Outcome.START_FAIL}
+            for r in unmeasured
+        )
         add(
-            "infra_errors",
+            "unmeasured_evaluations",
             "info",
             "funnel",
-            f"{infra} evaluation(s) were not measured (tester or platform error) and are excluded; re-evaluate them.",
+            f"{len(unmeasured)} evaluation(s) have no measured grade and are excluded from conditional graded-check "
+            f"rates. {known_failures} have a known output/build/start failure; "
+            f"{len(unmeasured) - known_failures} have an unknown all-check-pass outcome. "
+            "Evaluation status alone does not distinguish application failure from a tester or platform error.",
         )
     attrition = protocol.get("attrition_excluded") or {}
     if attrition:
@@ -1278,7 +1518,8 @@ def validity_section(
             "not_evaluated",
             "warning",
             "funnel",
-            f"{not_evaluated} generated run(s) have no evaluation; deploy rates exclude them.",
+            f"{not_evaluated} generated run(s) have no measured evaluation; conditional rates exclude them. "
+            "Whole-cohort deployment uses final run outcomes, and functional bounds retain unknown grades.",
         )
     mixed = protocol.get("mixed_fingerprint_cells") or 0
     if mixed:
@@ -1305,14 +1546,21 @@ def validity_section(
         )
     zero = [s["severity"] for s in security["overall"] if s["severity"] in ("critical", "high") and s["issues"] == 0]
     if zero and security["apps_analyzed"]:
-        bound = inf.zero_count_upper_bound(security["apps_analyzed"])
+        bound = next(s.get("zero_rate_upper95") for s in security["overall"] if s["severity"] in zero)
+        inference_note = (
+            f" The conditional one-sided 95% binomial upper bound is {bound:.1%}, assuming independent, "
+            "exchangeable task units under the fixed endpoint and instrument."
+            if bound is not None
+            else " A pooled binomial confidence bound is withheld because endpoint-by-task observations "
+            "are not independent trials."
+        )
         add(
             "zero_severe",
             "warning",
             "security_bounds",
             f"No {' or '.join(zero)} code security issues (normalized severity) in {security['apps_analyzed']} "
-            f"apps: the per-app rate is bounded at {bound:.1%} (95%), not zero; the tasks may not exercise "
-            "these classes.",
+            f"apps.{inference_note} Absence of detected findings does not establish zero vulnerability risk; "
+            "the tasks or instruments may not detect these classes.",
         )
     params = issues.get("params") or {}
     if not config.get("include_ai"):
@@ -1605,6 +1853,85 @@ def _issues_by_group(per_app, rows, grouped_by: str) -> list[dict[str, Any]]:
     return [{**_group_fields(g, v, grouped_by), **group_summary(v)} for g, v in sorted(groups.items())]
 
 
+def group_tool_measurements(rows, grouped_by: str, *, common_tools=(), include_ai: bool = False):
+    """Raw tool counts by group, with equal app weights and explicit measurement coverage.
+
+    Repeats of one app are averaged before averaging apps. Every observed tool has a row for
+    every group; a failed, skipped or absent measurement stays unknown, while a completed
+    clean scan contributes zero. These tool-specific counts are not cross-tool deduplicated.
+    A tool missing from the catalog has an unknown analysis mode, never an assumed static mode.
+    """
+    groups = _group(rows, "group")
+    row_by_id = {r["run_id"]: r for r in rows}
+    result_ids = ToolResult.latest_ids_per_job(row_by_id)
+    results = list(
+        ToolResult.objects.filter(id__in=result_ids)
+        .values("run__generation_job_id", "tool_slug", "category", "status", "summary")
+        .annotate(finding_count=Count("findings")),
+    )
+    catalog = {
+        t["slug"]: t
+        for t in AnalyzerTool.objects.filter(slug__in={r["tool_slug"] for r in results}).values(
+            "slug",
+            "category",
+            "analysis_mode",
+            "kind",
+        )
+    }
+    ai = {slug for slug, tool in catalog.items() if tool["kind"] == "ai"}
+    ai.update(r["tool_slug"] for r in results if r["category"] == "ai")
+    results = [r for r in results if include_ai or r["tool_slug"] not in ai]
+    slugs = sorted({r["tool_slug"] for r in results})
+    by_tool: dict[str, list] = defaultdict(list)
+    by_group_tool: dict[tuple[str, str], list] = defaultdict(list)
+    for result in results:
+        run_id = str(result["run__generation_job_id"])
+        by_tool[result["tool_slug"]].append(result)
+        by_group_tool[(row_by_id[run_id]["group"], result["tool_slug"])].append(result)
+    metadata = {}
+    for slug in slugs:
+        tool = catalog.get(slug, {})
+        categories = sorted({r["category"] for r in by_tool[slug] if r["category"]})
+        fallback = categories[0] if len(categories) == 1 else "mixed" if categories else "unknown"
+        category = tool.get("category") or fallback
+        metadata[slug] = {
+            "category": category,
+            "analysis_mode": tool.get("analysis_mode", "unknown"),
+            "is_dependency_scanner": slug in VULN_TOOLS or category == "dependencies",
+            "is_ai": slug in ai,
+        }
+    out = []
+    for group, items in sorted(groups.items()):
+        group_fields = _group_fields(group, items, grouped_by)
+        apps_total = len(_units(items))
+        for slug in slugs:
+            observations = by_group_tool[(group, slug)]
+            measured = [r for r in observations if tool_measured(r["status"], r["summary"])]
+            per_app: dict[tuple, list[int]] = defaultdict(list)
+            for result in measured:
+                row = row_by_id[str(result["run__generation_job_id"])]
+                per_app[app_unit(row)].append(result["finding_count"])
+            app_means = [_mean(counts) for counts in per_app.values()]
+            out.append(
+                {
+                    **group_fields,
+                    "group": group,
+                    "tool": slug,
+                    **metadata[slug],
+                    "raw_findings": sum(r["finding_count"] for r in measured) if measured else None,
+                    "raw_findings_per_app": _mean(app_means),
+                    "apps_measured": len(per_app),
+                    "apps_total": apps_total,
+                    "runs_measured": len(measured),
+                    "runs_total": len(items),
+                    "runs_with_result": len(observations),
+                    "complete_coverage": len(measured) == len(items),
+                    "counted_in_comparison": slug in common_tools,
+                },
+            )
+    return out
+
+
 # ── generator ────────────────────────────────────────────────────────────
 
 
@@ -1642,6 +1969,14 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
 
 
 def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any]:
+    from backend.reports.services.evaluation_selection import selected_suite
+    from backend.reports.services.evaluation_selection import selection_summary
+    from backend.reports.services.requirement_alignment import alignment_section
+    from backend.reports.services.supplemental_evidence import bind_evidence
+
+    eval_suite = selected_suite(config)
+    if eval_suite is not None:
+        config = {**config, "eval_suite": eval_suite.pinned_ref}
     study = _study(config, user)
     seed = int(config.get("seed", 0))
     include_ai = bool(config.get("include_ai", False))
@@ -1667,10 +2002,14 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
         # Sensitivity analysis: truncated runs measure the budget ceiling as much as the model.
         runs = [r for r in runs if not bool((r.validity or {}).get("truncated"))]
 
-    rows, issues = app_table(runs, include_ai=include_ai, line_tolerance=line_tolerance)
+    rows, issues = app_table(runs, include_ai=include_ai, line_tolerance=line_tolerance, eval_suite=eval_suite)
+    supplemental = bind_evidence(config.get("supplemental_evidence"), rows)
     # Arms that share a model (harness, prompt or stack conditions) are never pooled.
     grouped_by = label_groups(rows)
     design = design_state(study) if study is not None else None
+    evaluation_selection = selection_summary(rows, eval_suite)
+    if design is not None:
+        design["evaluation_suite_changed"] = bool(evaluation_selection["changed_from_plan_runs"])
     # The declared metrics and the ranking are confirmatory only for the plan's analysis on the planned sample.
     reasons = exploratory_reasons(plan, design)
 
@@ -1682,6 +2021,8 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
         criteria,
         seed=seed,
         resample=_resampler(by_model) if config.get("bootstrap", True) else None,
+        draws=ranking_draws(config),
+        data_draws=ranking_draws(config),
     )
     declared = declared_metrics(plan)
     ranking["status"] = (
@@ -1698,11 +2039,29 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
         arms_averaged=grouped_by == "condition",
     )
     security = security_bounds_section(rows, grouped_by)
+    from backend.reports.services.study_provenance import study_provenance
     from backend.statistics.services.accounting import run_accounting
     from backend.statistics.services.accounting import tool_inventory
 
     accounting = run_accounting(GenerationRun.objects.filter(id__in=[r.id for r in runs]))
+    provenance = study_provenance(runs, rows, study=study, eval_suite=eval_suite)
+    inventory = tool_inventory()
     protocol = protocol_section(runs, rows, study, config, grouped_by=grouped_by, design=design)
+    protocol["evaluation_selection"] = evaluation_selection
+    protocol["execution"] = provenance["execution"]
+    if supplemental.get("lock_materialization"):
+        protocol["execution"]["notes"] = [
+            note
+            for note in protocol["execution"]["notes"]
+            if not note.startswith("No paired original-versus-materialized")
+        ]
+        protocol["execution"]["notes"].append(
+            "A separately collected matched lock experiment is included in supplemental_evidence. "
+            "Its outcomes do not replace primary evaluation grades.",
+        )
+    protocol["requirements"] = provenance["requirements"]
+    protocol["tool_catalog"] = inventory["analyzers"]
+    protocol["platform_evaluators"] = inventory["evaluators"]
     protocol["truncated_excluded"] = total_runs - len(runs)
     protocol["in_flight_excluded"] = len(in_flight)
     protocol["attrition_excluded"] = dict(attrition)
@@ -1710,17 +2069,34 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
     protocol["pilot_excluded"] = (design or {}).get("pilot_excluded", 0)
     protocol["settings"]["exclusions_source"] = "analysis_plan" if plan and "truncated" in exclusions else "report"
     protocol["confirmatory"] = {"design": not reasons, "reasons": reasons}
-    planned = planned_comparisons_section(rows, study, plan, design)
+    planned = planned_comparisons_section(rows, study, plan, design, seed=seed)
+    from backend.reports.services.exploratory_comparisons import exploratory_comparisons
+
+    exploratory = exploratory_comparisons(rows, study, seed=seed) if planned is None else None
     # Which tools' findings the issue counts include (measured on every app) and which were left out.
     protocol["instrument_coverage"] = issues.get("coverage")
 
     issues_out = {k: v for k, v in issues.items() if k not in ("issues", "per_app")}
+    issues_out["by_group_tool"] = group_tool_measurements(
+        rows,
+        grouped_by,
+        common_tools=(issues.get("coverage") or {}).get("tools_common", []),
+        include_ai=include_ai,
+    )
+    issues_out["by_group_tool_note"] = (
+        "Raw findings per measured app, repeats averaged first; not cross-tool deduplicated. "
+        "Partial coverage describes the measured subset only. Null means unmeasured, not clean. "
+        "These tool counts cover the files each scanner read; dependency and dynamic tools are marked separately. "
+        "Tools absent from the catalog have an unknown analysis mode."
+    )
     if grouped_by == "condition":
         # The groups every other table uses: arms apart, colliding labels disambiguated,
         # and runs outside a study kept per model (by_condition pools them in one row).
         issues_out["by_group"] = _issues_by_group(issues["per_app"], rows, grouped_by)
     return {
         "protocol": protocol,
+        "supplemental_evidence": supplemental,
+        "requirement_alignment": alignment_section(rows),
         "definitions": DEFINITIONS,
         "metric_definitions": PLAN_METRICS,
         "funnel": funnel_section(rows, seed, grouped_by),
@@ -1736,12 +2112,14 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
         ],
         "issues": issues_out,
         "security_bounds": security,
+        "runtime_security": provenance["runtime_security"],
         "code_metrics": code_metrics_section(rows, seed, grouped_by),
         "correlations": correlations,
         "ranking": ranking,
         "planned_comparisons": planned,
-        "tool_inventory": tool_inventory()["counts"],
-        "accounting": {k: accounting[k] for k in ("apps", "analysis_runs", "executions", "evaluations")},
+        "exploratory_comparisons": exploratory,
+        "tool_inventory": inventory["counts"],
+        "accounting": {k: accounting[k] for k in ("apps", "analysis_runs", "executions", "evaluations", "tools")},
         "per_app": rows,
         "validity": validity_section(
             rows,

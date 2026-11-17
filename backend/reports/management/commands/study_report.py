@@ -2,7 +2,7 @@
 
 Usage:
     python manage.py study_report --study <uuid> --out results/study.md [--format md|tex|json]
-        [--user <username>] [--seed 0] [--include-ai] [--exclude-truncated] [--no-bootstrap] [--save]
+        [--user <email>] [--seed 0] [--include-ai] [--exclude-truncated] [--no-bootstrap] [--save]
 
 Without ``--study`` the report covers every sample run in scope. Without ``--user`` it covers every
 user's runs (staff view); with ``--study`` and no ``--user`` it acts as the study's owner.
@@ -33,9 +33,14 @@ class Command(BaseCommand):
         parser.add_argument("--out", required=True)
         parser.add_argument("--format", choices=("md", "tex", "json"), default=None, help="Default: from --out suffix")
         parser.add_argument("--study", default=None, help="Study id: its current runs (main stage)")
-        parser.add_argument("--user", default=None, help="Scope to this username's runs")
+        parser.add_argument("--user", default=None, help="Scope to this account email's runs")
         parser.add_argument("--seed", type=int, default=0)
         parser.add_argument("--include-ai", action="store_true")
+        parser.add_argument(
+            "--eval-suite",
+            default=None,
+            help="One versioned suite for every run; default: each run's planned suite",
+        )
         parser.add_argument(
             "--exclude-truncated",
             action="store_true",
@@ -43,12 +48,18 @@ class Command(BaseCommand):
         )
         parser.add_argument("--no-bootstrap", action="store_true")
         parser.add_argument("--save", action="store_true", help="Also store a Report row")
+        parser.add_argument(
+            "--evidence",
+            default=None,
+            help="JSON file of completed supplemental experiments bound to these source runs",
+        )
 
     def handle(self, *args, **opts):
         user = None
         if opts["user"]:
             try:
-                user = get_user_model().objects.get(username=opts["user"])
+                model = get_user_model()
+                user = model.objects.get(**{model.USERNAME_FIELD: opts["user"]})
             except get_user_model().DoesNotExist as exc:
                 msg = f"No user {opts['user']!r}"
                 raise CommandError(msg) from exc
@@ -72,9 +83,15 @@ class Command(BaseCommand):
             "seed": opts["seed"],
             "include_ai": opts["include_ai"],
             "bootstrap": not opts["no_bootstrap"],
+            "eval_suite": opts["eval_suite"],
         }
         if opts["exclude_truncated"]:
             config["exclude_truncated"] = True
+        if opts["evidence"]:
+            try:
+                config["supplemental_evidence"] = json.loads(Path(opts["evidence"]).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise CommandError(str(exc)) from exc
         try:
             data = generate_study_report(config, user=user)
         except ValueError as exc:

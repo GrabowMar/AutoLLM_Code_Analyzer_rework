@@ -12,6 +12,7 @@ import { apiFetch } from "../core";
 import { subscribe, type SseState } from "../sse";
 import type {
   EvaluateRunIn,
+  FeatureCheckScanOut,
   FileScope,
   Page,
   RunCallOut,
@@ -80,6 +81,13 @@ export function getSampleFacets(
   options?: RequestOptions,
 ): Promise<RunFacetsOut> {
   return getJson(`/runs/facets/${buildQuery({ ...query })}`, options);
+}
+
+export function scanSampleFeatureChecks(
+  query: RunListQuery = {},
+  options?: RequestOptions,
+): Promise<FeatureCheckScanOut> {
+  return getJson(`/runs/feature-scan/${buildQuery({ ...query })}`, options);
 }
 
 export function getSample(

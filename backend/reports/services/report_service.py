@@ -189,6 +189,14 @@ def _validate_config(report_type: str, config: dict[str, Any], user=None) -> Non
         from backend.statistics.services.mcdm import criteria_from_config
 
         criteria_from_config(config["ranking_criteria"])
+    if report_type == "study_report":
+        from backend.reports.services.evaluation_selection import selected_suite
+        from backend.reports.services.study_report import ranking_draws
+        from backend.reports.services.supplemental_evidence import validate_evidence
+
+        ranking_draws(config or {})
+        selected_suite(config or {})
+        validate_evidence((config or {}).get("supplemental_evidence"))
     if report_type == "tool_analysis" and (config or {}).get("tool_name"):
         from backend.analysis.models import AnalyzerTool
         from backend.analysis.models import ToolResult
@@ -285,8 +293,18 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
         return {
             "runs": funnel.get("runs", 0),
             "models": len((data.get("protocol") or {}).get("models") or []),
-            "deploy_rate": (funnel.get("deploy_rate") or {}).get("rate"),
-            "functional_rate": (funnel.get("functional_rate") or {}).get("rate"),
+            **(
+                {
+                    "end_to_end_deploy_rate": (funnel.get("end_to_end_deploy_rate") or {}).get("rate"),
+                    "conditional_deploy_rate": (funnel.get("deploy_rate") or {}).get("rate"),
+                    "conditional_functional_rate": (funnel.get("functional_rate") or {}).get("rate"),
+                }
+                if "end_to_end_deploy_rate" in funnel
+                else {
+                    "deploy_rate": (funnel.get("deploy_rate") or {}).get("rate"),
+                    "functional_rate": (funnel.get("functional_rate") or {}).get("rate"),
+                }
+            ),
             # None: no app was measured (unmeasured is not zero).
             "unique_issues": ((data.get("issues") or {}).get("totals") or {}).get("unique_issues"),
             "leader": top[0] if len(top) == 1 else None,

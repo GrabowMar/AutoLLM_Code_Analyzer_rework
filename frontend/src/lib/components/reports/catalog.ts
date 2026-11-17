@@ -55,7 +55,7 @@ export const REPORT_TYPES: ReportTypeInfo[] = [
       "Outcome funnel, deduplicated issues, correlations and rankings with uncertainty, and the threats to validity found in the data.",
     needs: "",
     contents: [
-      "Protocol and definitions",
+      "Protocol, execution provenance and task requirements",
       "Outcome funnel and plan metrics by model",
       "Issues by model, task and tool (deduplicated)",
       "Dependency advisories and manifest findings",
@@ -64,6 +64,7 @@ export const REPORT_TYPES: ReportTypeInfo[] = [
       "Spearman correlations (exploratory)",
       "TOPSIS ranking with rank intervals",
       "Threats to validity",
+      "Run-all Jupyter workflow and downloadable figures/data",
     ],
   },
   {

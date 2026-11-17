@@ -1,0 +1,11 @@
+# Resolve the same Maven Central metadata through Google's hosted mirror when
+# shared CI runner addresses are rate-limited by Central. Dependency scanning
+# remains online and scanner errors remain fatal.
+# https://trivy.dev/docs/latest/guide/coverage/language/java/#config-file-mirrors
+# https://docs.cloud.google.com/docs/buildpacks/java#google_cloud_hosted_maven_central_mirror
+scan:
+  maven:
+    mirrors:
+      - source: https://repo.maven.apache.org/maven2/
+        targets:
+          - https://maven-central.storage-download.googleapis.com/maven2/

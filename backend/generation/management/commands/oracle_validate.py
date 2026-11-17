@@ -6,7 +6,7 @@ verdicts go to ``evaluation/conformance/probe_validation.json`` and a kind witho
 disabled (``probe_unvalidated``).
 
 Without ``--kit`` it runs each task's reference (``data/tasks/<slug>/reference/<stack>/``) ``--runs`` times:
-every run must pass 100%, the bare starter must score below 0.5, checks with mixed results become the suite's
+every run must pass 100%, a measured runnable starter must score below 0.5, mixed results become the suite's
 ``flaky_checks`` (a new suite version). The verdict goes to ``TaskSpecVersion.oracle``. Needs the docker
 runtime (``EVAL_RUNTIME=docker``) and the pinned tester image.
 """
@@ -21,7 +21,7 @@ from django.core.management.base import CommandError
 
 
 class Command(BaseCommand):
-    help = "Validate task oracles (3 runs, flaky list, bare starter) or, with --kit, the probe mutant pairs."
+    help = "Validate task oracles (3 runs, flaky list, measured starter control) or the probe mutant pairs."
 
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
