@@ -54,13 +54,13 @@
 	const activeCount = $derived(FILTER_KEYS.filter((k) => k !== 'q' && filters[k]).length);
 
 	function setParams(patch: Record<string, string>, { keepPage = false } = {}) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		for (const [key, value] of Object.entries(patch)) {
 			if (value) url.searchParams.set(key, value);
 			else url.searchParams.delete(key);
 		}
 		if (!keepPage) url.searchParams.delete('page');
-		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+		goto(`${url.pathname}${url.search}`, { replace: true, reset: false });
 	}
 
 	// Search box: local value, pushed to the URL after a short pause.

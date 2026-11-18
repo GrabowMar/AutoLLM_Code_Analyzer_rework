@@ -1,6 +1,6 @@
 # LLM Lab frontend
 
-The web UI for LLM Lab: SvelteKit 2 with Svelte 5 runes, TypeScript, Tailwind CSS 4
+The web UI for LLM Lab: SvelteKit 3 with Svelte 5 runes, TypeScript, Tailwind CSS 4
 and bits-ui (shadcn-svelte) components, built with `@sveltejs/adapter-node`.
 
 ## Running it

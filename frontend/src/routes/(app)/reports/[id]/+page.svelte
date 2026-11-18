@@ -71,10 +71,10 @@
 		if (view === 'notebook') notebookOpened = true;
 	});
 	function setParam(key: string, value: string | null) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		if (value) url.searchParams.set(key, value);
 		else url.searchParams.delete(key);
-		goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+		goto(url, { replace: true, reset: false });
 	}
 
 	async function load() {

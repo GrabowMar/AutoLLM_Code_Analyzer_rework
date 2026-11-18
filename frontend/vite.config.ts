@@ -1,4 +1,5 @@
 import { request } from "node:http";
+import adapter from "@sveltejs/adapter-node";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
@@ -53,24 +54,36 @@ function appSubdomainPassthrough(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [appSubdomainPassthrough(), tailwindcss(), sveltekit()],
+export default defineConfig(({ command }) => ({
+  plugins: [
+    appSubdomainPassthrough(),
+    tailwindcss(),
+    sveltekit({
+      adapter: adapter(),
+      alias: { $lib: "./src/lib" },
+      // Use root-relative asset URLs on nested routes.
+      paths: { relative: false },
+      dynamicCompileOptions: ({ filename }) =>
+        filename.includes("node_modules") ? undefined : { runes: true },
+    }),
+  ],
   ssr: {
-    // layerchart ships raw .svelte files; Node can't load them when the
-    // package is externalized during dev SSR.
-    noExternal: ["layerchart"],
+    // The production image runs the built server without node_modules. In dev,
+    // only layerchart needs special handling for its raw Svelte components.
+    noExternal: command === "build" ? [/.*/] : ["layerchart"],
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         // Reduce chunk count to improve mobile loading reliability.
         // Without this, each Lucide icon and each bits-ui component
         // becomes its own chunk (~56 chunks for the dashboard page).
-        manualChunks(id) {
-          if (id.includes("@lucide/svelte")) return "vendor-lucide";
-          if (id.includes("bits-ui")) return "vendor-bits-ui";
-          if (id.includes("mode-watcher") || id.includes("svelte-sonner"))
-            return "vendor-ui-utils";
+        codeSplitting: {
+          groups: [
+            { name: "vendor-lucide", test: /@lucide\/svelte/ },
+            { name: "vendor-bits-ui", test: /bits-ui/ },
+            { name: "vendor-ui-utils", test: /mode-watcher|svelte-sonner/ },
+          ],
         },
       },
     },
@@ -214,4 +227,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

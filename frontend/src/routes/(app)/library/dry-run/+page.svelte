@@ -158,7 +158,7 @@
 	const cell = $derived(result?.out.cells[selected] ?? null);
 
 	function syncQuery() {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		for (const [field, param] of PARAMS) {
 			const value = String(form[field] ?? '').trim();
 			if (value) url.searchParams.set(param, value);

@@ -132,7 +132,7 @@
 
 	function setTab(value: string) {
 		tab = value as Tab;
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		if (value === 'overview') url.searchParams.delete('tab');
 		else url.searchParams.set('tab', value);
 		replaceState(url, page.state);

@@ -74,10 +74,10 @@
 		return t === 'selection' || t === 'method' ? t : 'leaderboard';
 	});
 	function setTab(next: string) {
-		const url = new URL(appPage.url);
+		const url = new URL(appPage.url.href);
 		if (next === 'leaderboard') url.searchParams.delete('tab');
 		else url.searchParams.set('tab', next);
-		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+		goto(`${url.pathname}${url.search}`, { replace: true, reset: false });
 	}
 
 	// ── Leaderboard ──────────────────────────────────────────────────────────

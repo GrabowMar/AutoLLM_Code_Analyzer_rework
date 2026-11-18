@@ -75,10 +75,10 @@
 	}
 
 	function onCreated(study: StudyOut) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		url.search = `?draft=${study.id}`;
 		url.hash = location.hash; // the open builder step (kept out of `page.url` by shallow routing)
-		void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+		void goto(url, { replace: true, reset: false });
 		started = `draft:${study.id}`;
 	}
 
@@ -96,7 +96,7 @@
 			if (draftId) {
 				const study = await getStudy(draftId);
 				if (!isEditable(study.status, study.locked)) {
-					await goto(`/experiments/${study.id}`, { replaceState: true });
+					await goto(`/experiments/${study.id}`, { replace: true });
 					return;
 				}
 				const b = new BuilderState(study.design, {}, { onCreated });

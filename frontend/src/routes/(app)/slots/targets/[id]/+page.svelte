@@ -46,11 +46,11 @@
 	let busy = $state(false);
 
 	function setParam(key: string, value: string) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		if (value) url.searchParams.set(key, value);
 		else url.searchParams.delete(key);
 		if (key !== 'page') url.searchParams.delete('page');
-		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+		goto(`${url.pathname}${url.search}`, { replace: true, reset: false });
 	}
 
 	async function loadTarget(id: string, signal?: AbortSignal) {

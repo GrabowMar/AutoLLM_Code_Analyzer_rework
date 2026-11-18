@@ -38,18 +38,16 @@
 	let pageNo = $state(Number(q.get('page')) || 1);
 
 	function writeUrl() {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		const p = url.searchParams;
 		const set = (k: string, v: string) => (v ? p.set(k, v) : p.delete(k));
 		set('status', status);
 		set('q', search);
 		set('page', pageNo > 1 ? String(pageNo) : '');
 		if (url.search === page.url.search) return;
-		try {
-			replaceState(url, page.state);
-		} catch {
+		void replaceState(url, page.state).catch(() => {
 			// Before the router is ready: the next change writes it.
-		}
+		});
 	}
 
 	// ── data ──────────────────────────────────────────────────────────
