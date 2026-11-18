@@ -6,6 +6,7 @@ tester and adherence checker in-process. Build-seam outcomes use a runtime whose
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -87,7 +88,54 @@ def test_reference_passes_100_percent_three_times_and_the_bare_starter_scores_be
     assert out["starter_pass_rate"] < 0.5
     assert out["status"] == "pass"
     version.refresh_from_db()
-    assert version.oracle[stack.pinned_ref]["status"] == "pass"
+    evidence = version.oracle[stack.pinned_ref]
+    assert evidence["status"] == "pass"
+    assert evidence["validation_run_ids"] == out["runs"]
+    assert evidence["reference_pass_rates"] == [1.0, 1.0, 1.0]
+    assert evidence["starter_run_id"] == out["starter_run_id"]
+    assert evidence["starter_measured"] is True
+    assert GenerationRun.objects.get(pk=out["starter_run_id"]).completed_at is not None
+
+
+@pytest.mark.parametrize("runs", [0, -1, True])
+def test_oracle_rejects_invalid_positive_control_counts(golden: Any, runs: Any) -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        conformance.validate_oracle(
+            golden.get("task", "crud_todo_list"),
+            golden.get("stack", "flask-react"),
+            suite_of(golden),
+            runs=runs,
+        )
+
+
+@pytest.mark.parametrize("missing", [True, False])
+def test_oracle_cannot_pass_without_a_measured_negative_control(golden: Any, monkeypatch: Any, missing: bool) -> None:
+    def evaluate(run: GenerationRun, *_args: Any, **_kwargs: Any) -> Any:
+        positive = run.reference_of == choices.ReferenceOf.ORACLE
+        return SimpleNamespace(
+            status=choices.EvaluationStatus.MEASURED if positive else choices.EvaluationStatus.NOT_MEASURED,
+            result={"measured": positive, "metrics": {"agent_pass_rate": 1.0 if positive else None}},
+        )
+
+    monkeypatch.setattr(suite_mod, "evaluate", evaluate)
+    monkeypatch.setattr(suite_mod, "outcome_of", lambda _row: (choices.Outcome.TESTED, ""))
+    version = golden.get("task", "crud_todo_list")
+    stack = golden.get("stack", "flask-react")
+    result = conformance.validate_oracle(
+        version,
+        stack,
+        suite_of(golden),
+        runs=1,
+        reference=kit_tree(),
+        starter_tree={} if missing else kit_tree(),
+        write_flaky=False,
+    )
+    assert result["rates"] == [1.0]
+    assert result["starter_pass_rate"] is None
+    assert result["starter_measured"] is False
+    assert result["status"] == "fail"
+    version.refresh_from_db()
+    assert version.oracle[stack.pinned_ref]["status"] == "fail"
 
 
 def test_evaluate_records_every_stage(golden: Any) -> None:
@@ -474,8 +522,10 @@ def test_lock_unresolvable_is_build_fail(golden: Any, monkeypatch: pytest.Monkey
     "output",
     [
         "error: Unexpected '\\\\', expected '-c', '-e', '-r' or the start of a requirement: requirements.txt:2:84",
-        "error: Error parsing included file in `requirements.txt` at position 0\n"
-        "  cause: failed to read from file `/work/requirements.lock`: No such file or directory (os error 2)",
+        (
+            "error: Error parsing included file in `requirements.txt` at position 0\n"
+            "  cause: failed to read from file `/work/requirements.lock`: No such file or directory (os error 2)"
+        ),
     ],
 )
 def test_unreadable_manifest_is_build_fail(golden: Any, monkeypatch: pytest.MonkeyPatch, output: str) -> None:

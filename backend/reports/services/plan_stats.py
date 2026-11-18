@@ -2,7 +2,7 @@
 
 ``PLAN_METRICS`` are the outcomes an analysis plan may declare (per-app values, an app's repeats
 averaged, then the mean over a group's apps). The tests are exact where feasible: the sign test, the
-Wilcoxon signed-rank test (exact up to 25 non-zero deltas) and a two-stage cluster bootstrap over apps.
+Wilcoxon signed-rank test (exact up to 50 non-zero deltas) and a two-stage cluster bootstrap over apps.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any
 BOOTSTRAP_DRAWS = 2000
 # Below this many apps a bootstrap interval is degenerate (one app at 100% would read as [1, 1]).
 MIN_APPS_FOR_CI = 3
-_EXACT_WILCOXON_MAX_N = 25
+_EXACT_WILCOXON_MAX_N = 50
 
 # Outcomes a plan may name: per-app values (an app's repeats averaged), then
 # the mean over a condition's (or model's) apps. Plans store only the keys, so
@@ -102,6 +102,27 @@ def cluster_bootstrap_ci(
     return _ci(samples)
 
 
+def paired_mean_ci(deltas: list[float], *, seed: int = 0, draws: int = BOOTSTRAP_DRAWS) -> list | None:
+    """Percentile 95% interval for a paired app-mean effect, resampling whole pairs.
+
+    Repeats have already been averaged within app on shared cells. The interval
+    describes this effect; it is not a simultaneous, multiplicity-adjusted interval.
+    """
+    if len(deltas) < MIN_APPS_FOR_CI:
+        return None
+    return cluster_bootstrap_ci({i: [value] for i, value in enumerate(deltas)}, random.Random(seed), draws)  # noqa: S311 - deterministic resampling
+
+
+def paired_difference(first: float, second: float) -> float:
+    """Second minus first, stabilizing subtraction below the reported metric precision.
+
+    Group metrics are rounded to four decimals. Twelve decimal places also
+    preserve repeated binary rates while preventing arithmetic noise from
+    splitting mathematically tied signed ranks.
+    """
+    return round(second - first, 12)
+
+
 def sign_test_p(wins: int, losses: int) -> float | None:
     """Two-sided exact binomial sign test (ties dropped); None without non-zero deltas."""
     n = wins + losses
@@ -133,9 +154,10 @@ def wilcoxon_p(deltas: list[float], alternative: str = "two-sided") -> float | N
 
     ``alternative`` is ``two-sided`` (default), ``greater`` (deltas tend to be
     positive) or ``less``. Exact (the null distribution of W+ by dynamic
-    programming over doubled ranks, so tied half-ranks stay integers) up to 25
+    programming over doubled ranks, so tied half-ranks stay integers) up to 50
     non-zero deltas; the normal approximation with tie and continuity
-    correction above.
+    correction above. The null assumes independent symmetric differences,
+    equivalently equiprobable sign flips conditional on their magnitudes.
     """
     if alternative not in ("two-sided", "greater", "less"):
         msg = f"Unknown alternative {alternative!r}"

@@ -5,6 +5,8 @@ on:
   pull_request:
     branches: ['main']
     paths:
+      - '.github/workflows/trivy.yml'
+      - '.github/trivy.yaml'
       - 'compose/**'
       - 'docker-compose.local.yml'
       - 'docker-compose.production.yml'
@@ -15,6 +17,8 @@ on:
   push:
     branches: ['main']
     paths:
+      - '.github/workflows/trivy.yml'
+      - '.github/trivy.yaml'
       - 'compose/**'
       - 'docker-compose.local.yml'
       - 'docker-compose.production.yml'
@@ -41,6 +45,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          trivy-config: .github/trivy.yaml
           format: sarif
           output: trivy-fs.sarif
           severity: HIGH,CRITICAL
@@ -48,7 +53,7 @@ jobs:
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && hashFiles('trivy-fs.sarif') != ''
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -83,22 +88,30 @@ jobs:
 
       - name: Discover image tag
         id: img
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
-          tag=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)${{ matrix.target }}:' | head -1)
+          set -euo pipefail
+          tag=$(docker buildx bake --file docker-compose.production.yml --print "$TARGET" |
+            jq -er --arg target "$TARGET" '
+              .target[$target].tags |
+              if type == "array" and length == 1 and (.[0] | type == "string" and length > 0)
+              then .[0] else error("Expected exactly one image tag for " + $target) end')
+          docker image inspect "$tag" --format '{{.Id}}'
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Trivy image scan
-        if: steps.img.outputs.tag != ''
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.img.outputs.tag }}
+          trivy-config: .github/trivy.yaml
           format: sarif
           output: trivy-${{ matrix.target }}.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true
 
       - name: Upload SARIF
-        if: steps.img.outputs.tag != ''
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.target)) != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-${{ matrix.target }}.sarif

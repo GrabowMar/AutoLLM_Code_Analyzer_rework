@@ -187,10 +187,32 @@ class TestDependencies:
         assert {name: locked.get(name) for name in declared} == declared
 
     def test_no_heavy_stats_dependencies(self, pyproject, locked):
-        # D18: stats stay pure Python; mixed models are fitted offline.
-        banned = {"statsmodels", "numpy", "scipy", "pandas", "pyarrow", "datasketch"}
+        # D18 applies to the server runtime. Portable notebook tests run in the dev environment.
+        banned = {"statsmodels", "numpy", "scipy", "pandas", "pyarrow", "datasketch", "matplotlib"}
         assert banned.isdisjoint(self._pins(pyproject["project"]["dependencies"]))
-        assert banned.isdisjoint(locked)
+        packages = tomllib.loads((REPO / "uv.lock").read_text())["package"]
+        pending = [
+            {"name": pyproject["project"]["name"], "extra": list(pyproject["project"]["optional-dependencies"])},
+        ]
+        visited = set()
+        runtime = set()
+        while pending:
+            dependency = pending.pop()
+            name, extras = dependency["name"], tuple(sorted(dependency.get("extra", [])))
+            if (name, extras) in visited:
+                continue
+            visited.add((name, extras))
+            runtime.add(name)
+            matches = [package for package in packages if package["name"] == name]
+            assert matches, f"Missing runtime lock entry: {name}"
+            for package in matches:
+                pending.extend(package.get("dependencies", []))
+                for extra in extras:
+                    pending.extend(package.get("optional-dependencies", {}).get(extra, []))
+        assert banned.isdisjoint(runtime), f"Heavy server dependencies: {banned & runtime}"
+        dev = self._pins(pyproject["dependency-groups"]["dev"])
+        for name in ("matplotlib", "numpy", "pandas"):
+            assert dev[name] == locked[name]
 
     @pytest.mark.parametrize("language", GRAMMARS)
     def test_grammar_ships_inside_the_wheel(self, language):

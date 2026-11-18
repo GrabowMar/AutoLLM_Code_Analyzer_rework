@@ -53,6 +53,8 @@ export interface StudyConditionsConfig {
 export interface StudyReportConfig {
   study_id?: string;
   run_ids?: string[];
+  /** One versioned instrument for every app; missing evaluations never fall back to another suite. */
+  eval_suite?: string;
   /**
    * Sensitivity analysis: leave truncated runs out. Send it only when the researcher chose it
    * (an explicit value that differs from a locked plan's exclusions adds a validity note).

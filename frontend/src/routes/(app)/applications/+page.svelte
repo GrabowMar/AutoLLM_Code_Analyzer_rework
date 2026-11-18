@@ -37,15 +37,15 @@
 	import Check from '@lucide/svelte/icons/check';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { getSampleFacets, listSamples } from '$lib/api/v3/samples';
-	import type { Page, RunFacetsOut, RunListOut, RunListQuery } from '$lib/api/v3/types';
+	import { getSampleFacets, listSamples, scanSampleFeatureChecks } from '$lib/api/v3/samples';
+	import type { FeatureCheckScanOut, Page, RunFacetsOut, RunListOut, RunListQuery } from '$lib/api/v3/types';
 	import { fmtRate, fmtSeconds, fmtUsd, OUTCOME_TONES, outcomeLabel, shortSha, UseAsParentAction } from '$lib/components/runs';
 	import { formatDate } from '$lib/utils/formatters';
 
 	const PAGE_SIZE = 50;
 
 	// ── URL state ───────────────────────────────────────────────────────────────
-	const FILTER_KEYS = ['q', 'status', 'outcome', 'model', 'task', 'harness', 'stack', 'study', 'usable'] as const;
+	const FILTER_KEYS = ['q', 'status', 'outcome', 'model', 'task', 'harness', 'stack', 'study', 'usable', 'deployment', 'preview_running'] as const;
 	type FilterKey = (typeof FILTER_KEYS)[number];
 	const param = (key: string) => page.url.searchParams.get(key) ?? '';
 	const filters = $derived(Object.fromEntries(FILTER_KEYS.map((k) => [k, param(k)])) as Record<FilterKey, string>);
@@ -87,6 +87,8 @@
 
 	const query = $derived<RunListQuery>({
 		kind: 'app_agentic',
+		deployment: (filters.deployment || undefined) as RunListQuery['deployment'],
+		preview_running: filters.preview_running === '' ? undefined : filters.preview_running === 'true',
 		q: filters.q || undefined,
 		status: filters.status || undefined,
 		outcome: filters.outcome || undefined,
@@ -125,6 +127,39 @@
 		return () => controller.abort();
 	});
 
+	let featureScan = $state<FeatureCheckScanOut | null>(null);
+	let scanBusy = $state(false);
+	let scanError = $state('');
+	let scanController: AbortController | undefined;
+	$effect(() => {
+		void query; void sort; void currentPage; void reloadKey;
+		untrack(() => {
+			scanController?.abort();
+			featureScan = null;
+			scanError = '';
+			scanBusy = false;
+		});
+		return () => scanController?.abort();
+	});
+	async function scanFeatures() {
+		scanController?.abort();
+		const controller = new AbortController();
+		scanController = controller;
+		scanBusy = true;
+		scanError = '';
+		try {
+			const result = await scanSampleFeatureChecks(
+				{ ...query, sort: sort || undefined, page: currentPage, page_size: PAGE_SIZE },
+				{ signal: controller.signal },
+			);
+			if (!controller.signal.aborted) featureScan = result;
+		} catch (e) {
+			if (!isAbortError(e)) scanError = formatApiError(e, 'Could not scan the recorded feature checks.');
+		} finally {
+			if (scanController === controller) scanBusy = false;
+		}
+	}
+
 	// While a visible row is still pending / running, refresh quietly so it moves on when it finishes.
 	const inProgress = $derived(data?.items.some((r) => r.status === 'pending' || r.status === 'running') ?? false);
 	$effect(() => {
@@ -144,6 +179,11 @@
 	const shortModel = (m: string) => m.split('/').pop() ?? m;
 	const statusOptions = $derived(opt(facets?.statuses));
 	const runningCount = $derived(facets?.statuses.find((s) => s.value === 'running')?.count ?? 0);
+	const deploymentOptions = $derived(opt(facets?.deployments));
+	const PREVIEW: FilterMenuOption[] = [
+		{ value: 'true', label: 'Preview running', hint: 'runtime container' },
+		{ value: 'false', label: 'No running preview' },
+	];
 	const outcomeOptions = $derived(opt(facets?.outcomes, (v) => outcomeLabel(v)));
 	const modelOptions = $derived(opt(facets?.models, (v) => shortModel(v)));
 	const taskOptions = $derived(opt(facets?.tasks));
@@ -234,11 +274,11 @@
 				{#if runningCount > 0 || filters.status === 'running'}
 					<button
 						class="header-stat hover:text-foreground"
-						title={filters.status === 'running' ? 'Show every status' : 'Show only running apps'}
+						title={filters.status === 'running' ? 'Show every generation status' : 'Show apps still being generated'}
 						onclick={() => setParams({ status: filters.status === 'running' ? '' : 'running' })}
 					>
 						<span class="status-dot status-dot-live h-1.5 w-1.5 text-info" aria-hidden="true"></span>
-						<b>{runningCount.toLocaleString()}</b> running
+						<b>{runningCount.toLocaleString()}</b> generating
 					</button>
 				{/if}
 				<span class="header-stat" title="Mean agent pass rate over apps whose evaluation was measured">
@@ -274,7 +314,9 @@
 				{/if}
 			</div>
 			<div class="tb-menus">
-				<FilterMenu label="Status" icon={Activity} value={filters.status} options={statusOptions} onChange={(v) => setParams({ status: v })} anyLabel="Any status" />
+				<FilterMenu label="Generation" icon={Activity} value={filters.status} options={statusOptions} onChange={(v) => setParams({ status: v })} anyLabel="Any status" />
+				<FilterMenu label="Deployment" icon={BadgeCheck} value={filters.deployment} options={deploymentOptions} onChange={(v) => setParams({ deployment: v })} anyLabel="Any deployment" />
+				<FilterMenu label="Preview" icon={AppWindow} value={filters.preview_running} options={PREVIEW} onChange={(v) => setParams({ preview_running: v })} anyLabel="Any preview state" />
 				<FilterMenu label="Outcome" icon={Flag} value={filters.outcome} options={outcomeOptions} onChange={(v) => setParams({ outcome: v })} />
 				<FilterMenu label="Model" icon={Cpu} value={filters.model} options={modelOptions} onChange={(v) => setParams({ model: v })} searchable anyLabel="All models" />
 				<FilterMenu label="Task" icon={ListChecks} value={filters.task} options={taskOptions} onChange={(v) => setParams({ task: v })} anyLabel="All tasks" />
@@ -290,6 +332,43 @@
 			</div>
 		</div>
 
+		{#if filters.deployment || filters.preview_running}
+			<p class="border-b border-border px-3 py-2 text-xs text-muted-foreground">Deployment uses recorded build/start results. Preview state is the runtime service’s recorded container state; generation status describes the generation job.</p>
+		{/if}
+		{#if scanError}<div class="p-3"><ErrorAlert message={scanError} onretry={scanFeatures} /></div>{/if}
+		{#if featureScan}
+			<section class="space-y-2 border-b border-border bg-muted/20 p-3" aria-label="Feature-check scan">
+				<div class="flex items-center justify-between gap-3">
+					<h2 class="text-sm font-medium">Feature-check scan · {featureScan.items.length} applications on page {featureScan.page}</h2>
+					<Button variant="ghost" size="sm" onclick={() => (featureScan = null)}>Close scan</Button>
+				</div>
+				<p class="text-xs text-muted-foreground">{featureScan.note}</p>
+				<ul class="divide-y divide-border">
+					{#each featureScan.items as scan (scan.run_id)}
+						{@const app = data?.items.find((row) => row.id === scan.run_id)}
+						<li class="py-2 text-xs">
+							<details>
+								<summary class="cursor-pointer">
+									<span class="font-medium">{app?.task_title ?? app?.task ?? shortSha(scan.run_id, 8)}</span>
+									<span class="ml-2 text-muted-foreground">{shortSha(scan.run_id, 8)} · {scan.measured ? `${scan.passed}/${scan.checks} checks passed · ${scan.failed} failed/errors · ${scan.skipped} skipped` : 'Checks not measured'} · {scan.uncovered_requirements.length} requirements unverified</span>
+								</summary>
+								<div class="ml-4 mt-2 space-y-2">
+									<a class="text-primary underline" href={`/samples/${scan.run_id}?tab=evaluation`}>Open evaluation {scan.evaluation_id ? `#${scan.evaluation_id}` : ''}</a>
+									<span class="ml-2 text-muted-foreground">{scan.eval_suite ?? 'No suite measured'} · {scan.evaluation_status}</span>
+									{#each [...scan.failed_checks, ...scan.skipped_checks] as check}
+										<p><span class="font-mono">{check.id}</span> · {check.status}{check.endpoint ? ` · ${check.endpoint}` : ''}{check.note ? ` — ${check.note}` : ''}</p>
+									{/each}
+									{#each scan.uncovered_requirements as requirement}
+										<p class="text-muted-foreground">Unverified {requirement.kind}: <span class="font-mono">{requirement.id}</span> — {requirement.description}</p>
+									{/each}
+									{#if scan.excluded_flaky_checks.length}<p class="text-muted-foreground">Excluded flaky checks: {scan.excluded_flaky_checks.join(', ')}</p>{/if}
+								</div>
+							</details>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 		{#if loading}
 			<LoadingState label="loading applications" />
 		{:else if !data || data.items.length === 0}
@@ -311,6 +390,9 @@
 					{data?.items.length ?? 0} of {(data?.total ?? 0).toLocaleString()}
 				{/snippet}
 				{#snippet controls()}
+					<Button variant="outline" size="sm" disabled={scanBusy} onclick={scanFeatures} title="Read recorded checks for applications on this page; no new model or evaluation run">
+						<ListChecks class="mr-1.5 size-3.5" />{scanBusy ? 'Scanning…' : 'Scan feature checks'}
+					</Button>
 					<div class="hidden md:block">
 					<DropdownMenu.Root>
 						<DropdownMenu.Trigger class="fm-trigger h-7! text-xs" aria-label="Choose setup columns">
