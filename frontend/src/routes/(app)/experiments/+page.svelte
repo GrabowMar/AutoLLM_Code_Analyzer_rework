@@ -102,11 +102,11 @@
 	});
 
 	function setParam(key: string, value: string) {
-		const next = new URL(page.url);
+		const next = new URL(page.url.href);
 		if (value) next.searchParams.set(key, value);
 		else next.searchParams.delete(key);
 		if (key !== 'page') next.searchParams.delete('page');
-		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
+		void goto(next, { replace: true, reset: false });
 	}
 
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -214,7 +214,7 @@
 					<Zap class="size-3.5" aria-hidden="true" />Quick generations
 				</button>
 				{#if activeCount > 0}
-					<button class="tb-clear" onclick={() => goto(`/experiments${showQuick ? '?quick=1' : ''}`, { replaceState: true })}>
+					<button class="tb-clear" onclick={() => goto(`/experiments${showQuick ? '?quick=1' : ''}`, { replace: true })}>
 						<X class="size-3" aria-hidden="true" />Clear{activeCount > 1 ? ` ${activeCount}` : ''}
 					</button>
 				{/if}

@@ -2,6 +2,7 @@
  * Models list filters: one object for every filter, its URL form (so a filtered view is a link)
  * and the `getModels` params it turns into. Comma-list fields mean "all must hold" on the API.
  */
+import type { ReadonlyURLSearchParams } from "$app/state";
 import type { getModels } from "$lib/api/models";
 
 export interface ModelFilters {
@@ -86,7 +87,7 @@ export function countActive(
     .filter((k) => Boolean(f[k])).length;
 }
 
-export function filtersFromUrl(params: URLSearchParams): ModelFilters {
+export function filtersFromUrl(params: ReadonlyURLSearchParams): ModelFilters {
   const f: ModelFilters = { ...EMPTY_FILTERS };
   for (const [field, key] of Object.entries(URL_KEYS) as [
     keyof ModelFilters,
@@ -104,9 +105,9 @@ export function filtersFromUrl(params: URLSearchParams): ModelFilters {
 /** Writes the filters into `params` (removing empty ones), leaving unrelated keys alone. */
 export function filtersToUrl(
   f: ModelFilters,
-  params: URLSearchParams,
+  params: ReadonlyURLSearchParams,
 ): URLSearchParams {
-  const out = new URLSearchParams(params);
+  const out = new URLSearchParams(params.toString());
   for (const [field, key] of Object.entries(URL_KEYS) as [
     keyof ModelFilters,
     string,

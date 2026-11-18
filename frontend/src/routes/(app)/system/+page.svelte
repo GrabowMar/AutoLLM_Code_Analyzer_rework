@@ -41,10 +41,10 @@ const tab = $derived<Tab>(
 );
 
 function setTab(next: string) {
-const url = new URL(page.url);
+const url = new URL(page.url.href);
 if (next === DEFAULT_TAB) url.searchParams.delete('tab');
 else url.searchParams.set('tab', next);
-goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+goto(`${url.pathname}${url.search}`, { replace: true, reset: false });
 }
 
 let isStaff = $state(false);

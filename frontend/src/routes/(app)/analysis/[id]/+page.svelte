@@ -13,7 +13,7 @@
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
-	import { page } from '$app/state';
+	import { page, type ReadonlyURL } from '$app/state';
 	import { Popover } from 'bits-ui';
 	import { toast } from 'svelte-sonner';
 	import * as Tabs from '$lib/components/ui/tabs';
@@ -81,7 +81,7 @@
 	type Tab = 'overview' | 'findings' | 'tools';
 	const TABS: Tab[] = ['overview', 'findings', 'tools'];
 
-	function filtersFromUrl(url: URL): FindingFilters {
+	function filtersFromUrl(url: ReadonlyURL): FindingFilters {
 		const p = url.searchParams;
 		const sort = p.get('sort');
 		return {
@@ -103,7 +103,7 @@
 	let filters = $state<FindingFilters>(filtersFromUrl(page.url));
 
 	function writeUrl() {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		const p = url.searchParams;
 		const set = (key: string, value: string, fallback = '') => (value && value !== fallback ? p.set(key, value) : p.delete(key));
 		set('tab', tab, 'overview');
@@ -117,11 +117,9 @@
 		set('sort', filters.sort, 'severity');
 		set('merge', filters.merge ? '' : '0');
 		if (url.search === page.url.search) return;
-		try {
-			replaceState(url, page.state);
-		} catch {
+		void replaceState(url, page.state).catch(() => {
 			// Before the router is ready (first render): the next change writes it.
-		}
+		});
 	}
 
 	$effect(() => {

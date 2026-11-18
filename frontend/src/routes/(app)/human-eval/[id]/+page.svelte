@@ -124,12 +124,12 @@
 	const tab = $derived<TaskTab>(data.tab ?? DEFAULT_TAB);
 
 	function setTab(next: string) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		if (next === DEFAULT_TAB) url.searchParams.delete('tab');
 		else url.searchParams.set('tab', next);
 		// Sub-state of the previous tab (filters, open sheet) doesn't carry over.
 		for (const key of ['assignment', 'view', 'participant', 'app']) url.searchParams.delete(key);
-		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+		goto(`${url.pathname}${url.search}`, { replace: true, reset: false });
 	}
 
 	const tabCount = $derived.by((): Partial<Record<TaskTab, number>> => {

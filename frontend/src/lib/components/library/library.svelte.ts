@@ -13,7 +13,7 @@
  *
  * Browser-only: the store is a module singleton, so on the server (SSR) nothing is fetched.
  */
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { formatApiError } from "$lib/api/core";
 import { getMe } from "$lib/api/users";
 import { getAuth } from "$lib/stores/auth.svelte";

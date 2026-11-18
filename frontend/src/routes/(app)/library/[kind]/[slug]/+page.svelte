@@ -119,12 +119,12 @@
 	// ── tabs (URL-synced) ──
 	let tab = $state(untrack(() => (data.diff ? 'diff' : data.tab)));
 	function setParam(updates: Record<string, string | null>) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		for (const [k, v] of Object.entries(updates)) {
 			if (v === null) url.searchParams.delete(k);
 			else url.searchParams.set(k, v);
 		}
-		void goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+		void goto(url, { replace: true, reset: false });
 	}
 	$effect(() => {
 		const t = tab;

@@ -1,4 +1,5 @@
-import type { Handle, HandleServerError, RequestEvent } from "@sveltejs/kit";
+import type { RequestEvent } from "@sveltejs/kit";
+import type { Handle, HandleServerError } from "@sveltejs/kit/hooks";
 
 const API_TARGET = process.env.API_TARGET ?? "http://localhost:8001";
 
@@ -101,13 +102,14 @@ export const handle: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 
-export const handleError: HandleServerError = async ({ error, status }) => {
-  const message = error instanceof Error ? error.message : String(error);
+export const handleError: HandleServerError = ({ kind, error }) => {
+  if (kind === "app" || kind === "validation") return;
   // Missing static assets (favicon, old PWA paths) should not spam logs or mask real errors.
   if (
-    status === 404 &&
-    (/favicon\.(png|ico|svg)/i.test(message) ||
-      /^Not found: \/(_app|sw\.js|favicon)/i.test(message))
+    kind === "framework" &&
+    error.status === 404 &&
+    (/favicon\.(png|ico|svg)/i.test(error.message) ||
+      /^Not found: \/(_app|sw\.js|favicon)/i.test(error.message))
   ) {
     return { message: "Not found" };
   }

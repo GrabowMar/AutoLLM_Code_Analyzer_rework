@@ -13,7 +13,7 @@
  * refetches them); and after a TTL a list is never served again.
  * `refreshCatalog()` forces a refetch after a change made elsewhere.
  */
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { getModels, type LLMModelSummary } from "$lib/api/models";
 
 const MODEL_PAGE_SIZE = 200; // backend maximum

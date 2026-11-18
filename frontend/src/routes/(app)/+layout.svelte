@@ -37,7 +37,7 @@
 					if (roleCheckingFor !== key) return;
 					isEvaluator = me.is_evaluator === true;
 					roleCheckedFor = key;
-					if (isEvaluator) void goto('/eval', { replaceState: true });
+					if (isEvaluator) void goto('/eval', { replace: true });
 				})
 				.catch(() => {
 					if (roleCheckingFor !== key) return;
