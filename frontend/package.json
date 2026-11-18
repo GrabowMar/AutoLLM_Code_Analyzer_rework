@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@internationalized/date": "^3.12.4",
-    "@lucide/svelte": "^1.71.0",
+    "@lucide/svelte": "^1.72.0",
     "@sveltejs/adapter-node": "^5.5.7",
     "@sveltejs/kit": "^2.69.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
@@ -27,15 +27,15 @@
     "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.2.1",
     "typescript": "^6.0.3",
-    "vite": "^8.3.7",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
   },
   "dependencies": {
     "@shikijs/transformers": "^4.6.0",
-    "bits-ui": "^2.20.6",
+    "bits-ui": "^2.21.0",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.17",
-    "layerchart": "^2.9.2",
+    "layerchart": "^2.10.1",
     "marked": "^18.2.0",
     "marked-alert": "^2.1.2",
     "marked-gfm-heading-id": "^4.1.4",
