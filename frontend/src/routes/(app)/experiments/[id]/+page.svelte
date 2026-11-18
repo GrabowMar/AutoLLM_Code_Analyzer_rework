@@ -78,7 +78,7 @@
 			});
 			live = next;
 			void next.start().then(() => {
-				if (next.study && next.study.status === 'draft') void goto(`/experiments/new?draft=${studyId}`, { replaceState: true });
+				if (next.study && next.study.status === 'draft') void goto(`/experiments/new?draft=${studyId}`, { replace: true });
 			});
 			void loadResults();
 		});
@@ -93,9 +93,9 @@
 	onDestroy(() => live?.destroy());
 
 	function setTab(value: string) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		url.searchParams.set('tab', value);
-		void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+		void goto(url, { replace: true, reset: false });
 	}
 
 	async function act(fn: () => Promise<unknown>, fallback: string) {

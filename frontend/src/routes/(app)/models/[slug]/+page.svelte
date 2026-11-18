@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import {
 		getModel,
@@ -37,7 +37,7 @@
 	import ModelApplicationsSection from '$lib/components/models/ModelApplicationsSection.svelte';
 	import ModelGenerationDataTab from '$lib/components/models/ModelGenerationDataTab.svelte';
 
-	const slug = $derived($page.params.slug ?? '');
+	const slug = $derived(page.params.slug ?? '');
 
 	const sections = [
 		{ id: 'overview', label: 'Overview', icon: Info },
@@ -52,7 +52,7 @@
 	type SectionId = (typeof sections)[number]['id'];
 
 	function initialSection(): SectionId {
-		const t = $page.url.searchParams.get('tab');
+		const t = page.url.searchParams.get('tab');
 		return sections.some((s) => s.id === t) ? (t as SectionId) : 'overview';
 	}
 

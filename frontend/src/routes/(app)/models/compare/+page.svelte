@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { formatPrice, formatTokens } from '$lib/utils/formatters';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { getModelComparison, type LLMModelDetail, type ModelComparisonResult } from '$lib/api/client';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -19,7 +19,7 @@
 	type BaselineMode = 'first' | 'average' | 'median';
 
 	const queryModels = $derived(
-		($page.url.searchParams.get('models') ?? '')
+		(page.url.searchParams.get('models') ?? '')
 			.split(',')
 			.map((value) => value.trim())
 			.filter(Boolean),

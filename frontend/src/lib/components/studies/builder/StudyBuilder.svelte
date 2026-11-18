@@ -104,10 +104,10 @@
 		if (step === current) return;
 		if (current !== 'review') left = new Set([...left, current]);
 		current = step;
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		url.hash = step;
 		try {
-			replaceState(url, page.state);
+			await replaceState(url, page.state);
 		} catch {
 			/* the router is not ready during the first render */
 		}

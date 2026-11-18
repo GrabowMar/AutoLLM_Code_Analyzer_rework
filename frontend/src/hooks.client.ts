@@ -1,4 +1,4 @@
-import type { HandleClientError } from "@sveltejs/kit";
+import type { HandleClientError } from "@sveltejs/kit/hooks";
 
 /** Runs before root layout mount — must not wait on network (see app.html 6s watchdog). */
 export function init() {
@@ -13,9 +13,7 @@ export function init() {
   }
 }
 
-export const handleError: HandleClientError = async ({ error, message }) => {
+export const handleError: HandleClientError = ({ kind, error }) => {
+  if (kind === "app") return;
   console.error("Client error:", error);
-  return {
-    message: message || "An unexpected error occurred",
-  };
 };

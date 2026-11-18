@@ -204,7 +204,7 @@ services:
   # public registries, note depcache_unavailable). Nothing can be published to any of them, and their
   # volumes are never mounted into an agent container.
   depcache-npm:
-    image: docker.io/verdaccio/verdaccio:7.0.2@sha256:5623458a61100ff2c89526752e8ea2db58ae2d494fa202c18bf4a508ec46892c
+    image: docker.io/verdaccio/verdaccio:7.1.0@sha256:c1b1b86154b43a4e1861bc7a4496d4977aa43c8bdb5db49b68445f8a9273729f
     profiles: [depcache]
     restart: unless-stopped
     volumes:
@@ -265,7 +265,7 @@ services:
     oom_score_adj: 500
 
   depcache-maven:
-    image: docker.io/dzikoysk/reposilite:3.6.6@sha256:2438ab2a01392ea53d62ba83cdca1afe963603518f4282af4712076d39e1dd22
+    image: docker.io/dzikoysk/reposilite:3.6.7@sha256:eee5c8fe3b72254c464a4cf04a0d54ae7aa6c759493ffe252d085f30ee45c5c8
     profiles: [depcache]
     restart: unless-stopped
     environment:
@@ -296,7 +296,7 @@ services:
     oom_score_adj: 500
 
   redis:
-    image: docker.io/redis:8.8
+    image: docker.io/redis:8.10
     # Come back after a Docker daemon restart (unattended-upgrades restarted it on 2026-11-11 and
     # left the stack down).
     restart: unless-stopped

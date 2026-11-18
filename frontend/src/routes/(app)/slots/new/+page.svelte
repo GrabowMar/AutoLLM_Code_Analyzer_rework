@@ -41,12 +41,12 @@
 	let pick = $state<{ selection: ParentSelection; poolSize: number | null } | null>(null);
 
 	function navigate(params: Record<string, string | null>) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		for (const [key, value] of Object.entries(params)) {
 			if (value) url.searchParams.set(key, value);
 			else url.searchParams.delete(key);
 		}
-		goto(`${url.pathname}${url.search}`, { keepFocus: true, noScroll: true });
+		goto(`${url.pathname}${url.search}`, { reset: false });
 	}
 
 	// ── step 2: frozen sets and the picker ──────────────────────────────────

@@ -57,13 +57,13 @@
 	const hasConsole = $derived(task.design.blocks.some((b) => b.type === 'security' && b.http_console));
 
 	function setParams(next: Record<string, string | null>) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		for (const [key, value] of Object.entries(next)) {
 			if (value == null || value === '') url.searchParams.delete(key);
 			else url.searchParams.set(key, value);
 		}
 		try {
-			goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+			goto(`${url.pathname}${url.search}`, { replace: true, reset: false });
 		} catch {
 			// Router not ready yet.
 		}
