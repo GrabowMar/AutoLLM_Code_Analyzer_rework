@@ -43,7 +43,7 @@ dependencies = [
   "tree-sitter==0.26.1",
   # 0.13.x is the last line that ships its grammars inside the wheel (hash-pinned by uv.lock);
   # 1.x downloads them from GitHub at first use, which breaks offline containers and pinned grammars.
-  "tree-sitter-language-pack==0.13.0",
+  "tree-sitter-language-pack==1.25.2",
   "uvicorn[standard]==0.54.0",
   "uvicorn-worker==0.4.0",
   "whitenoise==6.12.0",
