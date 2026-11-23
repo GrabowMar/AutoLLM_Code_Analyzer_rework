@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS jupyterlite
+FROM python:3.15-slim AS jupyterlite
 
 WORKDIR /lite/frontend
 COPY ./frontend/jupyterlite ./jupyterlite
