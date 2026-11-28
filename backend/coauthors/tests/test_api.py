@@ -98,11 +98,13 @@ def test_at_most_twenty_active_links(owner_client, owner):
 def test_revoke_invite_is_idempotent_and_owner_scoped(owner_client, owner):
     _raw, invite = make_invite(owner)
     foreign = CoauthorInviteFactory()
-    assert owner_client.delete(f"{API}/invites/{invite.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/invites/{invite.pk}/")
+    assert delete_response.status_code == 204
     invite.refresh_from_db()
     first = invite.revoked_at
     assert first is not None
-    assert owner_client.delete(f"{API}/invites/{invite.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/invites/{invite.pk}/")
+    assert delete_response.status_code == 204
     invite.refresh_from_db()
     assert invite.revoked_at == first
     missing = owner_client.delete(f"{API}/invites/{foreign.pk}/")
@@ -304,15 +306,18 @@ def test_members_list_active_first_then_ended(owner, owner_client):
 
 def test_remove_member_is_idempotent_and_owner_scoped(owner, owner_client, coauthorship):
     foreign = CoauthorshipFactory()
-    assert owner_client.delete(f"{API}/members/{coauthorship.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/members/{coauthorship.pk}/")
+    assert delete_response.status_code == 204
     coauthorship.refresh_from_db()
     ended = coauthorship.revoked_at
     assert ended is not None
     assert coauthorship.revoked_by == owner
-    assert owner_client.delete(f"{API}/members/{coauthorship.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/members/{coauthorship.pk}/")
+    assert delete_response.status_code == 204
     coauthorship.refresh_from_db()
     assert coauthorship.revoked_at == ended
-    assert owner_client.delete(f"{API}/members/{foreign.pk}/").status_code == 404
+    delete_response = owner_client.delete(f"{API}/members/{foreign.pk}/")
+    assert delete_response.status_code == 404
     foreign.refresh_from_db()
     assert foreign.revoked_at is None
     assert Coauthorship.objects.count() == 2  # rows are never deleted
@@ -320,18 +325,22 @@ def test_remove_member_is_idempotent_and_owner_scoped(owner, owner_client, coaut
 
 def test_leave_clears_the_selection_and_is_idempotent(member, acting_client, coauthorship, owner):
     assert acting_client.get("/api/users/me/").json()["email"] == owner.email
-    assert acting_client.delete(f"{API}/memberships/{coauthorship.pk}/").status_code == 204
+    delete_response = acting_client.delete(f"{API}/memberships/{coauthorship.pk}/")
+    assert delete_response.status_code == 204
     coauthorship.refresh_from_db()
     assert coauthorship.revoked_by == member
     assert coauthorship.last_selected_at is None
     assert services.SESSION_KEY not in acting_client.session
     assert acting_client.get("/api/users/me/").json()["email"] == member.email
-    assert acting_client.delete(f"{API}/memberships/{coauthorship.pk}/").status_code == 204
+    delete_response = acting_client.delete(f"{API}/memberships/{coauthorship.pk}/")
+    assert delete_response.status_code == 204
     foreign = CoauthorshipFactory()
-    assert acting_client.delete(f"{API}/memberships/{foreign.pk}/").status_code == 404
+    delete_response = acting_client.delete(f"{API}/memberships/{foreign.pk}/")
+    assert delete_response.status_code == 404
     # The owner cannot "leave" on the member's behalf through this route.
     theirs = CoauthorshipFactory(owner=member)
-    assert acting_client.delete(f"{API}/memberships/{theirs.pk}/").status_code == 404
+    delete_response = acting_client.delete(f"{API}/memberships/{theirs.pk}/")
+    assert delete_response.status_code == 404
     assert owner_listed_status(owner, coauthorship) == "left"
 
 

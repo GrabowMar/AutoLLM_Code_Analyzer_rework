@@ -731,7 +731,8 @@ def test_s16_the_token_is_never_in_a_url_a_trail_row_or_a_log(owner, member, cap
 
     assert post(member_client, f"{API}/join/preview/", {"token": raw}).status_code == 200
     assert post(member_client, f"{API}/join/accept/", {"token": raw}).status_code == 200
-    assert member_client.delete("/api/credentials/openrouter/").status_code == 200  # one recorded action
+    delete_response = member_client.delete("/api/credentials/openrouter/")  # one recorded action
+    assert delete_response.status_code == 200
     assert post(member_client, "/api/tokens/", {"name": raw}).status_code == 403  # and one denied
 
     for path in (f"{API}/join/preview/", f"{API}/join/accept/"):
@@ -1093,7 +1094,8 @@ def test_s26_removal_kills_the_link(owner, owner_client, member_client, member):
     raw, invite = make_invite(owner, max_uses=5)
     assert post(member_client, f"{API}/join/accept/", {"token": raw}).status_code == 200
     row = Coauthorship.objects.get(owner=owner, member=member)
-    assert owner_client.delete(f"{API}/members/{row.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/members/{row.pk}/")
+    assert delete_response.status_code == 204
     invite.refresh_from_db()
     assert invite.status() == "revoked"
     assert member_client.get("/api/users/me/").status_code == 409  # the stale selection, once
@@ -1108,7 +1110,8 @@ def test_s26b_no_older_link_lets_a_removed_member_back_in(owner, owner_client, m
     team_raw, team_link = make_invite(owner, max_uses=5, label="team")
     assert post(member_client, f"{API}/join/accept/", {"token": raw}).status_code == 200
     row = Coauthorship.objects.get(owner=owner, member=member)
-    assert owner_client.delete(f"{API}/members/{row.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/members/{row.pk}/")
+    assert delete_response.status_code == 204
     assert member_client.get("/api/users/me/").status_code == 409  # the stale selection, once
     team_link.refresh_from_db()
     assert team_link.status() == "active"  # still works for other people
@@ -1135,7 +1138,8 @@ def test_s26_leaving_does_not_revoke_the_link(owner, member_client, member):
     raw, invite = make_invite(owner, max_uses=5)
     assert post(member_client, f"{API}/join/accept/", {"token": raw}).status_code == 200
     row = Coauthorship.objects.get(owner=owner, member=member)
-    assert member_client.delete(f"{API}/memberships/{row.pk}/").status_code == 204
+    delete_response = member_client.delete(f"{API}/memberships/{row.pk}/")
+    assert delete_response.status_code == 204
     invite.refresh_from_db()
     assert invite.status() == "active"
     again = post(member_client, f"{API}/join/accept/", {"token": raw})
@@ -1149,7 +1153,8 @@ def test_s26_an_expired_or_used_up_link_keeps_its_status_on_removal(owner, owner
     raw, invite = make_invite(owner)
     assert post(member_client, f"{API}/join/accept/", {"token": raw}).status_code == 200
     row = Coauthorship.objects.get(owner=owner, member=member)
-    assert owner_client.delete(f"{API}/members/{row.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/members/{row.pk}/")
+    assert delete_response.status_code == 204
     invite.refresh_from_db()
     assert invite.status() == "used_up"
     assert invite.revoked_at is None
@@ -1385,7 +1390,8 @@ def test_s29_errors_in_the_check_mean_no(closed, rf, monkeypatch):
 
 def test_s30_removal_is_immediate(acting_client, owner_client, owner, member, coauthorship):
     assert me(acting_client) == owner.email
-    assert owner_client.delete(f"{API}/members/{coauthorship.pk}/").status_code == 204
+    delete_response = owner_client.delete(f"{API}/members/{coauthorship.pk}/")
+    assert delete_response.status_code == 204
     once = acting_client.get("/api/reports/")
     assert once.status_code == 409
     assert once.json() == ENDED
@@ -1515,11 +1521,13 @@ def test_s33_trail_content(owner, member_client, member):
 
     member_client.get("/api/reports/?limit=3")
     assert CoauthorAction.objects.count() == 0
-    assert member_client.delete("/api/credentials/openrouter/?reason=secret-looking").status_code == 200
+    delete_response = member_client.delete("/api/credentials/openrouter/?reason=secret-looking")
+    assert delete_response.status_code == 200
     assert post(member_client, "/api/tokens/?x=1", {"name": "sneaky"}).status_code == 403
     assert post(member_client, f"{API}/invites/", {}).status_code == 403
     assert member_client.get("/api/tokens/").status_code == 403  # a denied read is not recorded
-    assert member_client.delete(f"{API}/memberships/{row.pk}/").status_code == 204
+    delete_response = member_client.delete(f"{API}/memberships/{row.pk}/")
+    assert delete_response.status_code == 204
 
     recorded = list(CoauthorAction.objects.order_by("id").values_list("method", "path", "status_code"))
     assert recorded == [

@@ -174,7 +174,8 @@ def test_no_coauthor_query_without_a_selection(member_client, client, coauthorsh
         assert member_client.get("/api/users/me/").status_code == 200
         assert member_client.get("/api/reports/").status_code == 200
         assert member_client.get("/api/tokens/").status_code == 200
-        assert member_client.delete("/api/credentials/openrouter/").status_code == 200
+        delete_response = member_client.delete("/api/credentials/openrouter/")
+        assert delete_response.status_code == 200
         assert client.get("/api/users/me/").status_code == 401
         assert client.get("/api/users/bootstrap-status/").status_code == 200
     assert _coauthor_queries(context) == []
@@ -366,7 +367,8 @@ def test_the_workspace_header_through_the_stack(acting_client, member_client, co
     assert stale.status_code == 409
     assert stale.json() == CHANGED
     assert acting_client.get("/api/users/me/").status_code == 200  # the session is untouched
-    assert member_client.delete("/api/credentials/openrouter/", **claim).status_code == 200
+    delete_response = member_client.delete("/api/credentials/openrouter/", **claim)
+    assert delete_response.status_code == 200
     behind = member_client.delete("/api/credentials/openrouter/", HTTP_X_WORKSPACE=str(coauthorship.pk))
     assert behind.json()["code"] == "workspace_changed"
     assert CoauthorAction.objects.count() == 0  # refused before anything ran or was recorded

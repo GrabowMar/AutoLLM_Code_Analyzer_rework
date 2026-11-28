@@ -376,7 +376,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("different numbers of tasks", evidence["sample_selection"]["detail"])
             with zipfile.ZipFile(result["archive"]) as bundle:
                 names = set(bundle.namelist())
-            self.assertTrue({"selection.json", "selection_matrix.csv", "selection_superseded.csv"} <= names)
+            self.assertLessEqual({"selection.json", "selection_matrix.csv", "selection_superseded.csv"}, names)
 
     def test_complete_case_selection_labels_dropped_tasks_and_keeps_an_empty_superseded_table(self):
         report = selection_report()
