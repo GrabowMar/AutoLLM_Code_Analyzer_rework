@@ -11,7 +11,12 @@
 	 * ticked, so an untouched report stays intention-to-treat (or follows a locked analysis plan)
 	 * without an override note.
 	 *
-	 * Deep link: `?type=<report type>&study_id=<uuid>` (from a study's Results section).
+	 * The study report's sample is one experiment (or every app of yours), or the newest unique runs
+	 * across experiments (the final assessment: `selection: "latest_unique"` with the ticked
+	 * `study_ids`, optional `models` / `tasks` filters and `common_tasks_only`).
+	 *
+	 * Deep links: `?type=<report type>&study_id=<uuid>` (from a study's Results section);
+	 * `?type=study_report&selection=latest_unique&study_ids=a,b[&models=…&tasks=…&common_tasks=1]`.
 	 */
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -22,6 +27,10 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Select from '$lib/components/ui/select';
 	import Check from '@lucide/svelte/icons/check';
+	import Link2 from '@lucide/svelte/icons/link-2';
+	import Layers from '@lucide/svelte/icons/layers';
+	import Microscope from '@lucide/svelte/icons/microscope';
+	import { toast } from 'svelte-sonner';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import CircleDashed from '@lucide/svelte/icons/circle-dashed';
@@ -30,6 +39,9 @@
 	import SectionHeading from '$lib/components/SectionHeading.svelte';
 	import ComposerSection from '$lib/components/studies/builder/ComposerSection.svelte';
 	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
+	import OptionCards from '$lib/components/studies/builder/OptionCards.svelte';
+	import SelectionScope from '$lib/components/reports/SelectionScope.svelte';
+	import { parseSampleSelection, sampleSelectionConfig, sampleSelectionLink } from '$lib/components/reports/selection';
 	import { getModels, type LLMModelSummary } from '$lib/api/models';
 	import {
 		excludeTruncatedConfig,
@@ -70,6 +82,12 @@
 	let submitting = $state(false);
 	let error = $state('');
 	let detailsOpen = $state(false);
+	/** The study report's sample: one experiment (or all my apps), or newest unique runs across experiments. */
+	let sample = $state<'study' | 'latest_unique'>('study');
+	let selStudyIds = $state<string[]>([]);
+	let selModels = $state<string[]>([]);
+	let selTasks = $state<string[]>([]);
+	let selCommonTasks = $state(false);
 
 	let models = $state<LLMModelSummary[]>([]);
 	let tasks = $state<LibraryItemOut<'task'>[]>([]);
@@ -82,6 +100,17 @@
 		if (type && REPORT_TYPES.some((t) => t.key === type)) selectedType = type as ReportType;
 		studyId = page.url.searchParams.get('study_id') ?? '';
 		evalSuite = page.url.searchParams.get('eval_suite') ?? '';
+		// ?selection=latest_unique&study_ids=a,b…: the cross-experiment sample of a study report.
+		const sel = parseSampleSelection(page.url.searchParams);
+		if (sel) {
+			if (!type) selectedType = 'study_report';
+			sample = 'latest_unique';
+			selStudyIds = sel.studyIds;
+			selModels = sel.models;
+			selTasks = sel.tasks;
+			selCommonTasks = sel.commonTasksOnly;
+			studyId = '';
+		}
 	}
 
 	onMount(async () => {
@@ -106,6 +135,22 @@
 		}))
 	);
 	const modelItems = $derived(models.map((m) => ({ value: m.model_id, label: m.model_name, description: m.model_id })));
+	const crossStudy = $derived(selectedType === 'study_report' && sample === 'latest_unique');
+	const selectionState = $derived({ studyIds: selStudyIds, models: selModels, tasks: selTasks, commonTasksOnly: selCommonTasks });
+	const SAMPLE_ITEMS = [
+		{
+			value: 'study',
+			title: 'One experiment',
+			description: 'Its runs, locked analysis plan and planned comparisons; or all my apps as an exploratory rollup.',
+			icon: Microscope
+		},
+		{
+			value: 'latest_unique',
+			title: 'Newest unique runs across experiments',
+			description: 'Final assessment: per model and task, the newest usable run from the experiments you tick. Older attempts are superseded and listed.',
+			icon: Layers
+		}
+	];
 	const selectedTask = $derived(tasks.find((t) => t.slug === taskSlug) ?? null);
 	const selectedStudy = $derived(studies.find((s) => s.id === studyId) ?? null);
 	const selectedModel = $derived(models.find((m) => m.model_id === modelId) ?? null);
@@ -146,6 +191,10 @@
 			case 'experiment_report':
 				return `Study conditions: ${selectedStudy?.name ?? (studyId || '…')}`;
 			case 'study_report':
+				if (crossStudy) {
+					const n = selStudyIds.length;
+					return `Final assessment: newest unique runs across ${n ? `${n} experiment${n === 1 ? '' : 's'}` : 'every experiment'}`;
+				}
 				return `Study report: ${selectedStudy?.name ?? 'all my apps'}`;
 			default:
 				return 'Untitled report';
@@ -175,7 +224,15 @@
 				out.push(['Experiment', selectedStudy?.name ?? '—']);
 				break;
 			case 'study_report':
-				out.push(['Scope', selectedStudy?.name ?? 'all my apps']);
+				if (crossStudy) {
+					out.push(['Sample', 'Newest unique runs']);
+					out.push(['Experiments', selStudyIds.length ? `${selStudyIds.length} ticked` : 'every experiment']);
+					out.push(['Models', selModels.length ? `${selModels.length} picked` : 'all']);
+					out.push(['Tasks', selTasks.length ? `${selTasks.length} picked` : 'all']);
+					out.push(['Design', selCommonTasks ? 'complete cases' : 'every task a model has']);
+				} else {
+					out.push(['Scope', selectedStudy?.name ?? 'all my apps']);
+				}
 				out.push(['Evaluation', evalSuite.trim() || 'Planned suite']);
 				out.push(['Seed', String(seed ?? 0)]);
 				break;
@@ -231,7 +288,9 @@
 			// No study: every app you own.
 			// Unset unless ticked: an explicit value differing from a locked plan adds a validity note.
 			const c: StudyReportConfig = excludeTruncatedConfig(excludeTruncated);
-			if (studyId) c.study_id = studyId;
+			// Cross-experiment sample: `study_ids` replaces `study_id` (the server refuses both).
+			if (crossStudy) Object.assign(c, sampleSelectionConfig(selectionState));
+			else if (studyId) c.study_id = studyId;
 			if (evalSuite.trim()) c.eval_suite = evalSuite.trim();
 			// Unset by default: tests and the agent's scratch scripts are counted apart from the app.
 			if (countTests) c.code_scope = 'all';
@@ -243,7 +302,8 @@
 		try {
 			const r = await generateReport({
 				report_type: selectedType,
-				title: title.trim() || undefined,
+				// The cross-experiment report is named here: the server's default title knows one scope only.
+				title: title.trim() || (crossStudy ? autoTitle : undefined),
 				description: description.trim() || undefined,
 				config
 			});
@@ -251,6 +311,17 @@
 		} catch (e) {
 			error = formatApiError(e, 'Failed to generate report');
 			submitting = false;
+		}
+	}
+
+	/** Copy a link that reopens this page with the same cross-experiment sample. */
+	async function copyLink() {
+		const url = new URL(sampleSelectionLink(selectionState, { eval_suite: evalSuite.trim() || null }), page.url.origin).toString();
+		try {
+			await navigator.clipboard.writeText(url);
+			toast.success('Link to this sample copied');
+		} catch {
+			toast.error('Copy failed: the browser blocked clipboard access');
 		}
 	}
 </script>
@@ -418,9 +489,35 @@
 					{@render excludeTruncatedOption("If the experiment's analysis plan is locked, its truncated-runs rule applies instead.")}
 				{:else if selectedType === 'study_report'}
 					<div class="space-y-1.5">
-						{@render field('rep-study-scope', 'Experiment', 'Choose one experiment for comparable runs and task coverage. Its locked analysis plan determines confirmatory comparisons and exclusions. All my apps is an exploratory rollup that can mix experiments.')}
-						<Select.Simple id="rep-study-scope" bind:value={studyId} placeholder="All my apps" items={[{ value: '', label: 'All my apps' }, ...studyItems]} />
+						<p class="text-sm font-medium">Sample</p>
+						<OptionCards
+							aria-label="Sample"
+							value={sample}
+							items={SAMPLE_ITEMS}
+							onValueChange={(v) => {
+								sample = v === 'latest_unique' ? 'latest_unique' : 'study';
+								// The experiment picked for one-experiment mode starts the pool.
+								if (sample === 'latest_unique' && studyId && selStudyIds.length === 0) selStudyIds = [studyId];
+							}}
+						/>
 					</div>
+					{#if sample === 'latest_unique'}
+						<SelectionScope
+							{studies}
+							loaded={listsLoaded}
+							catalogModels={models.map((m) => ({ value: m.model_id, label: m.model_name }))}
+							catalogTasks={tasks.map((t) => ({ value: t.slug, label: t.name || t.slug }))}
+							bind:studyIds={selStudyIds}
+							bind:models={selModels}
+							bind:tasks={selTasks}
+							bind:commonTasksOnly={selCommonTasks}
+						/>
+					{:else}
+						<div class="space-y-1.5">
+							{@render field('rep-study-scope', 'Experiment', 'Choose one experiment for comparable runs and task coverage. Its locked analysis plan determines confirmatory comparisons and exclusions. All my apps is an exploratory rollup that can mix experiments.')}
+							<Select.Simple id="rep-study-scope" bind:value={studyId} placeholder="All my apps" items={[{ value: '', label: 'All my apps' }, ...studyItems]} />
+						</div>
+					{/if}
 					<p class="text-xs text-muted-foreground">After generation, open Notebook → Run all to export the complete analysis, figures and evidence checks.</p>
 					<div class="space-y-1.5">
 						{@render field('rep-eval-suite', 'Evaluation suite', 'Leave blank to use each app’s planned suite. For a versioned reanalysis, choose one suite for every app; unavailable evaluations remain missing. Changing the planned instrument makes the reanalysis exploratory.')}
@@ -493,6 +590,17 @@
 								<dd class="truncate" title={v}>{v}</dd>
 							</div>
 						{/each}
+						{#if crossStudy}
+							<div class="pt-1">
+								<button
+									type="button"
+									class="inline-flex cursor-pointer items-center gap-1.5 rounded-sm text-xs text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+									onclick={copyLink}
+								>
+									<Link2 class="size-3.5" aria-hidden="true" />Copy link to this sample
+								</button>
+							</div>
+						{/if}
 					</dl>
 					<div class="border-b border-border/60 px-4 py-3">
 						<p class="section-label mb-1.5">Contains</p>

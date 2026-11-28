@@ -7,8 +7,8 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from ninja import Router
 from ninja import Schema
-from ninja.security import SessionAuth
 
+from backend.coauthors.auth import PersonalSessionAuth
 from backend.tokens import services
 from backend.tokens.api.schema import ApiTokenCreated
 from backend.tokens.api.schema import ApiTokenSummary
@@ -16,7 +16,8 @@ from backend.tokens.models import ApiToken
 
 router = Router(tags=["tokens"])
 
-_session = SessionAuth()
+# Personal tokens belong to the real person's sign-in: never served on behalf of a workspace owner.
+_session = PersonalSessionAuth()
 
 
 class CreateTokenSchema(Schema):

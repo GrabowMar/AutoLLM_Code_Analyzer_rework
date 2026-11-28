@@ -233,7 +233,36 @@ export function specItems(
   delete c.experiment_id;
 
   // Scope
-  if (studyId) {
+  const crossStudy = c.selection === "latest_unique";
+  const pooled = Array.isArray(c.study_ids) ? c.study_ids.length : 0;
+  const modelFilter = Array.isArray(c.models) ? c.models.length : 0;
+  const taskFilter = Array.isArray(c.tasks) ? c.tasks.length : 0;
+  const completeCases = c.common_tasks_only === true;
+  if (crossStudy) {
+    delete c.selection;
+    delete c.study_ids;
+    delete c.models;
+    delete c.tasks;
+    delete c.common_tasks_only;
+  }
+  if (crossStudy) {
+    items.push({
+      label: "Scope",
+      value: "Newest unique runs",
+      sub: [
+        pooled
+          ? `${pooled} experiment${pooled === 1 ? "" : "s"}`
+          : "every experiment",
+        modelFilter
+          ? `${modelFilter} model${modelFilter === 1 ? "" : "s"}`
+          : "all models",
+        taskFilter
+          ? `${taskFilter} task${taskFilter === 1 ? "" : "s"}`
+          : "all tasks",
+        ...(completeCases ? ["complete cases"] : []),
+      ].join(" · "),
+    });
+  } else if (studyId) {
     items.push({
       label: "Scope",
       value: names.study || `Experiment ${studyId.split("-")[0]}`,
@@ -419,6 +448,33 @@ export interface KeyFigure {
   attention?: boolean;
 }
 
+/** Nested summary figures (`parent.key`) whose "Parent · key" reading would be unclear. */
+const NESTED_FIGURE_LABELS: Record<string, string> = {
+  "selection.groups": "Groups compared",
+  "selection.tasks": "Tasks analysed",
+  "selection.selected": "Runs in the sample",
+};
+
+/**
+ * A newest-unique-runs summary with its analysed task count re-read from the report's selection
+ * (`tasks` minus complete cases' `dropped_tasks`), so summaries stored with the in-scope count are right too.
+ */
+function analysedSelection(
+  summary: unknown,
+  data?: Record<string, unknown> | null,
+): unknown {
+  const sel = data?.selection as
+    | { tasks?: unknown; dropped_tasks?: unknown }
+    | null
+    | undefined;
+  if (!summary || typeof summary !== "object" || !Array.isArray(sel?.tasks))
+    return summary;
+  const dropped = Array.isArray(sel.dropped_tasks)
+    ? sel.dropped_tasks.length
+    : 0;
+  return { ...summary, tasks: sel.tasks.length - dropped };
+}
+
 function isCounts(v: unknown): v is Record<string, number> {
   return (
     !!v &&
@@ -442,6 +498,8 @@ export function keyFigures(
   // The scope (experiment) is the masthead's; not a figure.
   delete raw.study_id;
   delete raw.experiment_id;
+  if ("selection" in raw)
+    raw.selection = analysedSelection(raw.selection, data);
   const out: KeyFigure[] = [];
   const nested: Record<string, unknown> = {};
   const breakdowns: KeyFigure[] = [];
@@ -461,17 +519,22 @@ export function keyFigures(
     } else if (v && typeof v === "object" && !Array.isArray(v)) {
       for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
         if (x == null || typeof x !== "object")
-          nested[`${humanize(key)} · ${humanize(k).toLowerCase()}`] = x;
+          nested[
+            NESTED_FIGURE_LABELS[`${key}.${k}`] ??
+              `${humanize(key)} · ${humanize(k).toLowerCase()}`
+          ] = x;
       }
       delete raw[key];
     }
   }
   for (const item of summaryItems(raw, data)) {
-    const key = Object.keys(raw).find(
-      (k) =>
-        k.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase()) ===
-        item.label,
-    );
+    const key =
+      item.key ??
+      Object.keys(raw).find(
+        (k) =>
+          k.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase()) ===
+          item.label,
+      );
     const v = key ? raw[key] : undefined;
     if (item.label === "Leader") {
       out.push({

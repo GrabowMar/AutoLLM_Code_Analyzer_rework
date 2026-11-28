@@ -127,6 +127,34 @@ describe("summaryItems", () => {
     ]);
   });
 
+  it("labels a final-assessment report's ranking preset and whole-cohort pass rate", () => {
+    const items = summaryItems({
+      runs: 288,
+      ranking_criteria: "final_assessment",
+      whole_cohort_pass_rate: 0.8236,
+    });
+    expect(items).toEqual([
+      { label: "Runs", value: "288" },
+      {
+        label: "Ranking criteria",
+        value: "Final assessment: failures counted as 0, cost at list price",
+        key: "ranking_criteria",
+      },
+      {
+        label: "Pass rate, failures counted as 0",
+        value: "82.4%",
+        key: "whole_cohort_pass_rate",
+      },
+    ]);
+    // An unknown preset is shown as recorded; unmeasured stays a dash.
+    expect(
+      summaryItems({
+        ranking_criteria: "custom",
+        whole_cohort_pass_rate: null,
+      }).map((i) => i.value),
+    ).toEqual(["custom", "—"]);
+  });
+
   it("re-reads a study report's leader from its TOPSIS ranks", () => {
     const ranking = (ranks: number[], grouped_by = "model") => ({
       protocol: { grouped_by },

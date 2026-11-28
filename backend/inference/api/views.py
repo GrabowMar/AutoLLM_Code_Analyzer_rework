@@ -31,6 +31,7 @@ from ninja import Router
 from ninja.errors import HttpError
 from ninja.responses import Status
 
+from backend.coauthors.identity import is_acting
 from backend.inference import tokens as relay_tokens
 from backend.inference.access import endpoint_access
 from backend.inference.access import is_endpoint_owner
@@ -441,6 +442,12 @@ def update_endpoint(request, endpoint_id: int, data: EndpointUpdate):
     endpoint = _owned(request, endpoint_id)
     staff = _is_staff(request)
     changes = data.dict(exclude_unset=True)
+    # A co-author working in this workspace cannot send the stored key to another server:
+    # a new address needs the key entered again (or cleared) in the same request.
+    new_url = (changes.get("base_url") or "").strip().rstrip("/")
+    if is_acting(request) and endpoint.encrypted_api_key and new_url and new_url != endpoint.base_url:
+        if changes.get("api_key") is None:
+            raise HttpError(400, "Enter the API key again to change the address of this endpoint.")
     if endpoint.is_system:
         if not staff:
             raise HttpError(403, "Only staff can change the OpenRouter endpoint.")

@@ -17,7 +17,13 @@ if typing.TYPE_CHECKING:
 
 class AccountAdapter(DefaultAccountAdapter):
     def is_open_for_signup(self, request: HttpRequest) -> bool:
-        return getattr(settings, "ACCOUNT_ALLOW_REGISTRATION", True)
+        if getattr(settings, "ACCOUNT_ALLOW_REGISTRATION", True):
+            return True
+        # Registration is closed: an administrator's co-author invite link, previewed in
+        # this visitor's session, still lets its holder register (backend.coauthors).
+        from backend.coauthors.services import signup_allowed_by_invite
+
+        return signup_allowed_by_invite(request)
 
     def login(self, request: HttpRequest, user: AbstractBaseUser) -> None:
         super().login(request, user)

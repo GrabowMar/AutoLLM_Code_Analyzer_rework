@@ -68,7 +68,17 @@ from backend.generation.models import GenerationRun
 from backend.generation.models import RunAttempt
 from backend.generation.models import Study
 from backend.generation.models import choices
+from backend.reports.services.cohort_selection import LATEST_UNIQUE
+from backend.reports.services.cohort_selection import scope_fields
+from backend.reports.services.cohort_selection import select_latest_unique
+from backend.reports.services.cohort_selection import selection_warnings
+from backend.reports.services.list_cost import cost_basis
+from backend.reports.services.list_cost import earlier_attempts
+from backend.reports.services.list_cost import list_prices
+from backend.reports.services.list_cost import map_twin_prices
+from backend.reports.services.list_cost import run_list_cost
 from backend.reports.services.loc import loc_from_view
+from backend.reports.services.plan_stats import FINAL_ASSESSMENT_METRICS
 from backend.reports.services.plan_stats import MIN_APPS_FOR_CI
 from backend.reports.services.plan_stats import PLAN_METRICS
 from backend.reports.services.plan_stats import cluster_bootstrap_ci
@@ -80,6 +90,7 @@ from backend.reports.services.plan_stats import sign_test_p
 from backend.reports.services.plan_stats import wilcoxon_p
 from backend.statistics.services import inference as inf
 from backend.statistics.services.dedup import VULN_TOOLS
+from backend.statistics.services.mcdm import CRITERIA_PRESETS
 from backend.statistics.services.mcdm import criteria_from_config
 from backend.statistics.services.mcdm import rank_models
 from backend.statistics.services.runs import app_unit
@@ -107,6 +118,8 @@ _TERMINAL = (choices.StudyStatus.COMPLETED, choices.StudyStatus.CANCELLED, choic
 _IN_FLIGHT = (RunStatus.PENDING, RunStatus.RUNNING)
 # These statuses do not provide a grade; they do not identify the cause of the missing grade.
 _EVAL_UNMEASURED = frozenset({choices.EvaluationStatus.NOT_MEASURED, choices.EvaluationStatus.ERROR})
+# Final outcomes that are known model-caused failures: whole-cohort (ITT) rates count them as 0.
+_KNOWN_FAILURES = frozenset({choices.Outcome.OUTPUT_INVALID, choices.Outcome.BUILD_FAIL, choices.Outcome.START_FAIL})
 # Cells stopped before they ran: the planned sample was not collected.
 _STOPPED_CELLS = (
     choices.CellExclusionReason.BUDGET_STOP,
@@ -185,6 +198,28 @@ DEFINITIONS = {
 }
 
 
+# What a final-assessment report (whole-cohort rates, cost at list price) adds to the definitions; its
+# ``conditional_deploy_rate`` entry replaces the one that points readers at the ranking's conditional criterion.
+FINAL_ASSESSMENT_DEFINITIONS = {
+    "conditional_deploy_rate": (
+        "deploy_rate, pass_rate and functional_passed are conditional on a measured evaluation: known "
+        "output/build/start failures have no grade and are left out of them. The whole-cohort rates count those "
+        "failures as 0; end_to_end_deploy_rate withholds its rate while any deployment is unknown."
+    ),
+    "whole_cohort_rates": (
+        "deploy_rate_itt, pass_rate_itt and functional_passed_itt: over every usable app, known output/build/start "
+        "failures counted as 0 (deployment from final run outcomes, as end_to_end_deploy_rate). Runs whose outcome "
+        "or grade is genuinely unknown are left out and reported, never counted as failures."
+    ),
+    "list_cost": (
+        "Generation cost at public list prices (list_cost_per_app): every run's tokens priced, cache-aware, by its "
+        "model's OpenRouter catalog row or catalog twin (protocol.cost_basis), failed runs included. The billed "
+        "cost (cost_per_app) is kept for reference; it is 0 on subscription endpoints and keys billed outside "
+        "per-call pricing."
+    ),
+}
+
+
 # ── per-app table ────────────────────────────────────────────────────────
 
 
@@ -240,14 +275,36 @@ def _providers_by_run(run_ids) -> dict[str, list[str]]:
     return {k: sorted(v) for k, v in out.items()}
 
 
+def itt_outcomes(row: dict[str, Any]) -> dict[str, Any]:
+    """The whole-cohort (intention-to-treat) outcomes of one run row: known model-caused failures count as 0.
+
+    ``deployed_itt`` is the funnel's end-to-end deployment evidence (:func:`deployment_outcome`), so the
+    rates agree with it. ``pass_rate_itt`` / ``functional_passed_itt`` are the measured grade, 0 for a known
+    output/build/start failure (it cannot pass a check) and None when the grade is genuinely unknown (no
+    measured evaluation and no known failure): left out and reported, never counted as a failure.
+    """
+    failed = row.get("outcome") in _KNOWN_FAILURES
+    measured = bool(row.get("evaluated"))
+    return {
+        "deployed_itt": deployment_outcome(row),
+        "pass_rate_itt": 0.0 if failed else (row.get("pass_rate") if measured else None),
+        "functional_passed_itt": False if failed else (row.get("functional_passed") if measured else None),
+    }
+
+
 def app_table(
     runs,
     *,
     include_ai: bool = False,
     line_tolerance: int = 2,
     eval_suite=None,
+    prices: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """One row per run with every per-run quantity the report aggregates; plus the issue breakdowns."""
+    """One row per run with every per-run quantity the report aggregates; plus the issue breakdowns.
+
+    *prices* (``list_cost.list_prices`` of the runs' models) adds the final-assessment columns: the
+    whole-cohort outcomes (:func:`itt_outcomes`) and ``list_cost``, the run's cost at list prices.
+    """
     from backend.generation.runs.view import run_views
     from backend.reports.services.evaluation_selection import planned_suite_ref
 
@@ -347,6 +404,16 @@ def app_table(
                 "providers": providers.get(rid, []),
             },
         )
+        if prices is not None:
+            price = prices.get(rows[-1]["model"])
+            rows[-1].update(
+                # The run's outcome reason decides a ``not_tested:<level>`` deployment (unknown without an observed
+                # start), as the funnel's end-to-end rate does once provenance adds it to the row.
+                itt_outcomes({**rows[-1], "outcome_reason": run.outcome_reason}),
+                # Unknown (None), never 0, when the model has no list price or the tokens were not recorded.
+                list_cost=run_list_cost(metrics, price),
+                list_cost_priced_as=(price.priced_as or None) if price is not None else None,
+            )
     return rows, issues
 
 
@@ -370,9 +437,13 @@ def _units(rows) -> dict[tuple, list[dict[str, Any]]]:
 
 
 def _app_stats(rows: list[dict[str, Any]]) -> dict[str, float | None]:
-    """The plan metrics of one app (its repeats averaged); ``_code``/``_loc`` feed issues per kLOC."""
+    """The plan metrics of one app (its repeats averaged); ``_code``/``_loc`` feed issues per kLOC.
+
+    Rows with the final-assessment columns (``app_table(prices=...)``) also give the
+    :data:`FINAL_ASSESSMENT_METRICS`: whole-cohort rates over every run and the list cost of every run.
+    """
     analyzed = [r for r in rows if r["analyzed"]]
-    return {
+    stats = {
         "deploy_rate": _avg(r["deployed"] for r in rows),
         "pass_rate": _avg(r["pass_rate"] for r in rows),
         "functional_passed": _avg(r["functional_passed"] for r in rows),
@@ -382,18 +453,28 @@ def _app_stats(rows: list[dict[str, Any]]) -> dict[str, float | None]:
         "_code": _avg(r["code_unique_model"] for r in analyzed),
         "_loc": _avg(r["loc"] for r in analyzed),
     }
+    if rows and "deployed_itt" in rows[0]:
+        stats.update(
+            deploy_rate_itt=_avg(r["deployed_itt"] for r in rows),
+            pass_rate_itt=_avg(r["pass_rate_itt"] for r in rows),
+            functional_passed_itt=_avg(r["functional_passed_itt"] for r in rows),
+            # Every run's tokens were spent, failures included.
+            list_cost_per_app=_avg(r["list_cost"] for r in rows),
+        )
+    return stats
 
 
 def _combine(stats: list[dict[str, float | None]]) -> dict[str, float | None]:
     """Group metrics from per-app stats: the mean over apps; issues per kLOC as total code issues over total LOC."""
     out: dict[str, float | None] = {}
-    for key in PLAN_METRICS:
+    extra = [k for k in FINAL_ASSESSMENT_METRICS if any(k in s for s in stats)]
+    for key in (*PLAN_METRICS, *extra):
         if key == "issues_per_kloc":
             measured = [s for s in stats if s["_code"] is not None and s["_loc"] is not None]
             loc = sum(s["_loc"] for s in measured)
             out[key] = round(sum(s["_code"] for s in measured) * 1000 / loc, 4) if loc else None
         else:
-            out[key] = _mean(s[key] for s in stats)
+            out[key] = _mean(s.get(key) for s in stats)
     return out
 
 
@@ -440,12 +521,30 @@ def label_groups(rows: list[dict[str, Any]]) -> str:
     return grouped_by
 
 
+def _selection_groups(rows: list[dict[str, Any]], selection) -> str:
+    """Set each row's ``group`` to its cross-study selection group (a model, or a model's treatment).
+
+    Returns ``model`` when every group is a whole model, else ``condition`` (groups are then treatments of a
+    model, kept apart as arms are).
+    """
+    for r in rows:
+        r["group"] = selection.group_of[r["run_id"]]
+    return "model" if selection.whole_models else "condition"
+
+
 def _group_fields(group: str, items: list[dict[str, Any]], grouped_by: str) -> dict[str, Any]:
-    """The identifying columns of a group row: ``model`` is the group's label (a condition label when grouped so)."""
+    """The identifying columns of a group row: ``model`` is the group's label (a condition label when grouped so).
+
+    ``condition_id`` is the group's one condition, None when it pools several (a cross-study selection group).
+    """
     if grouped_by != "condition":
         return {"model": group}
-    first = items[0]
-    return {"model": group, "condition_id": first["condition_id"], "model_id": first["model"]}
+    conditions = {r["condition_id"] for r in items}
+    return {
+        "model": group,
+        "condition_id": next(iter(conditions)) if len(conditions) == 1 else None,
+        "model_id": items[0]["model"],
+    }
 
 
 # ── sections ─────────────────────────────────────────────────────────────
@@ -542,11 +641,31 @@ def _end_to_end_deploy_rate(rows, seed):
     return result
 
 
+def _itt_rates(rows, seed: int) -> dict[str, Any]:
+    """The whole-cohort rates of a funnel row (rows with the final-assessment columns): failures counted as 0.
+
+    Unlike ``end_to_end_deploy_rate`` the rate is not withheld when some outcome is unknown: unknown runs are
+    left out (``unknown_runs``) and reported, as the ranking's ``deploy_rate_itt`` does.
+    """
+    deploy = _app_rate(rows, lambda r: r["deployed_itt"], seed)
+    deploy["unknown_runs"] = sum(r["deployed_itt"] is None for r in rows)
+    functional = _app_rate(rows, lambda r: r["functional_passed_itt"], seed)
+    functional["unknown_runs"] = sum(r["functional_passed_itt"] is None for r in rows)
+    return {
+        "deploy_rate_itt": deploy,
+        "functional_rate_itt": functional,
+        "mean_pass_rate_itt": _app_mean(rows, "pass_rate_itt"),
+        "known_failures": sum(r.get("outcome") in _KNOWN_FAILURES for r in rows),
+    }
+
+
 def _funnel_row(rows, seed: int = 0) -> dict[str, Any]:
     generated = [r for r in rows if r["generated"]]
     evaluated = [r for r in rows if r["evaluated"]]
     deployed = [r for r in evaluated if r["deployed"]]
     passed = [r for r in evaluated if r["functional_passed"]]
+    # Final-assessment rows (``app_table(prices=...)``) also get the whole-cohort rates.
+    itt = _itt_rates(rows, seed) if rows and "deployed_itt" in rows[0] else {}
     return {
         # Run counts; the rates below are over apps.
         "runs": len(rows),
@@ -566,6 +685,7 @@ def _funnel_row(rows, seed: int = 0) -> dict[str, Any]:
         "functional_given_deployed": _app_rate(deployed, lambda r: r["functional_passed"], seed),
         "mean_pass_rate": _app_mean(evaluated, "pass_rate"),
         "mean_pass_rate_deployed": _app_mean(deployed, "pass_rate"),
+        **itt,
     }
 
 
@@ -1406,12 +1526,22 @@ def validity_section(
     config,
     planned=None,
     ranking=None,
+    sample_selection=None,
+    group_criteria=None,
 ) -> list[dict[str, Any]]:
-    """Threats to validity detected in this data (``level``: warning | info)."""
+    """Threats to validity detected in this data (``level``: warning | info).
+
+    *sample_selection*: the ``selection`` section of a cross-study report (``cohort_selection``), whose own
+    checks replace ``mixed_study_scope`` (pooling studies is the point there, and its rule is stated).
+    *group_criteria*: per group, the metrics with the final-assessment columns (:func:`final_assessment_threats`).
+    """
     out = []
 
     def add(code, level, section, message):
         out.append({"code": code, "level": level, "section": section, "message": message})
+
+    for entry in selection_warnings(sample_selection):
+        add(*entry)
 
     selection = protocol.get("evaluation_selection") or {}
     if selection.get("changed_from_plan_runs"):
@@ -1423,7 +1553,7 @@ def validity_section(
             "instead of the originally planned instrument. This is a versioned exploratory reanalysis; "
             "the original generation sample and source remain unchanged, and other suites never fill missing grades.",
         )
-    if ((protocol.get("execution") or {}).get("coverage") or {}).get("mixed_study_scope"):
+    if ((protocol.get("execution") or {}).get("coverage") or {}).get("mixed_study_scope") and not sample_selection:
         add(
             "mixed_study_scope",
             "warning",
@@ -1521,6 +1651,9 @@ def validity_section(
             f"{not_evaluated} generated run(s) have no measured evaluation; conditional rates exclude them. "
             "Whole-cohort deployment uses final run outcomes, and functional bounds retain unknown grades.",
         )
+    if group_criteria is not None:
+        for entry in final_assessment_threats(rows, group_criteria, ranking or {}, protocol):
+            add(*entry)
     mixed = protocol.get("mixed_fingerprint_cells") or 0
     if mixed:
         add(
@@ -1837,6 +1970,124 @@ def validity_section(
     return out
 
 
+def _failure_counts(items) -> str:
+    counts = Counter(r["outcome"] for r in items if r.get("outcome") in _KNOWN_FAILURES)
+    return ", ".join(f"{n} {k}" for k, n in sorted(counts.items()))
+
+
+def final_assessment_threats(
+    rows,
+    group_criteria: dict[str, dict[str, Any]],
+    ranking: dict[str, Any],
+    protocol: dict[str, Any],
+) -> list[tuple[str, str, str, str]]:
+    """Validity entries of the final-assessment metrics: ``(code, level, section, message)``.
+
+    ``conditional_vs_itt`` names the groups whose conditional rates left known failures out;
+    ``itt_unknown`` the runs neither measured nor known to fail; ``list_cost_unpriced`` the models without a
+    list price; ``ranking_dropped`` the groups the ranking left out and the criteria they lack.
+    """
+    out = []
+    by_group = _group(rows, "group")
+    differing, any_changed = [], False
+    for group, values in sorted(group_criteria.items()):
+        changed = [
+            f"{word} {_fmt_rate(values.get(key))} vs {_fmt_rate(values.get(f'{key}_itt'))}"
+            for word, key in (("deploy", "deploy_rate"), ("pass", "pass_rate"))
+            if values.get(key) is not None
+            and values.get(f"{key}_itt") is not None
+            and round(values[key], 4) != round(values[f"{key}_itt"], 4)
+        ]
+        any_changed = any_changed or bool(changed)
+        failures = _failure_counts(by_group.get(group) or [])
+        if changed or failures:
+            differing.append(f"{group} ({failures or 'no known failures'}: {', '.join(changed) or 'rates equal'})")
+    if any_changed:
+        uses = {c["key"] for c in ranking.get("criteria") or []}
+        basis = (
+            " The ranking uses the whole-cohort rates."
+            if {"deploy_rate_itt", "pass_rate_itt"} & uses
+            else " The ranking uses the conditional rates; compare it with the whole-cohort rates."
+            if {"deploy_rate", "pass_rate"} & uses
+            else ""
+        )
+        out.append(
+            (
+                "conditional_vs_itt",
+                "info",
+                "funnel, model_outcomes, ranking",
+                (
+                    "Conditional rates (deploy_rate, pass_rate) are over measured evaluations only, so known "
+                    "output/build/start failures are left out of them; the whole-cohort rates (deploy_rate_itt, "
+                    "pass_rate_itt) count those failures as 0. Groups whose known failures the conditional rates "
+                    f"exclude (conditional vs whole-cohort): {'; '.join(differing)}.{basis}"
+                ),
+            ),
+        )
+    no_deploy = [r for r in rows if r.get("deployed_itt") is None]
+    no_grade = [r for r in rows if r.get("pass_rate_itt") is None]
+    if no_deploy or no_grade:
+        groups = Counter(r["group"] for r in {r["run_id"]: r for r in [*no_deploy, *no_grade]}.values())
+        out.append(
+            (
+                "itt_unknown",
+                "warning",
+                "funnel, model_outcomes, ranking",
+                f"{len(no_deploy)} run(s) have no known deployment outcome and {len(no_grade)} neither a measured "
+                "grade nor a known output/build/start failure: they are left out of the whole-cohort rates "
+                "(unknown, not failures), which are conditional on the rest; runs per group: "
+                + ", ".join(f"{g} ({n})" for g, n in sorted(groups.items()))
+                + ".",
+            ),
+        )
+    basis = protocol.get("cost_basis") or {}
+    unpriced = [m for m in basis.get("per_model") or [] if not m.get("priced")]
+    if unpriced:
+        out.append(
+            (
+                "list_cost_unpriced",
+                "warning",
+                "model_outcomes, ranking",
+                "No list price for: "
+                + "; ".join(f"{m['model']} ({m.get('missing')})" for m in unpriced)
+                + ". Their cost at list price is unknown, not 0; a ranking on list_cost_per_app leaves them out.",
+            ),
+        )
+    priced = {m["model"] for m in basis.get("per_model") or [] if m.get("priced")}
+    untokened = Counter(r["group"] for r in rows if r["model"] in priced and r.get("list_cost") is None)
+    if untokened:
+        out.append(
+            (
+                "list_cost_tokens_missing",
+                "warning",
+                "model_outcomes, ranking",
+                f"{sum(untokened.values())} run(s) of priced models recorded no token counts, so their cost at list "
+                "price is unknown and left out of the cost per app: "
+                + ", ".join(f"{g} ({n})" for g, n in sorted(untokened.items()))
+                + ".",
+            ),
+        )
+    keys = [c["key"] for c in ranking.get("criteria") or []]
+    dropped = [
+        f"{group} ({', '.join(k for k in keys if (group_criteria.get(group) or {}).get(k) is None)})"
+        for group in ranking.get("dropped_missing_criteria") or []
+    ]
+    if dropped:
+        out.append(
+            (
+                "ranking_dropped",
+                "warning",
+                "ranking",
+                f"Left out of the ranking because a criterion has no value (never imputed): {'; '.join(dropped)}.",
+            ),
+        )
+    return out
+
+
+def _fmt_rate(value: float | None) -> str:
+    return "-" if value is None else f"{value:.3g}"
+
+
 def _issues_by_group(per_app, rows, grouped_by: str) -> list[dict[str, Any]]:
     """The deduplicated issue table per report group, labelled as the funnel and ranking are.
 
@@ -1932,6 +2183,49 @@ def group_tool_measurements(rows, grouped_by: str, *, common_tools=(), include_a
     return out
 
 
+# ── final assessment: ranking criteria and comparable cost ───────────────
+
+
+def ranking_criteria(config: dict[str, Any], plan: dict[str, Any], *, cross_study: bool = False):
+    """The ranking's criteria and where they come from: ``(criteria, preset)``.
+
+    The report's ``ranking_criteria`` (preset ``report``), else the plan's (``analysis_plan``), else the
+    preset: ``final_assessment`` (whole-cohort rates, cost at list prices) for a cross-study sample,
+    ``default`` (``mcdm.DEFAULT_CRITERIA``) everywhere else.
+    """
+    if config.get("ranking_criteria"):
+        return criteria_from_config(config["ranking_criteria"]), "report"
+    if plan.get("ranking_criteria"):
+        return criteria_from_config(plan["ranking_criteria"]), "analysis_plan"
+    preset = "final_assessment" if cross_study else "default"
+    return CRITERIA_PRESETS[preset], preset
+
+
+def _run_models(runs) -> dict[str, Any]:
+    """``{model_id: LLMModel}`` of *runs* (one query)."""
+    from backend.llm_models.models import LLMModel
+
+    rows = LLMModel.objects.filter(pk__in={r.model_id for r in runs if r.model_id})
+    return {m.model_id: m for m in rows}
+
+
+def _alternative_costs(runs, rows, models, prices) -> dict[str, tuple[Any, float | None]]:
+    """Per model whose curated name-map twin is not its catalog twin: those prices and its list cost per app."""
+    alternatives = map_twin_prices(models.values(), prices)
+    if not alternatives:
+        return {}
+    metrics = {str(r.pk): r.metrics if isinstance(r.metrics, dict) else {} for r in runs}
+    out = {}
+    for model_id, price in alternatives.items():
+        model_rows = [
+            {**row, "list_cost": run_list_cost(metrics.get(row["run_id"]), price)}
+            for row in rows
+            if row["model"] == model_id
+        ]
+        out[model_id] = (price, _mean(_avg(r["list_cost"] for r in v) for v in _units(model_rows).values()))
+    return out
+
+
 # ── generator ────────────────────────────────────────────────────────────
 
 
@@ -1977,11 +2271,15 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
     eval_suite = selected_suite(config)
     if eval_suite is not None:
         config = {**config, "eval_suite": eval_suite.pinned_ref}
-    study = _study(config, user)
+    selection = None
+    if config.get("selection") == LATEST_UNIQUE:
+        # Cross-study: the newest usable run per (model, task) of several studies (no one study's design).
+        selection = select_latest_unique(config, user)
+    study = _study(config, user) if selection is None else None
     seed = int(config.get("seed", 0))
     include_ai = bool(config.get("include_ai", False))
     line_tolerance = int(config.get("line_tolerance", 2))
-    runs = list(scope_runs(config, user, study))
+    runs = list(scope_runs(config, user, study)) if selection is None else list(selection.runs)
     # Runs still queued, running or being evaluated have no outcome yet; counting them would
     # read as "not generated" (a failure) in the funnel and rates.
     in_flight = [r for r in runs if r.status in _IN_FLIGHT]
@@ -1989,6 +2287,9 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
     # Attrition: no model-attributable outcome (infra error, exclusion): reported, never a failure.
     attrition = Counter(r.outcome or r.status for r in runs if r.usable is not True)
     runs = [r for r in runs if r.usable is True]
+    if selection is not None:
+        # The selection's units: a unit without a usable run, or only in flight, never reaches the sample.
+        in_flight, attrition = selection.in_flight, selection.attrition
     total_runs = len(runs)
     plan = (study.analysis_plan if study is not None and isinstance(study.analysis_plan, dict) else None) or {}
     exclusions = plan.get("exclusions") or {}
@@ -2002,10 +2303,22 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
         # Sensitivity analysis: truncated runs measure the budget ceiling as much as the model.
         runs = [r for r in runs if not bool((r.validity or {}).get("truncated"))]
 
-    rows, issues = app_table(runs, include_ai=include_ai, line_tolerance=line_tolerance, eval_suite=eval_suite)
+    criteria, preset = ranking_criteria(config, plan, cross_study=selection is not None)
+    # The final assessment's columns (whole-cohort outcomes, cost at list prices): a cross-study sample, or a
+    # ranking that names one of them. Other reports keep exactly their previous content.
+    final_assessment = selection is not None or any(c.key in FINAL_ASSESSMENT_METRICS for c in criteria)
+    models = _run_models(runs) if final_assessment else {}
+    prices = list_prices(models.values()) if final_assessment else None
+    rows, issues = app_table(
+        runs,
+        include_ai=include_ai,
+        line_tolerance=line_tolerance,
+        eval_suite=eval_suite,
+        prices=prices,
+    )
     supplemental = bind_evidence(config.get("supplemental_evidence"), rows)
     # Arms that share a model (harness, prompt or stack conditions) are never pooled.
-    grouped_by = label_groups(rows)
+    grouped_by = label_groups(rows) if selection is None else _selection_groups(rows, selection)
     design = design_state(study) if study is not None else None
     evaluation_selection = selection_summary(rows, eval_suite)
     if design is not None:
@@ -2015,7 +2328,6 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
 
     by_model = _group([r for r in rows if r["group"]], "group")
     criteria_by_model = {m: model_criteria(v) for m, v in by_model.items()}
-    criteria = criteria_from_config(config.get("ranking_criteria") or plan.get("ranking_criteria"))
     ranking = rank_models(
         {m: {c.key: criteria_by_model[m][c.key] for c in criteria} for m in criteria_by_model},
         criteria,
@@ -2067,12 +2379,38 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
     protocol["attrition_excluded"] = dict(attrition)
     protocol["beyond_plan_excluded"] = (design or {}).get("beyond_plan_excluded", 0)
     protocol["pilot_excluded"] = (design or {}).get("pilot_excluded", 0)
+    if selection is not None:
+        counts = selection.summary["counts"]
+        protocol["beyond_plan_excluded"] = counts["beyond_plan_excluded"]
+        protocol["pilot_excluded"] = counts["pilot_excluded"]
+        # The selection left truncated runs out itself (before complete cases), so its sample is the report's.
+        protocol["truncated_excluded"] = counts["truncated_excluded"]
+        protocol["scope"].update(scope_fields(selection.summary))
     protocol["settings"]["exclusions_source"] = "analysis_plan" if plan and "truncated" in exclusions else "report"
+    if final_assessment:
+        # Which criteria ranked (the final-assessment preset is the cross-study default) and how cost is priced.
+        protocol["ranking_preset"] = preset
+        in_sample = {r["model"] for r in rows}
+        protocol["cost_basis"] = cost_basis(
+            {m: p for m, p in prices.items() if m in in_sample},
+            alternatives=_alternative_costs(runs, rows, models, prices),
+            earlier=earlier_attempts(rows, prices),
+        )
     protocol["confirmatory"] = {"design": not reasons, "reasons": reasons}
     planned = planned_comparisons_section(rows, study, plan, design, seed=seed)
     from backend.reports.services.exploratory_comparisons import exploratory_comparisons
 
-    exploratory = exploratory_comparisons(rows, study, seed=seed) if planned is None else None
+    exploratory = (
+        exploratory_comparisons(
+            rows,
+            study,
+            seed=seed,
+            cross_study=selection is not None,
+            final_assessment=final_assessment,
+        )
+        if planned is None
+        else None
+    )
     # Which tools' findings the issue counts include (measured on every app) and which were left out.
     protocol["instrument_coverage"] = issues.get("coverage")
 
@@ -2089,16 +2427,19 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
         "These tool counts cover the files each scanner read; dependency and dynamic tools are marked separately. "
         "Tools absent from the catalog have an unknown analysis mode."
     )
-    if grouped_by == "condition":
+    if grouped_by == "condition" or selection is not None:
         # The groups every other table uses: arms apart, colliding labels disambiguated,
         # and runs outside a study kept per model (by_condition pools them in one row).
         issues_out["by_group"] = _issues_by_group(issues["per_app"], rows, grouped_by)
-    return {
+    if selection is not None:
+        # Selection groups pool conditions across studies; a per-condition split would contradict them.
+        issues_out.pop("by_condition", None)
+    report = {
         "protocol": protocol,
         "supplemental_evidence": supplemental,
         "requirement_alignment": alignment_section(rows),
-        "definitions": DEFINITIONS,
-        "metric_definitions": PLAN_METRICS,
+        "definitions": {**DEFINITIONS, **FINAL_ASSESSMENT_DEFINITIONS} if final_assessment else DEFINITIONS,
+        "metric_definitions": {**PLAN_METRICS, **FINAL_ASSESSMENT_METRICS} if final_assessment else PLAN_METRICS,
         "funnel": funnel_section(rows, seed, grouped_by),
         "model_outcomes": [
             {
@@ -2132,5 +2473,10 @@ def _generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, An
             config=config,
             planned=planned,
             ranking=ranking,
+            sample_selection=selection.summary if selection is not None else None,
+            group_criteria=criteria_by_model if final_assessment else None,
         ),
     }
+    if selection is not None:
+        report["selection"] = selection.summary
+    return report

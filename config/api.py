@@ -2,6 +2,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from ninja import NinjaAPI
 from ninja.security import SessionAuth
 
+from backend.coauthors.errors import CoauthorError
 from backend.common.exceptions import APIError
 from backend.human_eval.services.errors import HumanEvalServiceError
 from backend.tokens.auth import TokenAuth
@@ -34,8 +35,16 @@ def handle_human_eval_error(request, exc: HumanEvalServiceError):
     return api.create_response(request, exc.payload(), status=exc.status)
 
 
+# Co-author errors carry a code as well ({"detail", "code", "errors"}).
+@api.exception_handler(CoauthorError)
+def handle_coauthor_error(request, exc: CoauthorError):
+    return api.create_response(request, exc.payload(), status=exc.status)
+
+
 api.add_router("/users/", "backend.users.api.views.router")
 api.add_router("/tokens/", "backend.tokens.api.views.router")
+# Co-authors (invite links, workspaces). A personal router: see backend/coauthors/policy.py.
+api.add_router("/coauthors/", "backend.coauthors.api.views.router")
 api.add_router("/credentials/", "backend.credentials.api.views.router")
 api.add_router("/models/", "backend.llm_models.api.views.router")
 api.add_router("/generation/", "backend.generation.api.router")

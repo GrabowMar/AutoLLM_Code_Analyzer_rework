@@ -19,6 +19,7 @@
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { SETTINGS_SECTIONS, SETTINGS_GROUPS, resolveSettingsSection } from '$lib/settings-sections';
 	import { provideSectionStatus } from '$lib/components/users-settings/section-status.svelte';
+	import { getWorkspace } from '$lib/stores/workspace.svelte';
 
 	import ProfileSection from '$lib/components/users-settings/ProfileSection.svelte';
 	import SecuritySection from '$lib/components/users-settings/SecuritySection.svelte';
@@ -27,17 +28,21 @@
 	import PrivacyDataSection from '$lib/components/users-settings/PrivacyDataSection.svelte';
 	import ApiKeysSection from '$lib/components/users-settings/ApiKeysSection.svelte';
 	import TokenSection from '$lib/components/users-settings/TokenSection.svelte';
+	import CoauthorsSection from '$lib/components/users-settings/CoauthorsSection.svelte';
+	import PersonalSectionLock from '$lib/components/users-settings/PersonalSectionLock.svelte';
 	import { McpSection, ProvidersSection, GitHubSection, WebhooksSection } from '$lib/components/integrations';
 	import Link from '@lucide/svelte/icons/link';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
 
 	const auth = getAuth();
+	const workspace = getWorkspace();
 	const statuses = provideSectionStatus();
 
 	const BODIES: Record<string, Component> = {
 		account: ProfileSection,
 		security: SecuritySection,
+		coauthors: CoauthorsSection,
 		appearance: AppearanceSection,
 		workspace: WorkspaceSection,
 		privacy: PrivacyDataSection,
@@ -299,7 +304,7 @@
 				<div class="space-y-4" role="group" aria-labelledby="group-{group.id}">
 					<SectionHeading id="group-{group.id}" size="sm" title={group.label} />
 					{#each group.sections as s (s.id)}
-						{@const Body = BODIES[s.id]}
+						{@const Body = workspace.actingAs && s.personal ? PersonalSectionLock : BODIES[s.id]}
 						{@const status = statuses[s.id]}
 						<section
 							id={s.id}

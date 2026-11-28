@@ -7,9 +7,9 @@ import type { ReportDetail, ReportDocument } from "$lib/api/reports";
 import analysisWorkflow from "./analysis_workflow.py?raw";
 import { chartSpec } from "./chart";
 import { planTable, reportAccession } from "./format";
-import { rankingData } from "./ranking";
+import { criteriaBasis, rankingData } from "./ranking";
 
-export const NOTEBOOK_WORKFLOW_VERSION = 4;
+export const NOTEBOOK_WORKFLOW_VERSION = 5;
 
 /** Saved notebooks retain edits; callers offer an explicit reset for older generated workflows. */
 export function notebookNeedsUpdate(notebook: unknown): boolean {
@@ -152,6 +152,42 @@ export function buildNotebook(
     ),
   );
 
+  const selection = report.report_data?.selection;
+  if (
+    report.report_type === "study_report" &&
+    selection &&
+    typeof selection === "object"
+  ) {
+    cells.push(
+      md(
+        [
+          "## Sample selection",
+          "",
+          "This report pools experiments: per group (a model, or one treatment of it) and task, the newest usable run counts. " +
+            "`S` has one row per group and task (status, selected run, experiment, attempts); its `sample` column marks a selected run outside the analysed sample " +
+            "(task dropped for complete cases, or truncated) as `left out`. `superseded` lists every attempt left out and why. " +
+            "Run all also writes `selection_matrix.csv`, `selection_superseded.csv` and the coverage figure.",
+        ].join("\n"),
+      ),
+    );
+    cells.push(
+      code(
+        [
+          "selection = report['report_data'].get('selection') or {}",
+          "print(selection.get('rule', ''))",
+          "S = pd.DataFrame(selection.get('matrix') or [])",
+          "superseded = pd.DataFrame(selection.get('superseded') or [])",
+          "if not S.empty:",
+          "    # Selected but not analysed: a task dropped for complete cases, or a truncated run left out.",
+          "    in_sample = S['in_sample'].astype(bool) if 'in_sample' in S else ~S['task'].isin(selection.get('dropped_tasks') or [])",
+          "    S['sample'] = S['status'].mask(S['status'].eq('selected') & ~in_sample, 'left out')",
+          "display(pd.DataFrame(selection.get('groups') or []))",
+          "S.pivot_table(index='group', columns='task', values='sample', aggfunc='first') if not S.empty else S",
+        ].join("\n"),
+      ),
+    );
+  }
+
   if (report.report_type === "study_report") {
     cells.push(
       md(
@@ -217,9 +253,12 @@ export function buildNotebook(
     const weights = Object.fromEntries(
       rk.criteria.map((c) => [c.key, c.weight]),
     );
+    // The final-assessment criteria say what they count (whole-cohort rates, cost at list price).
+    const basis = criteriaBasis(rk.criteria);
     cells.push(
       md(
-        "## What if: re-rank with your own weights\n\nTOPSIS as the report computes it (vector normalisation, ideal and anti-ideal per criterion). Change the weights and run the cell; they are renormalised to sum to 1.",
+        "## What if: re-rank with your own weights\n\nTOPSIS as the report computes it (vector normalisation, ideal and anti-ideal per criterion). Change the weights and run the cell; they are renormalised to sum to 1." +
+          (basis ? ` ${basis}` : ""),
       ),
     );
     cells.push(

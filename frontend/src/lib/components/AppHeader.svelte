@@ -12,6 +12,8 @@
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import X from '@lucide/svelte/icons/x';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Check from '@lucide/svelte/icons/check';
+	import Users from '@lucide/svelte/icons/users';
 	import SidebarNav from './SidebarNav.svelte';
 	import BrandMark from './BrandMark.svelte';
 	import { navSectionFor, routeLabels } from '$lib/nav';
@@ -21,6 +23,9 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { getPreferences } from '$lib/stores/preferences.svelte';
+	import { getWorkspace } from '$lib/stores/workspace.svelte';
+	import { formatApiError } from '$lib/api/core';
+	import { toast } from 'svelte-sonner';
 
 	interface AuthState {
 		isAuthenticated: boolean;
@@ -33,6 +38,7 @@
 
 	const authStore = getAuth();
 	const preferences = getPreferences();
+	const workspace = getWorkspace();
 
 	let mobileMenuOpen = $state(false);
 	let dropdownOpen = $state(false);
@@ -111,6 +117,17 @@
 	function handleKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape' && dropdownOpen) {
 			closeDropdown();
+		}
+	}
+
+	/** Work in a co-author workspace (`null` = my own account); reloads the app. */
+	async function switchWorkspace(coauthorshipId: number | null) {
+		closeDropdown();
+		if ((workspace.actingAs?.coauthorship_id ?? null) === coauthorshipId) return;
+		try {
+			await workspace.switchTo(coauthorshipId);
+		} catch (err) {
+			toast.error(formatApiError(err, 'Could not switch workspace.'));
 		}
 	}
 
@@ -228,19 +245,51 @@
 						</div>
 
 						<div class="p-1">
+							{#if workspace.workspaces.length > 0}
+								{@const current = workspace.actingAs?.coauthorship_id ?? null}
+								<p class="px-2 pt-1.5 pb-1 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70">
+									Workspace
+								</p>
+								<button
+									class="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+									role="menuitemradio"
+									aria-checked={current === null}
+									onclick={() => switchWorkspace(null)}
+								>
+									<User class="h-3.5 w-3.5 shrink-0" />
+									<span class="min-w-0 flex-1 truncate">My account</span>
+									{#if current === null}<Check class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />{/if}
+								</button>
+								{#each workspace.workspaces as ws (ws.coauthorship_id)}
+									<button
+										class="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+										role="menuitemradio"
+										aria-checked={current === ws.coauthorship_id}
+										title={ws.owner.email}
+										onclick={() => switchWorkspace(ws.coauthorship_id)}
+									>
+										<Users class="h-3.5 w-3.5 shrink-0" />
+										<span class="min-w-0 flex-1 truncate">{ws.owner.display_name}'s workspace</span>
+										{#if current === ws.coauthorship_id}<Check class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />{/if}
+									</button>
+								{/each}
+								<div role="separator" class="my-1 h-px bg-border/60"></div>
+							{/if}
 							<p class="px-2 pt-1.5 pb-1 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70">
 								Profile
 							</p>
-							<a
-								href={`/users/${auth.user.id}`}
-								class="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-								role="menuitem"
-								onclick={closeDropdown}
-							>
-								<User class="h-3.5 w-3.5" />
-								<span class="flex-1">View profile</span>
-								<span class="text-[11px] text-muted-foreground/70">↗</span>
-							</a>
+							{#if !workspace.actingAs}
+								<a
+									href={`/users/${auth.user.id}`}
+									class="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+									role="menuitem"
+									onclick={closeDropdown}
+								>
+									<User class="h-3.5 w-3.5" />
+									<span class="flex-1">View profile</span>
+									<span class="text-[11px] text-muted-foreground/70">↗</span>
+								</a>
+							{/if}
 							<a
 								href="/users/settings#account"
 								class="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"

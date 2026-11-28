@@ -29,6 +29,9 @@ describe("portable report notebook", () => {
     expect(notebookNeedsUpdate({ metadata: {} })).toBe(true);
     expect(
       notebookNeedsUpdate({ metadata: { llmlab: { workflow_version: 4 } } }),
+    ).toBe(true);
+    expect(
+      notebookNeedsUpdate({ metadata: { llmlab: { workflow_version: 5 } } }),
     ).toBe(false);
   });
   it("embeds an exact snapshot with Unicode, escaped text and unrounded values", () => {
@@ -48,6 +51,42 @@ describe("portable report notebook", () => {
     );
     expect(setup).toContain("Path('report.json').exists()");
     expect(setup).toContain("belongs to a different report");
+  });
+
+  it("says what the final-assessment criteria count in the what-if section, and nothing for other rankings", () => {
+    const ranked = (keys: string[]) =>
+      ({
+        ...report,
+        report_type: "study_report",
+        report_data: {
+          per_app: [],
+          ranking: {
+            ranking: [
+              {
+                model: "m",
+                topsis_rank: 1,
+                ...Object.fromEntries(keys.map((k) => [k, 1])),
+              },
+            ],
+            criteria: keys.map((key) => ({
+              key,
+              label: key,
+              weight: 1 / keys.length,
+              direction: "benefit",
+            })),
+          },
+        },
+      }) as unknown as ReportDetail;
+    const whatIf = (r: ReportDetail) =>
+      buildNotebook(r, { tables: [] }).cells.find((cell) =>
+        cell.source.startsWith("## What if"),
+      )!.source;
+    expect(whatIf(ranked(["deploy_rate_itt", "list_cost_per_app"]))).toContain(
+      "failures as 0 over every usable app; cost is every run's tokens at the model's public list prices",
+    );
+    expect(whatIf(ranked(["deploy_rate", "cost_per_app"]))).not.toContain(
+      "failures as 0",
+    );
   });
 
   it("keeps full report identifiers distinct even when the displayed accession collides", () => {
@@ -90,6 +129,38 @@ describe("portable report notebook", () => {
       "Value [2]",
     ]);
     expect(snapshot.tables[0].rows[0][2]).toBe("-");
+  });
+
+  it("adds the sample-selection cells only to study reports that pool experiments", () => {
+    const study = {
+      ...report,
+      report_type: "study_report",
+      report_data: {
+        per_app: [],
+        selection: { mode: "latest_unique", matrix: [], groups: [] },
+      },
+    } as unknown as ReportDetail;
+    const cells = buildNotebook(study, { tables: [] }).cells;
+    const heading = cells.findIndex((cell) =>
+      cell.source.startsWith("## Sample selection"),
+    );
+    expect(heading).toBeGreaterThan(0);
+    expect(cells[heading + 1].source).toContain("S = pd.DataFrame(");
+    // Selected runs outside the analysed sample are marked, never shown as plain "selected".
+    expect(cells[heading + 1].source).toContain("'left out'");
+    expect(cells[heading + 1].source).toContain("values='sample'");
+    expect(cells[heading + 1].cell_type).toBe("code");
+    const workflow = cells.findIndex((cell) =>
+      cell.source.startsWith("## Reproducible analysis workflow"),
+    );
+    expect(workflow).toBeGreaterThan(heading);
+    const plain = buildNotebook(
+      { ...study, report_data: { per_app: [] } } as unknown as ReportDetail,
+      { tables: [] },
+    ).cells;
+    expect(
+      plain.some((cell) => cell.source.startsWith("## Sample selection")),
+    ).toBe(false);
   });
 
   it("makes live access optional and keeps all cell IDs valid and stable", () => {

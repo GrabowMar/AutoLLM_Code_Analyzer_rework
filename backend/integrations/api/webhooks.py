@@ -16,6 +16,7 @@ from ninja import Schema
 from ninja.errors import HttpError
 from ninja.responses import Status
 
+from backend.coauthors.identity import is_acting
 from backend.inference.security import UnsafeTargetError
 from backend.integrations.models import WebhookDelivery
 from backend.integrations.models import WebhookKind
@@ -182,7 +183,12 @@ def update_subscription(request, sub_id: int, payload: SubscriptionPatch):
     if data.get("url") is not None:
         if sub.kind == WebhookKind.TELEGRAM:
             raise HttpError(400, "Telegram webhooks have no URL; set the bot token and chat id.")
-        sub.set_url(_validate_url(data["url"]))
+        new_url = _validate_url(data["url"])
+        # A co-author working in this workspace cannot send the stored secret to another address:
+        # a new URL needs the secret entered again (or cleared) in the same request.
+        if is_acting(request) and sub.encrypted_secret and new_url != sub.get_url() and data.get("secret") is None:
+            raise HttpError(400, "Enter the secret again to change the address of this webhook.")
+        sub.set_url(new_url)
     if data.get("telegram_chat_id") is not None:
         if sub.kind != WebhookKind.TELEGRAM:
             raise HttpError(400, "telegram_chat_id only applies to telegram webhooks.")

@@ -40,6 +40,53 @@ export function rankingData(
   return { ranking: r.ranking, criteria: r.criteria };
 }
 
+/**
+ * Readable names of the ranking criteria the study report computes, for criteria whose
+ * label is only their key (a report's own `ranking_criteria` may omit labels). The
+ * final-assessment keys (`*_itt`, `list_cost_per_app`) say what they count.
+ */
+export const CRITERION_LABELS: Record<string, string> = {
+  deploy_rate: "Deploy rate | evaluated",
+  deploy_rate_itt: "Deploy rate, failures counted as 0",
+  pass_rate: "Pass rate | evaluated",
+  pass_rate_itt: "Pass rate, failures counted as 0",
+  functional_passed: "Fully correct | evaluated",
+  functional_passed_itt: "Fully correct, failures counted as 0",
+  unique_issues_per_app: "Unique issues / app",
+  issues_per_kloc: "Code issues / kLOC",
+  security_per_app: "Security issues / app",
+  cost_per_app: "Cost / app billed (USD)",
+  list_cost_per_app: "Cost / app at list price (USD)",
+};
+
+/** A criterion's label: the report's own, else a known key's name, else the key. */
+export function criterionLabel(c: Pick<Criterion, "key" | "label">): string {
+  if (c.label && c.label !== c.key) return c.label;
+  return CRITERION_LABELS[c.key] ?? c.key;
+}
+
+/**
+ * One sentence on what the criteria count, when they include the final-assessment ones
+ * (whole-cohort rates, cost at list price); null for every other ranking (older reports too).
+ */
+export function criteriaBasis(
+  criteria: Pick<Criterion, "key">[],
+): string | null {
+  const keys = new Set(criteria.map((c) => c.key));
+  const parts: string[] = [];
+  if ([...keys].some((k) => k.endsWith("_itt")))
+    parts.push(
+      "rates count known output, build and start failures as 0 over every usable app",
+    );
+  if (keys.has("list_cost_per_app"))
+    parts.push(
+      "cost is every run's tokens at the model's public list prices (billed cost is not comparable across routes)",
+    );
+  if (parts.length === 0) return null;
+  const text = parts.join("; ");
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+}
+
 const TIE_TOLERANCE = 1e-12;
 
 /** Weights normalised to sum 1 (all zero: equal weights). */

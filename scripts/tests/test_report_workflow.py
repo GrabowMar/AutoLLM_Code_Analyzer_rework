@@ -199,7 +199,320 @@ def sample_report():
     }
 
 
+def selection_report(groups=("alpha", "beta", "gamma"), tasks=("one@1", "two@1", "three@1", "four@1")):
+    """A cross-experiment report: no single experiment in scope, units pooled from two experiments."""
+    report = sample_report()
+    data = report["report_data"]
+    data["protocol"]["scope"] = {
+        "study_id": None,
+        "selection": "latest_unique",
+        "study_ids": ["s-1", "s-2"],
+        "models": None,
+        "tasks": None,
+        "common_tasks_only": False,
+    }
+    data.pop("planned_comparisons")
+    matrix = []
+    superseded = []
+    for g, group in enumerate(groups):
+        for t, task in enumerate(tasks):
+            if (g, t) == (1, 3):
+                continue  # no attempt: the payload omits the unit
+            status, outcome = "selected", "tested"
+            if (g, t) == (0, 1):
+                outcome = "build_fail"
+            elif (g, t) == (1, 2):
+                status, outcome = "attrition", "infra_error"
+            elif (g, t) == (2, 0):
+                status, outcome = "in_flight", None
+            older = [f"old-{g}-{t}"] if t == 0 and g < 2 else []
+            matrix.append(
+                {
+                    "group": group,
+                    "task": task,
+                    "status": status,
+                    "run_id": f"run-{g}-{t}",
+                    "study_id": "s-2" if older else "s-1",
+                    "study_name": "Second" if older else "First",
+                    "outcome": outcome,
+                    "created_at": "2026-11-10T10:00:00Z",
+                    "attempts": 1 + len(older),
+                    "superseded_run_ids": older,
+                },
+            )
+            superseded.extend(
+                {
+                    "run_id": run,
+                    "group": group,
+                    "task": task,
+                    "study_id": "s-1",
+                    "study_name": "First",
+                    "outcome": "tested",
+                    "usable": True,
+                    "created_at": "2026-11-01T10:00:00Z",
+                    "replaced_by": f"run-{g}-{t}",
+                    "reason": "newer_usable_run",
+                }
+                for run in older
+            )
+    data["selection"] = {
+        "mode": "latest_unique",
+        "rule": "Per group and task, the newest usable run.",
+        "filters": {"study_ids": ["s-1", "s-2"], "models": None, "tasks": None, "common_tasks_only": False},
+        "studies": [
+            {"id": "s-1", "name": "First", "status": "completed", "runs_considered": 12, "runs_selected": 9},
+            {"id": "s-2", "name": "Second", "status": "completed", "runs_considered": 2, "runs_selected": 2},
+        ],
+        "counts": {"candidates": 14, "selected": 9, "superseded": len(superseded), "attrition_cells": 1},
+        "groups": [
+            {
+                "group": group,
+                "model": group,
+                "treatment_hash": "924d5065",
+                "conditions": [g],
+                "studies": ["s-1", "s-2"],
+                "resource_policies": ["final@1"],
+                "tasks_selected": sum(c["group"] == group and c["status"] == "selected" for c in matrix),
+                "tasks_in_scope": len(tasks),
+                "outcomes": {"tested": 1},
+            }
+            for g, group in enumerate(groups)
+        ],
+        "tasks": list(tasks),
+        "matrix": matrix,
+        "superseded": superseded,
+        "analyses": {
+            "rule": "Newest measured result per run and tool.",
+            "by_launch": [
+                {
+                    "launch_id": "l-1",
+                    "example_name": "FINAL static",
+                    "analysis_runs": 4,
+                    "results_selected": 9,
+                    "results_superseded": 2,
+                },
+            ],
+            "by_label": [
+                {
+                    "label": "FINAL static",
+                    "example_name": "FINAL static 1a2b3c4d",
+                    "analysis_runs": 4,
+                    "results_selected": 9,
+                    "results_superseded": 0,
+                },
+                {
+                    "label": "SHALLOW dynamic",
+                    "example_name": "SHALLOW dynamic 5e6f7a8b",
+                    "analysis_runs": 1,
+                    "results_selected": 0,
+                    "results_superseded": 2,
+                },
+            ],
+            "tools_mixed_launches": [],
+            "tools_mixed_labels": [],
+        },
+        "common_tasks": [],
+        "dropped_tasks": [],
+    }
+    return report
+
+
 class WorkflowTests(unittest.TestCase):
+    def test_selection_categories_keep_measured_failures_apart_from_attrition(self):
+        category = workflow.selection_category
+        self.assertEqual(category({"status": "selected", "outcome": "tested"}), "tested")
+        for outcome in ("build_fail", "start_fail", "output_invalid"):
+            self.assertEqual(category({"status": "selected", "outcome": outcome}), "failed")
+        self.assertEqual(category({"status": "selected", "outcome": None}), "selected")
+        self.assertEqual(category({"status": "attrition", "outcome": "infra_error"}), "attrition")
+        self.assertEqual(category({"status": "in_flight"}), "in_flight")
+        self.assertEqual(category({"status": "missing"}), "missing")
+        self.assertEqual(category(None), "missing")
+        # Selected but outside the analysed sample: truncated, or its task dropped for complete cases.
+        left_out = {"status": "selected", "outcome": "tested", "in_sample": False, "excluded": "truncated"}
+        self.assertEqual(category(left_out), "excluded")
+        self.assertEqual(category({"status": "selected", "outcome": "tested", "task": "x@1"}, {"x@1"}), "excluded")
+        self.assertEqual(category({"status": "selected", "outcome": "tested", "task": "y@1"}, {"x@1"}), "tested")
+
+    def test_cross_experiment_selection_exports_every_unit_attempt_and_coverage_figure(self):
+        report = selection_report()
+        with tempfile.TemporaryDirectory() as directory:
+            result = workflow.run_report_workflow(report, directory)
+            manifest = result["manifest"]
+            self.assertEqual(manifest["status"], "completed", manifest["steps"])
+            step = next(s for s in manifest["steps"] if s["name"] == "sample_selection")
+            self.assertEqual(step["status"], "completed", step)
+            root = Path(directory)
+            matrix = workflow.pd.read_csv(root / "selection_matrix.csv", keep_default_na=False)
+            # The omitted unit is a missing attempt, not a dropped row.
+            self.assertEqual(len(matrix), 12)
+            units = matrix.set_index(["group", "task"])
+            self.assertEqual(units.loc[("beta", "four@1"), "category"], "missing")
+            self.assertEqual(units.loc[("alpha", "two@1"), "category"], "failed")
+            self.assertEqual(units.loc[("beta", "three@1"), "category"], "attrition")
+            self.assertEqual(units.loc[("gamma", "one@1"), "category"], "in_flight")
+            self.assertEqual(units.loc[("alpha", "one@1"), "superseded_run_ids"], "old-0-0")
+            self.assertEqual(units.loc[("alpha", "one@1"), "attempts"], 2)
+            superseded = workflow.pd.read_csv(root / "selection_superseded.csv")
+            self.assertEqual(sorted(superseded["run_id"]), ["old-0-0", "old-1-0"])
+            self.assertEqual(set(superseded["reason"]), {"newer_usable_run"})
+            coverage = workflow.pd.read_csv(root / "selection_coverage.csv").set_index("group")
+            self.assertEqual(list(coverage.columns), ["one@1", "two@1", "three@1", "four@1"])
+            self.assertEqual(list(coverage.index), ["alpha", "beta", "gamma"])
+            self.assertEqual(coverage.loc["beta", "four@1"], "missing")
+            for ext in ("png", "svg"):
+                self.assertGreater((root / f"selection_coverage.{ext}").stat().st_size, 100)
+            svg = (root / "selection_coverage.svg").read_text()
+            self.assertIn("2 experiments pooled", svg)
+            self.assertTrue((root / "selection_groups.csv").exists())
+            self.assertTrue((root / "selection_studies.csv").exists())
+            self.assertTrue((root / "selection_analyses_by_launch.csv").exists())
+            by_label = workflow.pd.read_csv(root / "selection_analyses_by_label.csv")
+            self.assertEqual(list(by_label["label"]), ["FINAL static", "SHALLOW dynamic"])
+            self.assertFalse((root / "selection_tools_mixed_labels.csv").exists())
+            self.assertIn("## Sample selection", (root / "methods.md").read_text())
+            evidence = {r["check"]: r for r in manifest["evidence_checks"]}
+            self.assertEqual(evidence["sample_selection"]["status"], "warning")
+            self.assertIn("different numbers of tasks", evidence["sample_selection"]["detail"])
+            with zipfile.ZipFile(result["archive"]) as bundle:
+                names = set(bundle.namelist())
+            self.assertLessEqual({"selection.json", "selection_matrix.csv", "selection_superseded.csv"}, names)
+
+    def test_complete_case_selection_labels_dropped_tasks_and_keeps_an_empty_superseded_table(self):
+        report = selection_report()
+        selection = report["report_data"]["selection"]
+        selection["filters"]["common_tasks_only"] = True
+        selection["superseded"] = []
+        selection["dropped_tasks"] = ["four@1"]
+        selection["tasks"] = ["one@1", "two@1", "three@1"]
+        for group in selection["groups"]:
+            group["tasks_selected"] = 3
+        with tempfile.TemporaryDirectory() as directory:
+            result = workflow.run_report_workflow(report, directory)
+            self.assertEqual(result["manifest"]["status"], "completed", result["manifest"]["steps"])
+            root = Path(directory)
+            superseded = workflow.pd.read_csv(root / "selection_superseded.csv")
+            self.assertTrue(superseded.empty)
+            self.assertEqual(list(superseded.columns), list(workflow.SELECTION_SUPERSEDED_COLUMNS))
+            coverage = workflow.pd.read_csv(root / "selection_coverage.csv")
+            self.assertIn("four@1", coverage.columns)
+            self.assertIn("four@1 (dropped)", (root / "selection_coverage.svg").read_text())
+            evidence = {r["check"]: r["status"] for r in result["manifest"]["evidence_checks"]}
+            self.assertEqual(evidence["sample_selection"], "recorded")
+            # The selected runs of the dropped task are outside the sample: their own category, never "tested".
+            matrix = workflow.pd.read_csv(root / "selection_matrix.csv", keep_default_na=False)
+            dropped = matrix[matrix["task"] == "four@1"]
+            self.assertEqual(set(dropped["category"]), {"excluded", "missing"})
+            self.assertEqual(set(dropped.loc[dropped["category"] == "excluded", "excluded"]), {"dropped_task"})
+            self.assertEqual(set(dropped["in_sample"].astype(str)), {"False"})
+            self.assertEqual(coverage.set_index("group").loc["alpha", "four@1"], "excluded")
+
+    def test_truncated_runs_left_out_after_selection_are_counted_apart_and_named_in_methods(self):
+        report = selection_report()
+        selection = report["report_data"]["selection"]
+        for cell in selection["matrix"]:
+            cell["in_sample"] = cell["status"] == "selected"
+            cell["excluded"] = None
+        left_out = next(c for c in selection["matrix"] if (c["group"], c["task"]) == ("alpha", "three@1"))
+        left_out.update(in_sample=False, excluded="truncated")
+        selection["counts"].update(selected=8, truncated_excluded=1)
+        with tempfile.TemporaryDirectory() as directory:
+            result = workflow.run_report_workflow(report, directory)
+            self.assertEqual(result["manifest"]["status"], "completed", result["manifest"]["steps"])
+            root = Path(directory)
+            matrix = workflow.pd.read_csv(root / "selection_matrix.csv", keep_default_na=False)
+            units = matrix.set_index(["group", "task"])
+            self.assertEqual(units.loc[("alpha", "three@1"), "category"], "excluded")
+            self.assertEqual(units.loc[("alpha", "three@1"), "excluded"], "truncated")
+            # The selected categories add up to the analysed sample.
+            in_sample = matrix["category"].isin(["tested", "failed", "selected"]).sum()
+            self.assertEqual(in_sample, selection["counts"]["selected"])
+            self.assertEqual(int(matrix["in_sample"].astype(str).eq("True").sum()), selection["counts"]["selected"])
+            svg = (root / "selection_coverage.svg").read_text()
+            self.assertIn("Selected, left out", svg)
+            methods = (root / "methods.md").read_text()
+            self.assertIn("runs in the analysed sample: 8", methods)
+            self.assertIn("left out as truncated (sensitivity analysis): 1", methods)
+
+    def test_many_group_selection_renders_without_single_experiment_scope(self):
+        groups = [f"endpoint/model-{i}" for i in range(10)]
+        tasks = [f"task_{i:02d}@1" for i in range(30)]
+        report = selection_report(groups=groups, tasks=tasks)
+        with tempfile.TemporaryDirectory() as directory:
+            result = workflow.run_report_workflow(report, directory)
+            self.assertEqual(result["manifest"]["status"], "completed", result["manifest"]["steps"])
+            coverage = workflow.pd.read_csv(Path(directory) / "selection_coverage.csv")
+            self.assertEqual(coverage.shape, (10, 31))
+            self.assertGreater((Path(directory) / "selection_coverage.png").stat().st_size, 1000)
+
+    def test_absent_or_empty_selection_is_skipped_without_selection_files(self):
+        for data in ({}, {"selection": None}, {"selection": {"mode": "latest_unique"}}, {"selection": []}):
+            with tempfile.TemporaryDirectory() as directory:
+                result = workflow.run_report_workflow({"report_data": data}, directory)
+                self.assertEqual(result["manifest"]["status"], "completed", (data, result["manifest"]["steps"]))
+                step = next(s for s in result["manifest"]["steps"] if s["name"] == "sample_selection")
+                self.assertEqual(step["status"], "skipped")
+                self.assertFalse(any(f.startswith("selection") for f in result["manifest"]["files"]))
+                self.assertNotIn("sample_selection", {r["check"] for r in result["manifest"]["evidence_checks"]})
+                self.assertNotIn("## Sample selection", (Path(directory) / "methods.md").read_text())
+
+    def test_final_assessment_metrics_are_plotted_exported_and_named_in_methods(self):
+        report = sample_report()
+        data = report["report_data"]
+        for outcome in data["model_outcomes"]:
+            outcome.update(deploy_rate_itt=0.6, pass_rate_itt=0.4, functional_passed_itt=0.2, list_cost_per_app=1.25)
+        data["model_outcomes"][1]["list_cost_per_app"] = None  # unpriced: unknown, not free
+        for row in data["funnel"]["by_model"]:
+            row["deploy_rate_itt"] = {"rate": 0.6, "ci95": [0.3, 0.9], "n": 5, "apps": 3, "unknown_runs": 0}
+        data["ranking"]["criteria"] = [
+            {"key": "deploy_rate_itt", "label": "Deploy rate, failures counted as 0", "direction": "benefit"},
+            {"key": "list_cost_per_app", "label": "Cost / app at list price (USD)", "direction": "cost"},
+        ]
+        data["protocol"]["ranking_preset"] = "final_assessment"
+        data["protocol"]["cost_basis"] = {
+            "source": "OpenRouter list prices of the model's catalog row / catalog twin as synced 2026-11-09",
+            "unit": "USD per million tokens",
+            "formula": "cost = uncached x prompt + cached x input_cache_read + ...",
+            "per_model": [
+                {"model": "alpha", "priced_as": "vendor/alpha", "prompt": 2.0, "completion": 10.0, "priced": True},
+                {"model": "beta", "priced_as": None, "prompt": None, "priced": False, "missing": "no catalog twin"},
+            ],
+            "notes": ["Billed cost (cost_per_app, run.metrics.cost_usd) is kept for reference."],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            result = workflow.run_report_workflow(report, directory)
+            manifest = result["manifest"]
+            self.assertEqual(manifest["status"], "completed", manifest["steps"])
+            basis = workflow.pd.read_csv(Path(directory) / "cost_basis_per_model.csv")
+            self.assertEqual(basis["priced_as"].tolist()[0], "vendor/alpha")
+            self.assertTrue((Path(directory) / "cost_basis.json").exists())
+            scorecard = workflow.pd.read_csv(Path(directory) / "normalized_scorecard.csv")
+            for column in ("Pass rate, failures counted as 0", "Deployment, failures counted as 0"):
+                self.assertIn(column, scorecard)
+            self.assertIn("Inverse cost at list price", scorecard)
+            self.assertTrue(scorecard["Inverse cost at list price"].isna().iloc[1])
+            # Beside them, the conditional pass rate and the billed cost say what they are.
+            for column in ("Functional pass rate | measured evaluation", "Inverse billed cost"):
+                self.assertIn(column, scorecard)
+            self.assertNotIn("Inverse cost", scorecard)
+            methods = (Path(directory) / "methods.md").read_text()
+            self.assertIn("## Whole-cohort rates and cost at list price", methods)
+            self.assertIn("as synced 2026-11-09", methods)
+            self.assertIn("Ranking criteria: final_assessment (deploy_rate_itt, list_cost_per_app)", methods)
+            evidence = {r["check"]: r for r in manifest["evidence_checks"]}
+            self.assertIn("cost_basis_per_model.csv", evidence["cost_interpretation"]["detail"])
+
+    def test_reports_without_final_assessment_metrics_keep_their_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = workflow.run_report_workflow(sample_report(), directory)
+            self.assertFalse(any(f.startswith("cost_basis") for f in result["manifest"]["files"]))
+            self.assertNotIn("Whole-cohort rates", (Path(directory) / "methods.md").read_text())
+            scorecard = workflow.pd.read_csv(Path(directory) / "normalized_scorecard.csv")
+            self.assertNotIn("Pass rate, failures counted as 0", scorecard)
+            self.assertIn("Functional pass rate", scorecard)
+            self.assertNotIn("Inverse billed cost", scorecard)
+        self.assertEqual(workflow.final_assessment_methods({}), [])
+
     def test_unmeasured_prompt_subsets_export_missing_instead_of_plotting_zero(self):
         row = {
             "group": "model",
@@ -549,6 +862,7 @@ class WorkflowTests(unittest.TestCase):
                     "matched_lock_experiment",
                     "supplemental_feature_checks",
                     "requirement_alignment",
+                    "sample_selection",
                 },
                 manifest["steps"],
             )
