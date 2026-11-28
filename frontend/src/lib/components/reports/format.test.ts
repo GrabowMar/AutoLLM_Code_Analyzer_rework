@@ -12,6 +12,7 @@ import {
   shareOf,
   specItems,
   titleParts,
+  type KeyFigure,
 } from "./format";
 
 const table = (
@@ -110,6 +111,34 @@ describe("planTable", () => {
 });
 
 describe("specItems", () => {
+  it("describes a cross-experiment selection as its scope, not as raw config keys", () => {
+    const items = specItems("study_report", {
+      selection: "latest_unique",
+      study_ids: ["a", "b", "c"],
+      models: [],
+      tasks: ["one@1"],
+      common_tasks_only: true,
+      seed: 0,
+    });
+    expect(items[0]).toEqual({
+      label: "Scope",
+      value: "Newest unique runs",
+      sub: "3 experiments · all models · 1 task · complete cases",
+    });
+    const labels = items.map((i) => i.label);
+    for (const raw of [
+      "Selection",
+      "Study ids",
+      "Models",
+      "Tasks",
+      "Common tasks only",
+    ])
+      expect(labels).not.toContain(raw);
+    expect(
+      specItems("study_report", { selection: "latest_unique" })[0].sub,
+    ).toBe("every experiment · all models · all tasks");
+  });
+
   it("reads scope, analysis and randomisation from a study report config", () => {
     const items = specItems("study_report", {
       study_id: "d9ed43ed-4c0b",
@@ -167,6 +196,46 @@ describe("keyFigures", () => {
 
   it("keeps unmeasured values as a dash", () => {
     expect(keyFigures({ total_findings: null })[0].value).toBe("—");
+  });
+
+  it("shows a final-assessment report's whole-cohort pass rate as a rate and its preset as text", () => {
+    const figs = keyFigures({
+      leader: "local-opencode-go/deepseek-v4.1-flash",
+      ranking_criteria: "final_assessment",
+      whole_cohort_pass_rate: 0.8236,
+    });
+    expect(
+      figs.find((f) => f.label === "Pass rate, failures counted as 0"),
+    ).toMatchObject({ kind: "rate", value: "82.4%", share: 0.8236 });
+    expect(figs.find((f) => f.label === "Ranking criteria")).toMatchObject({
+      kind: "text",
+      value: "Final assessment: failures counted as 0, cost at list price",
+    });
+  });
+
+  it("labels a newest-unique sample's figures and counts only the analysed tasks", () => {
+    const summary = { selection: { groups: 10, tasks: 30, selected: 180 } };
+    const tasks = Array.from({ length: 30 }, (_, i) => `t${i}@1`);
+    const value = (figs: KeyFigure[], label: string) =>
+      figs.find((f) => f.label === label)?.value;
+
+    // Complete cases: the 12 dropped tasks are not analysed, whatever the stored summary says.
+    const complete = keyFigures(summary, {
+      selection: { tasks, dropped_tasks: tasks.slice(18) },
+    });
+    expect(value(complete, "Tasks analysed")).toBe("18");
+    expect(value(complete, "Groups compared")).toBe("10");
+    expect(value(complete, "Runs in the sample")).toBe("180");
+    expect(complete.some((f) => f.label.startsWith("Selection ·"))).toBe(false);
+
+    // Every task a group has: all in-scope tasks are analysed; without the data the summary counts.
+    expect(
+      value(
+        keyFigures(summary, { selection: { tasks, dropped_tasks: [] } }),
+        "Tasks analysed",
+      ),
+    ).toBe("30");
+    expect(value(keyFigures(summary), "Tasks analysed")).toBe("30");
   });
 });
 

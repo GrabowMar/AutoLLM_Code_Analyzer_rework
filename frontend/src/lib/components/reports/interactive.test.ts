@@ -4,7 +4,13 @@ import { chartDomain, chartRows, chartSpec, parseInterval } from "./chart";
 import { cellDelta, matchTable, rowsOnlyInOther } from "./compare";
 import { planTable, sortRows, toCsv, toMarkdown } from "./format";
 import { buildNotebook, notebookPaths } from "./notebook";
-import { competitionRanks, rankingData, topsis } from "./ranking";
+import {
+  competitionRanks,
+  criteriaBasis,
+  criterionLabel,
+  rankingData,
+  topsis,
+} from "./ranking";
 
 const table = (
   title: string,
@@ -113,6 +119,62 @@ describe("what-if ranking", () => {
       topsis(rows as never, RANKING.criteria, [1, 1, 1, 1, 1]).dropped,
     ).toEqual(["c"]);
     expect(rankingData({ ranking: { ranking: [], criteria: [] } })).toBeNull();
+  });
+
+  it("names the final-assessment criteria and says what they count", () => {
+    // A report's own criteria may carry only their key as label.
+    expect(
+      criterionLabel({ key: "deploy_rate_itt", label: "deploy_rate_itt" }),
+    ).toBe("Deploy rate, failures counted as 0");
+    expect(criterionLabel({ key: "list_cost_per_app", label: "" })).toBe(
+      "Cost / app at list price (USD)",
+    );
+    expect(
+      criterionLabel({ key: "pass_rate", label: "Functional pass rate" }),
+    ).toBe("Functional pass rate");
+    expect(
+      criterionLabel({ key: "custom_metric", label: "custom_metric" }),
+    ).toBe("custom_metric");
+    const final = [
+      { key: "deploy_rate_itt" },
+      { key: "pass_rate_itt" },
+      { key: "issues_per_kloc" },
+      { key: "list_cost_per_app" },
+    ];
+    expect(criteriaBasis(final)).toBe(
+      "Rates count known output, build and start failures as 0 over every usable app; cost is every run's tokens " +
+        "at the model's public list prices (billed cost is not comparable across routes).",
+    );
+    expect(criteriaBasis([{ key: "list_cost_per_app" }])).toMatch(
+      /^Cost is every run's tokens/,
+    );
+    // The default criteria (and every older report) need no such sentence.
+    expect(criteriaBasis(RANKING.criteria)).toBeNull();
+  });
+
+  it("re-ranks a final-assessment ranking without crashing on an unpriced model", () => {
+    const criteria = [
+      {
+        key: "deploy_rate_itt",
+        label: "Deploy rate, failures counted as 0",
+        weight: 0.5,
+        direction: "benefit" as const,
+      },
+      {
+        key: "list_cost_per_app",
+        label: "Cost / app at list price (USD)",
+        weight: 0.5,
+        direction: "cost" as const,
+      },
+    ];
+    const rows = [
+      { model: "a", deploy_rate_itt: 1, list_cost_per_app: 1.28 },
+      { model: "b", deploy_rate_itt: 0.87, list_cost_per_app: 0.17 },
+      { model: "c", deploy_rate_itt: 1, list_cost_per_app: null },
+    ];
+    const { scores, dropped } = topsis(rows, criteria, [50, 50]);
+    expect(dropped).toEqual(["c"]);
+    expect([...scores.keys()].sort()).toEqual(["a", "b"]);
   });
 });
 

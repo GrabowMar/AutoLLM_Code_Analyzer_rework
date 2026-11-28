@@ -32,12 +32,29 @@ _SEVERITY_KEYS = frozenset(("critical", "high", "medium", "low", "info"))
 _NORMALIZED_NOTE = "Severity buckets are the platform's normalized severity (a heuristic), not the tools' own labels."
 _METRIC_HEADERS = {
     "deploy_rate": "Deploy rate",
+    "deploy_rate_itt": "Deploy rate, failures counted as 0",
     "pass_rate": "Pass rate",
+    "pass_rate_itt": "Pass rate, failures counted as 0",
     "functional_passed": "Fully correct",
+    "functional_passed_itt": "Fully correct, failures counted as 0",
     "unique_issues_per_app": "Unique issues / app",
     "issues_per_kloc": "Code issues / kLOC",
     "security_per_app": "Security issues / app",
     "cost_per_app": "Cost / app (USD)",
+    "list_cost_per_app": "Cost / app at list price (USD)",
+}
+# Next to the whole-cohort metrics (final assessment) the conditional ones say what they are conditional on.
+_CONDITIONAL_HEADERS = {
+    "deploy_rate": "Deploy rate | evaluated",
+    "pass_rate": "Pass rate | evaluated",
+    "functional_passed": "Fully correct | evaluated",
+    "cost_per_app": "Cost / app billed (USD)",
+}
+_PRESETS = {
+    "final_assessment": "final assessment (whole-cohort rates, failures counted as 0; cost at list price)",
+    "default": "default (conditional rates; billed cost)",
+    "report": "set in the report configuration",
+    "analysis_plan": "pre-registered in the analysis plan",
 }
 
 
@@ -157,12 +174,26 @@ def _protocol_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
             ("Baseline condition", study.get("baseline_condition") or planned.get("baseline_condition")),
             ("Planned repeats", study.get("planned_repeats") or study.get("repeats")),
         ]
+    scope = protocol.get("scope") or {}
+    cross_study = scope.get("selection") == "latest_unique"
+    if cross_study:
+        pool = len(scope.get("study_ids") or [])
+        contributing = len(scope.get("studies_contributing") or [])
+        kv.append(
+            (
+                "Sample",
+                f"Newest unique runs from {contributing} {'study' if contributing == 1 else 'studies'}"
+                + (f" ({pool} in the pool)" if pool != contributing else ""),
+            ),
+        )
     kv += [
         ("Runs", protocol.get("runs")),
         ("Apps (unit x condition; repeats averaged)", protocol.get("apps")),
         ("Models", len(protocol.get("models") or [])),
     ]
-    if protocol.get("grouped_by") == "condition":
+    if protocol.get("grouped_by") == "condition" and cross_study:
+        kv.append(("Grouped by", "treatment: a model ran under several treatments, so they are never pooled"))
+    elif protocol.get("grouped_by") == "condition":
         kv.append(("Grouped by", "condition: a model ran under several conditions, so arms are never pooled"))
     kv += [
         ("Tasks", len(protocol.get("tasks") or [])),
@@ -240,7 +271,62 @@ def _protocol_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
                 selection.get("generated_without_evaluation", 0),
             ),
         ]
+    if protocol.get("ranking_preset"):
+        kv.append(("Ranking criteria", _PRESETS.get(protocol["ranking_preset"], protocol["ranking_preset"])))
+    if protocol.get("cost_basis"):
+        kv.append(("Cost at list price", (protocol["cost_basis"].get("source") or "") + " (table: cost basis)"))
     return kv
+
+
+def _price(value: Any) -> str:
+    """A list price in USD per million tokens at its recorded precision (cache-read prices are often < 0.01)."""
+    return "-" if value is None else f"{value:.6g}"
+
+
+def _cost_basis_table(basis: dict[str, Any]) -> Table:
+    """The list prices each model's runs were priced at (final assessment), with the formula and caveats."""
+    rows = []
+    for m in basis.get("per_model") or []:
+        other = m.get("alternative_twin") or {}
+        earlier = m.get("earlier_attempts") or {}
+        notes = [
+            m.get("missing") or "",
+            "base tier (per-request tiers not applied)" if m.get("tiers_not_applied") else "",
+            "route lists other prices: " + ", ".join(f"{k} {_price(v)}" for k, v in m["route_pricing"].items())
+            if m.get("route_pricing")
+            else "",
+            f"name map assumes {other.get('model')}: {_price(other.get('prompt'))} / "
+            f"{_price(other.get('completion'))} / {_price(other.get('cache_read'))} per MTok, "
+            f"{_fmt(other.get('list_cost_per_app'))} USD / app"
+            if other
+            else "",
+            f"{earlier.get('runs')} run(s) had earlier attempts not included "
+            f"({_fmt(earlier.get('list_cost_usd'))} USD at these prices)"
+            if earlier
+            else "",
+        ]
+        rows.append(
+            {
+                **m,
+                **{k: _price(m.get(k)) for k in ("prompt", "completion", "cache_read", "cache_write")},
+                "note": "; ".join(n for n in notes if n) or "-",
+            },
+        )
+    return Table(
+        "Cost basis: list prices by model (USD per million tokens)",
+        [
+            ("model", "Model"),
+            ("priced_as", "Priced as"),
+            ("prompt", "Prompt"),
+            ("completion", "Completion"),
+            ("cache_read", "Cache read"),
+            ("cache_write", "Cache write"),
+            ("synced_at", "Synced"),
+            ("note", "Note"),
+        ],
+        rows,
+        " ".join([f"{basis.get('source', '')}.", basis.get("formula", ""), *(basis.get("notes") or [])]),
+    )
 
 
 def _issue_tables(data: dict[str, Any], group: str, group_word: str) -> list[Table]:
@@ -402,14 +488,210 @@ def _no_p_note(family: dict[str, Any]) -> str:
     )
 
 
+def _selection_tables(selection: dict[str, Any]) -> list[Table]:
+    """The cross-study sample selection (``cohort_selection``): rule, counts, coverage, superseded runs, analyses."""
+    counts = selection.get("counts") or {}
+    filters = selection.get("filters") or {}
+    analyses = selection.get("analyses") or {}
+    studies = selection.get("studies") or []
+    names = {s.get("id"): s.get("name") for s in studies}
+    summary = [
+        ("Rule", selection.get("rule")),
+        ("Studies pooled", len([s for s in studies if s.get("runs_selected")])),
+        ("Models filter", _join(filters.get("models") or []) or "all"),
+        ("Tasks filter", _join(filters.get("tasks") or []) or "all"),
+        ("Complete cases only (tasks every group has)", bool(filters.get("common_tasks_only"))),
+        ("Candidate runs", counts.get("candidates")),
+        ("Selected runs (the sample)", counts.get("selected")),
+        ("Superseded attempts", counts.get("superseded")),
+        ("Cells without a usable run (attrition)", counts.get("attrition_cells")),
+        ("Cells in flight", counts.get("in_flight_cells")),
+        ("Cells never attempted (missing)", counts.get("missing_cells")),
+        ("Tasks every group has", len(selection.get("common_tasks") or [])),
+        ("Tasks dropped (complete cases)", _join(selection.get("dropped_tasks") or []) or "none"),
+        (
+            "Excluded: pilot / beyond plan / reference / superseded plan",
+            " / ".join(
+                str(counts.get(k, 0))
+                for k in ("pilot_excluded", "beyond_plan_excluded", "reference_excluded", "superseded_plan_excluded")
+            ),
+        ),
+        ("Filtered out (models / tasks)", counts.get("filtered_out")),
+        ("Truncated selected runs left out (sensitivity)", counts.get("truncated_excluded", 0)),
+        ("Selected runs on dropped tasks", counts.get("dropped_runs", 0)),
+    ]
+    tables = [
+        Table("Sample selection", [("k", "Item"), ("v", "Value")], [{"k": k, "v": v} for k, v in summary]),
+        Table(
+            "Sample selection: studies",
+            [
+                ("name", "Study"),
+                ("id", "Id"),
+                ("status", "Status"),
+                ("runs_total", "Runs"),
+                ("runs_considered", "Candidates"),
+                ("runs_selected", "Selected"),
+            ],
+            studies,
+        ),
+        Table(
+            "Sample selection: coverage by group",
+            [
+                ("group", "Group"),
+                ("coverage", "Tasks in sample / in scope"),
+                ("outcomes", "Outcomes"),
+                ("truncated_excluded", "Truncated, left out"),
+                ("dropped_runs", "On dropped tasks"),
+                ("attrition_cells", "Attrition"),
+                ("in_flight_cells", "In flight"),
+                ("missing_cells", "Missing"),
+                ("conditions", "Conditions"),
+                ("study_names", "Studies"),
+                ("resource_policies", "Resource policies"),
+            ],
+            [
+                {
+                    **g,
+                    "coverage": f"{g.get('tasks_selected')} / {g.get('tasks_in_scope')}",
+                    "study_names": [names.get(s) or s for s in g.get("studies") or []],
+                }
+                for g in selection.get("groups") or []
+            ],
+            "One run per (group, task): the newest usable attempt. A group is a model, or a model's treatment "
+            "when its runs ran under several. Tasks in sample: after the truncation and complete-case exclusions.",
+        ),
+    ]
+    if selection.get("dropped_by_group"):
+        tables.append(
+            Table(
+                "Sample selection: groups blocking complete cases",
+                [("group", "Group"), ("tasks", "Dropped tasks without a run"), ("reasons", "Why")],
+                selection["dropped_by_group"],
+                "Per group, the tasks dropped for complete cases that it has no run in the sample for: attrition "
+                "(no usable attempt), missing (never attempted), in flight, or truncated (left out as truncated).",
+            ),
+        )
+    gaps = [c for c in selection.get("matrix") or [] if c.get("status") != "selected" or not c.get("in_sample")]
+    if gaps:
+        tables.append(
+            Table(
+                "Sample selection: cells without a sampled run",
+                [
+                    ("group", "Group"),
+                    ("task", "Task"),
+                    ("status", "Status"),
+                    ("outcome", "Newest attempt"),
+                    ("attempts", "Attempts"),
+                    ("study_name", "Study"),
+                    ("run_id", "Run"),
+                ],
+                [
+                    {
+                        **c,
+                        "status": c["status"]
+                        if c.get("status") != "selected"
+                        else ("truncated" if c.get("excluded") == "truncated" else "dropped"),
+                    }
+                    for c in gaps
+                ],
+                "attrition: no usable attempt; in_flight: still queued or running; missing: never attempted; "
+                "dropped: left out by the complete-case filter; truncated: the selected run was truncated and "
+                "truncated runs are excluded.",
+            ),
+        )
+    tables.append(
+        Table(
+            "Sample selection: superseded runs",
+            [
+                ("group", "Group"),
+                ("task", "Task"),
+                ("run_id", "Run"),
+                ("study_name", "Study"),
+                ("outcome", "Outcome"),
+                ("created_at", "Created"),
+                ("reason", "Reason"),
+                ("replaced_by", "Replaced by (selected run)"),
+                ("recorded_attempt", "Newest attempt (unit without a selected run)"),
+            ],
+            selection.get("superseded") or [],
+            "newer_usable_run: an older usable run; unusable_attempt: an attempt without a usable outcome; "
+            "in_flight: an attempt still queued or running. A unit without a usable run has no replacing run; "
+            "its newest attempt is recorded instead.",
+        ),
+    )
+    tables.append(
+        Table(
+            "Sample selection: analyses",
+            [("k", "Item"), ("v", "Value")],
+            [
+                {"k": k, "v": v}
+                for k, v in (
+                    ("Rule", analyses.get("rule")),
+                    (
+                        "Analysis runs: total / contributing / superseded",
+                        " / ".join(
+                            str(analyses.get(f"analysis_runs_{k}", 0)) for k in ("total", "contributing", "superseded")
+                        ),
+                    ),
+                    (
+                        "Tool results: finished / selected / superseded",
+                        " / ".join(
+                            str(analyses.get(f"tool_results_{k}", 0)) for k in ("total", "selected", "superseded")
+                        ),
+                    ),
+                    ("Older measured result preferred (run, tool)", analyses.get("older_measured_preferred")),
+                    (
+                        "Tools with results from several launches",
+                        _join(f"{t['tool']} ({t['launches']})" for t in analyses.get("tools_mixed_launches") or [])
+                        or "none",
+                    ),
+                )
+            ],
+        ),
+    )
+    tables.append(
+        Table(
+            "Sample selection: analyses by launch",
+            [
+                ("launch_id", "Launch"),
+                ("example_name", "Example analysis"),
+                ("analysis_runs", "Analysis runs"),
+                ("results_selected", "Results selected"),
+                ("results_superseded", "Results superseded"),
+            ],
+            analyses.get("by_launch") or [],
+        ),
+    )
+    if analyses.get("by_label"):
+        tables.append(
+            Table(
+                "Sample selection: analyses by round",
+                [
+                    ("label", "Analysis name (run id cut)"),
+                    ("analysis_runs", "Analysis runs"),
+                    ("results_selected", "Results selected"),
+                    ("results_superseded", "Results superseded"),
+                    ("latest_at", "Latest"),
+                ],
+                analyses["by_label"],
+            ),
+        )
+    return tables
+
+
 def _study_tables(data: dict[str, Any]) -> list[Table]:
     tables: list[Table] = []
     protocol = data.get("protocol") or {}
     by_condition = protocol.get("grouped_by") == "condition"
     group, group_word = ("Condition", "condition") if by_condition else ("Model", "model")
+    if by_condition and data.get("selection"):
+        # Cross-study groups: a model, or one treatment of a model, pooled across studies and conditions.
+        group, group_word = ("Group", "group")
     tables.append(
         Table("Protocol", [("k", "Item"), ("v", "Value")], [{"k": k, "v": v} for k, v in _protocol_rows(data)]),
     )
+    if data.get("selection"):
+        tables += _selection_tables(data["selection"])
 
     tables.append(
         Table(
@@ -428,13 +710,18 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
             "generated": r["generated"],
             "evaluated": r["evaluated"],
             "deploy": _rate(r["deploy_rate"]),
+            "deploy_itt": _rate(r.get("deploy_rate_itt")),
             "functional": _rate(r["functional_rate"]),
+            "functional_itt": _rate(r.get("functional_rate_itt")),
             "given": _rate(r["functional_given_deployed"]),
             "pass": r["mean_pass_rate"],
+            "pass_itt": r.get("mean_pass_rate_itt"),
         }
         for r in [*(funnel.get("by_model") or []), {**(funnel.get("overall") or {}), "model": "All"}]
         if r.get("runs") is not None
     ]
+    # Final-assessment reports: the whole-cohort rates next to the conditional ones (older payloads have none).
+    whole_cohort = any("deploy_rate_itt" in r for r in [*(funnel.get("by_model") or []), funnel.get("overall") or {}])
     tables.append(
         Table(
             f"Outcome funnel by {group_word}",
@@ -445,15 +732,28 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 ("generated", "Generated"),
                 ("evaluated", "Evaluated"),
                 ("deploy", "Deployed | evaluated [95% CI]"),
-                ("functional", "All checks passed [95% CI]"),
+                *([("deploy_itt", "Deployed, failures counted as 0 [95% CI]")] if whole_cohort else []),
+                (
+                    "functional",
+                    "All checks passed | evaluated [95% CI]" if whole_cohort else "All checks passed [95% CI]",
+                ),
+                *([("functional_itt", "All checks passed, failures counted as 0 [95% CI]")] if whole_cohort else []),
                 ("given", "All checks passed | deployed"),
-                ("pass", "Mean pass rate"),
+                ("pass", "Mean pass rate | evaluated" if whole_cohort else "Mean pass rate"),
+                *([("pass_itt", "Mean pass rate, failures counted as 0")] if whole_cohort else []),
             ],
             funnel_rows,
             "Rates are over evaluated apps, each app's repeats averaged first (the app is the unit); counts are "
             "runs. Intervals are Wilson 95% over apps when every app's repeats agree, else a cluster bootstrap over "
             "apps (none below 3 apps). Per-group intervals assume independent exchangeable tasks under a fixed "
-            "endpoint and instrument; the convenience cohort does not establish population representativeness.",
+            "endpoint and instrument; the convenience cohort does not establish population representativeness."
+            + (
+                " 'Failures counted as 0' columns are over every usable app: known output/build/start failures "
+                "count as 0 (deployment from final run outcomes, as end-to-end deployment); unknown outcomes are "
+                "left out and reported (Threats to validity)."
+                if whole_cohort
+                else ""
+            ),
         ),
     )
 
@@ -513,16 +813,27 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
     outcomes = data.get("model_outcomes") or []
     if outcomes:
         metrics = [k for k in _METRIC_HEADERS if any(k in o for o in outcomes)]
+        whole_cohort = "deploy_rate_itt" in metrics
+        headers = {**_METRIC_HEADERS, **(_CONDITIONAL_HEADERS if whole_cohort else {})}
         status = outcomes[0].get("status") or {}
         confirmatory = [k for k in metrics if status.get(k) == "confirmatory"]
         reasons = (protocol.get("confirmatory") or {}).get("reasons") or []
         tables.append(
             Table(
                 f"Plan metrics by {group_word}",
-                [("model", group), ("apps", "Apps"), ("runs", "Runs"), *((k, _METRIC_HEADERS[k]) for k in metrics)],
+                [("model", group), ("apps", "Apps"), ("runs", "Runs"), *((k, headers[k]) for k in metrics)],
                 outcomes,
                 "Each app's repeats are averaged first, then the mean over apps; code issues / kLOC is the apps' "
                 "code issues over their non-test LOC. "
+                + (
+                    "'| evaluated': over apps with a measured evaluation only, so known output/build/start failures "
+                    "are left out; 'failures counted as 0': over every usable app, those failures as 0 (unknown "
+                    "outcomes left out and reported). Cost at list price: every run's tokens at its model's "
+                    "OpenRouter list prices (Protocol: cost basis), over every usable app; billed cost is kept for "
+                    "reference and is over generated apps only (an output_invalid run is left out of it). "
+                    if whole_cohort
+                    else ""
+                )
                 + (
                     f"Confirmatory (pre-registered, planned sample): {', '.join(confirmatory)}; the rest exploratory."
                     if confirmatory
@@ -530,6 +841,9 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 ),
             ),
         )
+
+    if protocol.get("cost_basis"):
+        tables.append(_cost_basis_table(protocol["cost_basis"]))
 
     tables.extend(_issue_tables(data, group, group_word))
 
@@ -666,7 +980,13 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         }
         for r in ranking.get("ranking") or []
     ]
-    weights = ", ".join(f"{c['label']} {c['weight']:.2f} ({c['direction']})" for c in ranking.get("criteria") or [])
+    # Final assessment: a criterion configured without a label is named as its column is (conditional ones say so).
+    names = {**_METRIC_HEADERS, **_CONDITIONAL_HEADERS} if protocol.get("ranking_preset") else {}
+    weights = ", ".join(
+        f"{names.get(c.get('key'), c['label']) if c['label'] == c.get('key') else c['label']} {c['weight']:.2f} "
+        f"({c['direction']})"
+        for c in ranking.get("criteria") or []
+    )
     simulation_note = ranking.get("simulation_note") or ""
     tables.append(
         Table(
@@ -684,7 +1004,12 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 ("boot", "Rank 95% (data)"),
             ],
             rank_rows,
-            f"Weights: {weights}. TOPSIS vs WSM Kendall tau = {_fmt(ranking.get('topsis_vs_wsm_kendall_tau'))}. "
+            (
+                f"Criteria: {_PRESETS.get(protocol['ranking_preset'], protocol['ranking_preset'])}. "
+                if protocol.get("ranking_preset")
+                else ""
+            )
+            + f"Weights: {weights}. TOPSIS vs WSM Kendall tau = {_fmt(ranking.get('topsis_vs_wsm_kendall_tau'))}. "
             f"{ranking.get('weights_note', '')} "
             + (((ranking.get("data_uncertainty") or {}).get("design") or {}).get("note") or "")
             + (f" {simulation_note}" if simulation_note else "")
@@ -709,7 +1034,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 f"{comparison_kind} comparison: {family['metric']} ({family['role']}, {family['status']}, "
                 f"{family.get('alternative', 'two-sided')})" + (f" vs baseline {baseline}" if baseline else ""),
                 [
-                    ("condition", "Condition"),
+                    ("condition", group if data.get("selection") else "Condition"),
                     ("n_pairs", "Apps"),
                     ("mean_delta", "Mean delta"),
                     ("mean_delta_ci95", "95% CI (paired apps)"),

@@ -1,3 +1,9 @@
+import {
+  announceWorkspaceChange,
+  reloadHere,
+  workspaceClaim,
+} from "../coauthors/workspace-sync";
+
 export const ALLAUTH_BASE = "/_allauth/browser/v1";
 const API_BASE = "/api";
 
@@ -269,6 +275,9 @@ export async function allauthFetch(
   return res;
 }
 
+/** Set once apiFetch has started leaving a workspace that ended or changed (one navigation only). */
+let leavingWorkspace = false;
+
 export async function apiFetch(
   path: string,
   options: RequestInit = {},
@@ -280,6 +289,10 @@ export async function apiFetch(
   const method = (options.method || "GET").toUpperCase();
   if (method !== "GET" && method !== "HEAD") {
     headers["X-CSRFToken"] = getCsrfToken();
+    // The co-author workspace this tab shows; the server refuses the write if
+    // the session has since moved to another one (see workspace-sync.ts).
+    const claim = workspaceClaim();
+    if (claim !== null) headers["X-Workspace"] = claim;
   }
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -301,6 +314,32 @@ export async function apiFetch(
     // Non-enumerable: the thrown value stays the response body for every
     // existing reader, while `apiErrorStatus` can tell a 404 from an outage.
     Object.defineProperty(error, "httpStatus", { value: res.status });
+    // A co-author's access to the selected workspace ended (removed, or the
+    // owner's account went away): the server already dropped the selection, so
+    // reload into the person's own account and say why there. Requests that
+    // were in flight together can all get this 409; navigate once.
+    // `workspace_changed`: another tab switched the workspace of this session
+    // after this page loaded; reload so the page shows who it now acts as.
+    if (
+      res.status === 409 &&
+      (error.code === "workspace_ended" ||
+        error.code === "workspace_changed") &&
+      typeof window !== "undefined" &&
+      !leavingWorkspace
+    ) {
+      leavingWorkspace = true;
+      if (error.code === "workspace_ended") {
+        try {
+          sessionStorage.setItem("coauthor.ended", "1");
+        } catch {
+          // blocked storage: the reload alone still recovers
+        }
+        announceWorkspaceChange();
+        window.location.assign("/");
+      } else {
+        reloadHere();
+      }
+    }
     throw error;
   }
   return res;

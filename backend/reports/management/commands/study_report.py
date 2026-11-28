@@ -4,8 +4,13 @@ Usage:
     python manage.py study_report --study <uuid> --out results/study.md [--format md|tex|json]
         [--user <email>] [--seed 0] [--include-ai] [--exclude-truncated] [--no-bootstrap] [--save]
 
+    python manage.py study_report --latest-unique --studies <uuid,uuid,...> --out results/final.md
+        [--models <model_id,...>] [--tasks <slug@version|slug,...>] [--common-tasks]
+
 Without ``--study`` the report covers every sample run in scope. Without ``--user`` it covers every
 user's runs (staff view); with ``--study`` and no ``--user`` it acts as the study's owner.
+``--latest-unique`` pools several studies (``--studies``; default: every study in scope) and keeps the
+newest usable run per (model, task) (``reports.services.cohort_selection``).
 ``--save`` also stores it as a Report row, so it appears in the UI.
 """
 
@@ -49,12 +54,30 @@ class Command(BaseCommand):
         parser.add_argument("--no-bootstrap", action="store_true")
         parser.add_argument("--save", action="store_true", help="Also store a Report row")
         parser.add_argument(
+            "--latest-unique",
+            action="store_true",
+            help="Cross-study sample: the newest usable run per (model, task) of the pooled studies",
+        )
+        parser.add_argument("--studies", default=None, help="Comma-separated study ids to pool (--latest-unique)")
+        parser.add_argument("--models", default=None, help="Comma-separated model ids to keep (--latest-unique)")
+        parser.add_argument(
+            "--tasks",
+            default=None,
+            help="Comma-separated task refs (slug@version or slug) to keep (--latest-unique)",
+        )
+        parser.add_argument(
+            "--common-tasks",
+            action="store_true",
+            help="Complete cases: only tasks every group has a selected run for (--latest-unique)",
+        )
+        parser.add_argument(
             "--evidence",
             default=None,
             help="JSON file of completed supplemental experiments bound to these source runs",
         )
 
     def handle(self, *args, **opts):
+        selection = self._selection(opts)
         user = None
         if opts["user"]:
             try:
@@ -85,6 +108,9 @@ class Command(BaseCommand):
             "bootstrap": not opts["no_bootstrap"],
             "eval_suite": opts["eval_suite"],
         }
+        if selection:
+            del config["study_id"]
+            config.update(selection)
         if opts["exclude_truncated"]:
             config["exclude_truncated"] = True
         if opts["evidence"]:
@@ -99,6 +125,10 @@ class Command(BaseCommand):
 
         # The study's name, not its uuid, when the report covers one.
         scope = ((data.get("protocol") or {}).get("study") or {}).get("name")
+        if selection:
+            # The studies the sample draws runs from (the pool can hold studies that contribute none).
+            pooled = len(((data.get("protocol") or {}).get("scope") or {}).get("studies_contributing") or [])
+            scope = f"newest unique runs ({pooled} {'study' if pooled == 1 else 'studies'})"
         scope = scope or opts["study"] or "all apps"
         report = Report(
             report_type=Report.Type.STUDY_REPORT,
@@ -126,3 +156,27 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Wrote {out} ({fmt}); {len(warnings)} validity warning(s)."))
         for v in warnings:
             self.stdout.write(f"  - {v['message']}")
+
+    @staticmethod
+    def _selection(opts) -> dict:
+        """The cross-study selection keys of the config (empty without ``--latest-unique``)."""
+
+        def items(key):
+            return [v.strip() for v in (opts[key] or "").split(",") if v.strip()]
+
+        given = [f"--{k.replace('_', '-')}" for k in ("studies", "models", "tasks", "common_tasks") if opts[k]]
+        if not opts["latest_unique"]:
+            if given:
+                msg = f"{', '.join(given)} need --latest-unique"
+                raise CommandError(msg)
+            return {}
+        if opts["study"]:
+            msg = "--study cannot be combined with --latest-unique; pool studies with --studies"
+            raise CommandError(msg)
+        return {
+            "selection": "latest_unique",
+            "study_ids": items("studies"),
+            "models": items("models"),
+            "tasks": items("tasks"),
+            "common_tasks_only": bool(opts["common_tasks"]),
+        }

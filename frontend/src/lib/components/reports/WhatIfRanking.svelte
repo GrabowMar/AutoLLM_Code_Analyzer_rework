@@ -15,7 +15,7 @@
 	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
-	import { competitionRanks, normalise, topsis, type RankingData } from './ranking';
+	import { competitionRanks, criteriaBasis, criterionLabel, normalise, topsis, type RankingData } from './ranking';
 	import { shortName } from './format';
 
 	interface Props {
@@ -40,13 +40,15 @@
 	);
 	const isReport = $derived(weights.every((w, i) => w === reportWeights()[i]));
 	const moved = $derived(rows.filter((r) => r.before != null && r.before !== r.rank).length);
+	/** What the final-assessment criteria count (null for other rankings and older reports). */
+	const basis = $derived(criteriaBasis(data.criteria));
 </script>
 
 {#snippet caption()}
 	TOPSIS closeness to the ideal model (vector normalisation; 1 = best on every weighted criterion), recomputed in your
 	browser from the report's per-model values. Weights are renormalised to 100%. {#if result.dropped.length}Left out (a
-	criterion not measured): {result.dropped.map(shortName).join(', ')}.{/if} Exploratory: a ranking only orders models by the
-	weights you choose.
+	criterion not measured): {result.dropped.map(shortName).join(', ')}.{/if}{#if basis} {basis}{/if} Exploratory: a ranking only orders
+	models by the weights you choose.
 {/snippet}
 
 <StudyFigure {id} {number} title="What if: re-rank with your own weights" flush {caption}>
@@ -66,7 +68,7 @@
 			{#each data.criteria as c, i (c.key)}
 				<div class="space-y-1">
 					<div class="flex items-baseline justify-between gap-2 text-sm">
-						<label for="{id}-w-{c.key}" class="min-w-0 truncate">{c.label}</label>
+						<label for="{id}-w-{c.key}" class="min-w-0 truncate" title={criterionLabel(c)}>{criterionLabel(c)}</label>
 						<span class="shrink-0 font-mono text-xs tabular-nums">{(shares[i] * 100).toFixed(0)}%</span>
 					</div>
 					<div class="flex items-center gap-2">

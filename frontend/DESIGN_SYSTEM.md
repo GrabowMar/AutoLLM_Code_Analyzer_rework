@@ -413,6 +413,10 @@ this system's tokens and fonts).
 | `WhatIfRanking`     | study reports: TOPSIS re-ranked live from weight sliders (`ranking.ts`, a port of `mcdm.topsis_scores`; the report's weights reproduce its scores), rank moves as arrow + number                                                                                            |
 | `ReportNotebook`    | the Notebook tab: JupyterLite in a same-origin iframe; writes `reports/RPT-…/report.json` + a generated `report.ipynb` (`notebook.ts`) through `window.jupyterapp`, opens it in the app's theme                                                                             |
 | `compare.ts`        | `?compare=<id>`: tables matched by title (model ≡ condition grouping), rows by first cell, signed deltas between same-unit numbers                                                                                                                                          |
+| `ReportSelection`   | study reports pooling experiments (`report_data.selection`): rule, analysed-sample counts (truncated / dropped apart), Figure S1 matrix, notes (unequal task sets + complete-cases regenerate, empty groups, mixed presets), links to the Sample selection tables           |
+| `SelectionMatrix`   | group × task grid (~10 × 30): `SelectionMark` glyphs (shape + hue: solid tested, half failed, dot other, bar left out, cross attrition, ring running, dashed none, corner dot superseded), legend counts that highlight, ARIA grid, roving focus, pinned detail             |
+| `SelectionScope`    | `/reports/create` cross-experiment sample: experiment checklist (search, tick all shown), model / task `FilterMenu`s fed by the ticked designs, complete-cases switch                                                                                                       |
+| `selection.ts`      | pure helpers (unit-tested): deep link `?selection=latest_unique&study_ids=a,b`, config builder, payload normaliser, matrix layout (in-sample counts), cell labels, model labels, table links                                                                                |
 | `catalog.ts`        | report types: label, icon, group (research / platform), purpose, what it needs, what it contains                                                                                                                                                                            |
 | `format.ts`         | pure helpers (`planTable`, `shareOf`, `specItems`, `keyFigures`, `headline`, …), unit-tested                                                                                                                                                                                |
 
@@ -489,3 +493,14 @@ scan-bar loader (`LoadingState` / `.loading-mono`).
 - [ ] prefers-reduced-motion respected (incl. Svelte tweens/transitions)
 - [ ] Responsive: 375px, 768px, 1024px, 1440px
 - [ ] New/changed chart palettes re-run through the dataviz validator
+
+## Workspace banner (co-authors)
+
+- While a co-author works in someone else's workspace, one sticky status strip sits under the app bar
+  (`coauthors/WorkspaceBanner`, `h-10`, `bg-primary/10` over the page background): "Working in {owner}'s
+  workspace", the owner's e-mail from `sm` up, and one action, **Switch to my account**. Never dismissible.
+- The shell sets `data-workspace-banner` and `--workspace-banner-h` on its root; page-level sticky elements
+  (`top-12/16/20`, `top-[4.25rem]`, `top-[4.5rem]`) are pushed below the strip there. Use those offsets for new
+  sticky rails, or add the new one to the shell's list.
+- Settings sections marked `personal` (profile, security, co-authors, MCP, personal tokens) render
+  `users-settings/PersonalSectionLock` in that state instead of their body.

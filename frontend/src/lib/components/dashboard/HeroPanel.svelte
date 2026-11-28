@@ -24,6 +24,7 @@
 	import AsciiField from './AsciiField.svelte';
 	import { getMe } from '$lib/api/users';
 	import { pageTitle } from '$lib/stores/page-title.svelte';
+	import { getWorkspace } from '$lib/stores/workspace.svelte';
 	import type { AnalysisTrends, AnalyzerHealth, StatisticsOverview } from '$lib/api/client';
 
 	interface Props {
@@ -71,11 +72,14 @@
 	// (same check as the sidebar's staffOnly sections).
 	let isStaff = $state(false);
 	let firstName = $state('');
+	const workspace = getWorkspace();
 	onMount(async () => {
 		try {
 			const me = await getMe();
 			isStaff = me.is_staff ?? false;
-			firstName = (me.name || '').trim().split(/\s+/)[0] || me.email.split('@')[0] || '';
+			// A co-author working in someone's workspace gets the owner from /me; greet the real person.
+			const person = workspace.actingAs && workspace.actor ? workspace.actor : me;
+			firstName = (person.name || '').trim().split(/\s+/)[0] || person.email.split('@')[0] || '';
 		} catch {
 			isStaff = false;
 		}

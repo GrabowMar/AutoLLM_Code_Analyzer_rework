@@ -100,6 +100,7 @@ LOCAL_APPS = [
     "backend.execution",
     "backend.integrations",
     "backend.human_eval",
+    "backend.coauthors",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -164,6 +165,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "backend.human_eval.middleware.EvaluatorScopeMiddleware",
+    # Co-authors: resolve API requests to the selected workspace's owner. After the
+    # evaluator gate, so that gate always judges the real person.
+    "backend.coauthors.middleware.WorkspaceMiddleware",
     "backend.users.middleware.RememberMeMiddleware",
     "backend.users.middleware.ForceCsrfCookieMiddleware",
 ]

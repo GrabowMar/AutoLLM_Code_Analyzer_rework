@@ -49,10 +49,24 @@ export interface StudyConditionsConfig {
   exclude_truncated?: boolean;
 }
 
-/** `config` of a study report: a study and/or explicit runs (none: all my apps). */
+/**
+ * `config` of a study report: a study and/or explicit runs (none: all my apps), or, with
+ * `selection: "latest_unique"`, the newest usable run per model and task pooled across experiments
+ * (`study_ids` is the candidate pool; `study_id` is then refused).
+ */
 export interface StudyReportConfig {
   study_id?: string;
   run_ids?: string[];
+  /** Cross-experiment sample: the newest usable run per (model, task) unit. */
+  selection?: "latest_unique";
+  /** Candidate experiments for `selection`; empty or absent = every experiment you can see. */
+  study_ids?: string[];
+  /** `LLMModel.model_id`s to keep; empty or absent = every model. */
+  models?: string[];
+  /** Task refs `slug@version`, or a bare `slug` for any version; empty or absent = every task. */
+  tasks?: string[];
+  /** Complete cases: keep only tasks for which every group has a selected run. */
+  common_tasks_only?: boolean;
   /** One versioned instrument for every app; missing evaluations never fall back to another suite. */
   eval_suite?: string;
   /**
@@ -66,6 +80,176 @@ export interface StudyReportConfig {
    * `with_scratch` counts scratch scripts as app code, `all` counts test code too.
    */
   code_scope?: "app" | "app_named" | "with_scratch" | "all";
+}
+
+/** A unit's state in a cross-experiment selection (`report_data.selection.matrix[].status`). */
+export type SelectionCellStatus =
+  | "selected"
+  | "attrition"
+  | "missing"
+  | "in_flight";
+
+/** Why an attempt of a unit is not in the sample. */
+export type SupersededReason =
+  | "newer_usable_run"
+  | "unusable_attempt"
+  | "in_flight";
+
+export interface SelectionStudy {
+  id: string;
+  name: string;
+  status: string;
+  /** Every run of the experiment visible to the user, before exclusions and filters. */
+  runs_total?: number;
+  runs_considered: number;
+  runs_selected: number;
+}
+
+export interface SelectionCounts {
+  candidates: number;
+  selected: number;
+  superseded: number;
+  attrition_cells: number;
+  missing_cells: number;
+  in_flight_cells: number;
+  pilot_excluded: number;
+  beyond_plan_excluded: number;
+  reference_excluded: number;
+  filtered_out: number;
+  /** Runs of a plan the experiment has since replaced. */
+  superseded_plan_excluded: number;
+  dropped_tasks: number;
+  /** Selected runs left out with their dropped tasks (complete cases). */
+  dropped_runs: number;
+  /** Selected runs left out as truncated (`exclude_truncated`, before complete cases). */
+  truncated_excluded: number;
+}
+
+/** One group of the selection: a model (pooled across experiments and conditions) or one treatment of it. */
+export interface SelectionGroup {
+  group: string;
+  model: string;
+  treatment_hash: string | null;
+  conditions: number[];
+  /** Experiment ids the group's selected runs come from. */
+  studies: string[];
+  /** Budget presets (`ResourcePolicy` refs) of the selected runs. */
+  resource_policies: string[];
+  /** Selected runs per Budget preset ref. */
+  resource_policy_runs?: Record<string, number>;
+  /** Runs in the analysed sample (after the truncation and complete-case exclusions). */
+  tasks_selected: number;
+  tasks_in_scope: number;
+  /** Selected runs per outcome. */
+  outcomes: Record<string, number>;
+  /** Selected runs left out as truncated. */
+  truncated_excluded?: number;
+  /** Selected runs left out with a dropped task. */
+  dropped_runs?: number;
+}
+
+/** Why a selected run is not in the sample. */
+export type SelectionExclusion = "truncated" | "dropped_task";
+
+/** One (group, task) unit of the selection matrix. */
+export interface SelectionCell {
+  group: string;
+  task: string;
+  status: SelectionCellStatus;
+  run_id: string | null;
+  study_id: string | null;
+  study_name: string | null;
+  outcome: string | null;
+  created_at: string | null;
+  /** Attempts of the unit (selected + superseded). */
+  attempts: number;
+  superseded_run_ids: string[];
+  /** False unless the cell's run is in the analysed sample (every unselected unit; a dropped or truncated run). */
+  in_sample?: boolean;
+  /** Why a selected run is left out: truncated, or its task was dropped for complete cases. */
+  excluded?: SelectionExclusion | null;
+}
+
+/** An attempt left out of the sample, and why. */
+export interface SelectionSuperseded {
+  run_id: string;
+  group: string;
+  task: string;
+  study_id: string | null;
+  study_name: string | null;
+  outcome: string | null;
+  usable: boolean | null;
+  created_at: string | null;
+  /** The selected run that replaced it; null when the unit has no selected run. */
+  replaced_by: string | null;
+  /** The unit's newest attempt when it has no selected run (attrition, in flight). */
+  recorded_attempt?: string | null;
+  reason: SupersededReason | string;
+}
+
+export interface SelectionLaunch {
+  /** `AnalysisRun.launch_id`, or "none". */
+  launch_id: string;
+  example_name: string | null;
+  analysis_runs: number;
+  results_selected: number;
+  results_superseded: number;
+}
+
+/** The same breakdown by analysis name without its run suffix ("FINAL static"). */
+export interface SelectionAnalysisLabel {
+  label: string;
+  example_name: string | null;
+  analysis_runs: number;
+  results_selected: number;
+  results_superseded: number;
+}
+
+/** Which analysis results of the selected runs count (per run and tool, the newest measured one). */
+export interface SelectionAnalyses {
+  rule: string;
+  analysis_runs_total: number;
+  analysis_runs_contributing: number;
+  analysis_runs_superseded: number;
+  tool_results_total: number;
+  tool_results_selected: number;
+  tool_results_superseded: number;
+  older_measured_preferred: number;
+  by_launch: SelectionLaunch[];
+  by_label: SelectionAnalysisLabel[];
+  tools_mixed_launches: { tool: string; launches: number }[];
+  tools_mixed_labels: { tool: string; labels: string[] }[];
+}
+
+/** `report_data.selection` of a study report with `selection: "latest_unique"`. */
+export interface ReportSelection {
+  mode: "latest_unique";
+  rule: string;
+  filters: {
+    study_ids: string[];
+    models: string[] | null;
+    tasks: string[] | null;
+    common_tasks_only: boolean;
+    /** Truncated selected runs are left out (sensitivity). */
+    exclude_truncated?: boolean;
+  };
+  studies: SelectionStudy[];
+  counts: Partial<SelectionCounts>;
+  groups: SelectionGroup[];
+  tasks: string[];
+  matrix: SelectionCell[];
+  superseded: SelectionSuperseded[];
+  analyses: SelectionAnalyses | null;
+  /** Tasks every group has a run in the sample for (always computed). */
+  common_tasks: string[];
+  /** Tasks left out by `common_tasks_only` (empty when it is off). */
+  dropped_tasks: string[];
+  /** Per group, the dropped tasks it has no run for, and why (complete cases). */
+  dropped_by_group?: {
+    group: string;
+    tasks: number;
+    reasons: Record<string, number>;
+  }[];
 }
 
 /**
@@ -137,7 +321,24 @@ export interface SummaryItem {
   label: string;
   value: string;
   href?: string;
+  /** The summary key, when the label is not the key humanized. */
+  key?: string;
 }
+
+/** Summary keys whose label is not their humanized key (final-assessment study reports). */
+const SUMMARY_LABELS: Record<string, string> = {
+  ranking_criteria: "Ranking criteria",
+  whole_cohort_pass_rate: "Pass rate, failures counted as 0",
+};
+
+/** The ranking presets a study report records (`protocol.ranking_preset`). */
+export const RANKING_PRESETS: Record<string, string> = {
+  final_assessment:
+    "Final assessment: failures counted as 0, cost at list price",
+  default: "Default: conditional rates, billed cost",
+  report: "Set in the report",
+  analysis_plan: "Pre-registered in the analysis plan",
+};
 
 function summaryValue(key: string, v: unknown): string {
   if (v == null || v === "") return "—";
@@ -243,6 +444,14 @@ export function summaryItems(
         value: v.slice(0, 8),
         href: `/experiments/${v}`,
       });
+      continue;
+    }
+    if (key in SUMMARY_LABELS) {
+      const value =
+        key === "ranking_criteria" && typeof v === "string"
+          ? (RANKING_PRESETS[v] ?? v)
+          : summaryValue(key, v);
+      items.push({ label: SUMMARY_LABELS[key], value, key });
       continue;
     }
     items.push({ label, value: summaryValue(key, v) });

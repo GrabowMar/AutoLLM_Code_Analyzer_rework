@@ -1,4 +1,8 @@
-"""Paired condition comparisons within a completed study without a declared baseline plan."""
+"""Paired condition comparisons within a completed study without a declared baseline plan.
+
+Also the group comparisons of a cross-study sample (``cohort_selection``, one run per group and task): there the
+groups are pooled models and pairs match on the task alone.
+"""
 
 from collections import defaultdict
 from itertools import combinations
@@ -11,16 +15,36 @@ from backend.reports.services.plan_stats import wilcoxon_p
 from backend.statistics.services import inference
 
 MIN_PAIRS = 5
+# The final assessment's tested metrics: the whole-cohort rates (known output/build/start failures counted as 0)
+# and the cost at list price, beside the issue metrics. The conditional rates and the billed cost stay descriptive
+# (model_outcomes, funnel): conditional rates leave known failures out, and billed cost does not compare billing
+# routes, so neither is tested (nor spends the Holm family). ``deploy_rate_itt`` is the per-app end-to-end deployment.
+FINAL_ASSESSMENT_COMPARISONS = (
+    "deploy_rate_itt",
+    "pass_rate_itt",
+    "functional_passed_itt",
+    "unique_issues_per_app",
+    "issues_per_kloc",
+    "security_per_app",
+    "list_cost_per_app",
+)
 
 
-def exploratory_comparisons(rows, study, *, seed=0):
+def exploratory_comparisons(rows, study, *, seed=0, cross_study=False, final_assessment=False):
     """Exploratory effects of recorded condition systems, not isolated model causation.
 
     Pair only matching task/slot units and repeat indices. Repeats are averaged
     inside matched units before inference. All condition pairs and metrics share
     one Holm correction family; missing pairs are reported rather than imputed.
+
+    *cross_study*: *rows* are a cross-study selection (no one study; one run per group and task), so the
+    groups are compared without a study and pairs match on the unit alone (the repeat index of each group's
+    newest run is not a design position).
+
+    *final_assessment*: *rows* carry the final-assessment columns (``study_report.app_table(prices=...)``), so the
+    tested metrics are :data:`FINAL_ASSESSMENT_COMPARISONS` instead of the plan metrics.
     """
-    if study is None or study.status != "completed":
+    if not cross_study and (study is None or study.status != "completed"):
         return None
     from backend.reports.services.study_report import deployment_outcome
     from backend.reports.services.study_report import model_criteria
@@ -37,14 +61,14 @@ def exploratory_comparisons(rows, study, *, seed=0):
             return sum(outcomes) / len(outcomes) if outcomes and None not in outcomes else None
         return model_criteria(items)[metric]
 
-    metrics = [*PLAN_METRICS, "end_to_end_deploy_rate"]
+    metrics = list(FINAL_ASSESSMENT_COMPARISONS) if final_assessment else [*PLAN_METRICS, "end_to_end_deploy_rate"]
     values = {row["run_id"]: {metric: metric_value([row], metric) for metric in metrics} for row in rows}
     families = []
     tested = []
     for metric in metrics:
         cells = {
             group: {
-                (r.get("kind"), r.get("unit_key") or r["run_id"], r.get("repeat_index", 0)): r
+                (r.get("kind"), r.get("unit_key") or r["run_id"], 0 if cross_study else r.get("repeat_index", 0)): r
                 for r in items
                 if values[r["run_id"]][metric] is not None
             }
@@ -116,9 +140,19 @@ def exploratory_comparisons(rows, study, *, seed=0):
             p_sign_adjusted=inference.round_p(sign_adjusted),
             significant=adjusted is not None and adjusted < 0.05,
         )
+    cross_notes = (
+        [
+            (
+                "Cross-study sample: each group's run of a task is its newest usable run, possibly from another "
+                "experiment, condition or time than the other group's; pairs match on the task only."
+            ),
+        ]
+        if cross_study
+        else []
+    )
     return {
         "status": "exploratory",
-        "baseline_condition": "condition A (the right-hand member of B vs A)",
+        "baseline_condition": f"{'group' if cross_study else 'condition'} A (the right-hand member of B vs A)",
         "alpha": 0.05,
         "correction": "holm",
         "multiplicity": "all",
@@ -130,6 +164,7 @@ def exploratory_comparisons(rows, study, *, seed=0):
             f"95% paired-app percentile bootstrap, seed {seed}; not multiplicity-adjusted; absent below 3 apps"
         ),
         "notes": [
+            *cross_notes,
             "Post hoc comparisons of recorded condition systems; they do not isolate causal model effects.",
             "Only shared unit/repeat cells are paired; missing counterparts are excluded with counts.",
             "Wilcoxon p-values are Holm-adjusted jointly across every tested metric and condition pair. "
@@ -141,6 +176,13 @@ def exploratory_comparisons(rows, study, *, seed=0):
             "Signed ranks use the exact conditional sign-flip distribution through 50 nonzero pairs (tied "
             "midranks retained), then a tie/continuity-corrected normal approximation. The null requires "
             "independent symmetric task differences; the sign test does not require symmetry.",
-            "deploy_rate is conditional on measured evaluation; end_to_end_deploy_rate includes known final failures.",
+            (
+                "Final assessment: the rates tested are whole-cohort (known output/build/start failures counted as "
+                "0, unknown outcomes left out) and cost is at list price; the conditional rates and the billed cost "
+                "are reported descriptively but not tested (billed cost does not compare billing routes)."
+                if final_assessment
+                else "deploy_rate is conditional on measured evaluation; end_to_end_deploy_rate includes known final "
+                "failures."
+            ),
         ],
     }

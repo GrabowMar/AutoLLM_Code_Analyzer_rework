@@ -190,10 +190,13 @@ def _validate_config(report_type: str, config: dict[str, Any], user=None) -> Non
 
         criteria_from_config(config["ranking_criteria"])
     if report_type == "study_report":
+        from backend.reports.services.cohort_selection import validate_selection_config
         from backend.reports.services.evaluation_selection import selected_suite
         from backend.reports.services.study_report import ranking_draws
         from backend.reports.services.supplemental_evidence import validate_evidence
 
+        # Cross-study selection keys: types, UUIDs and study ownership (ValueError -> 400).
+        validate_selection_config(config or {}, user)
         ranking_draws(config or {})
         selected_suite(config or {})
         validate_evidence((config or {}).get("supplemental_evidence"))
@@ -224,6 +227,9 @@ def _default_title(report_type: str, config: dict[str, Any]) -> str:  # noqa: PL
     if report_type == "experiment_report":
         return f"Study conditions: {config.get('study_id', '?')}"
     if report_type == "study_report":
+        if config.get("selection") == "latest_unique":
+            studies = len(config.get("study_ids") or [])
+            return f"Study report: newest unique runs ({f'{studies} studies' if studies else 'all studies'})"
         scope = config.get("study_id") or ("selected runs" if config.get("run_ids") else "all my apps")
         return f"Study report: {scope}"
     return "Report"
@@ -310,6 +316,29 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
             "leader": top[0] if len(top) == 1 else None,
             "tied_leaders": len(top) if len(top) > 1 else 0,
             "warnings": sum(1 for v in data.get("validity") or [] if v.get("level") == "warning"),
+            # Final-assessment reports: which criteria ranked, and the whole-cohort pass rate (failures as 0).
+            **(
+                {
+                    "ranking_criteria": data["protocol"]["ranking_preset"],
+                    "whole_cohort_pass_rate": funnel.get("mean_pass_rate_itt"),
+                }
+                if (data.get("protocol") or {}).get("ranking_preset")
+                else {}
+            ),
+            # Cross-study reports: how many groups, analysed tasks and selected runs the newest-unique sample has
+            # (complete cases analyse the in-scope tasks minus the dropped ones).
+            **(
+                {
+                    "selection": {
+                        "groups": len(data["selection"].get("groups") or []),
+                        "tasks": len(data["selection"].get("tasks") or [])
+                        - len(data["selection"].get("dropped_tasks") or []),
+                        "selected": (data["selection"].get("counts") or {}).get("selected", 0),
+                    },
+                }
+                if data.get("selection")
+                else {}
+            ),
         }
     return {}
 

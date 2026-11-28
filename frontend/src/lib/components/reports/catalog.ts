@@ -56,7 +56,8 @@ export const REPORT_TYPES: ReportTypeInfo[] = [
     needs: "",
     contents: [
       "Protocol, execution provenance and task requirements",
-      "Outcome funnel and plan metrics by model",
+      "Sample selection when pooling experiments: newest unique run per model and task",
+      "Outcome funnel and plan metrics by model; pooled experiments add rates with failures counted as 0 and cost at list price",
       "Issues by model, task and tool (deduplicated)",
       "Dependency advisories and manifest findings",
       "Tool overlap and issue types",

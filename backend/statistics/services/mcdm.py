@@ -26,6 +26,8 @@ Missing criterion values drop the model from the ranking (reported), never
 imputed. Criteria must not share a denominator in opposite directions (for
 example "LOC per app" as a benefit next to "issues per kLOC" as a cost
 rewards verbosity twice); :data:`DEFAULT_CRITERIA` avoid that.
+:data:`FINAL_ASSESSMENT_CRITERIA` keep their weights and directions with
+whole-cohort rates and the cost at list prices (the cross-study default).
 """
 
 from __future__ import annotations
@@ -73,6 +75,21 @@ DEFAULT_CRITERIA: tuple[Criterion, ...] = (
     Criterion("security_per_app", "Security issues / app", "cost", 0.15),
     Criterion("cost_per_app", "Cost / app (USD)", "cost", 0.10),
 )
+
+# The final assessment's criteria (a cross-study report's default): the same weights and directions, but rates
+# over the whole usable cohort (known output/build/start failures count as 0 instead of being left out) and the
+# generation cost at public list prices (comparable across billing routes) instead of the billed cost.
+FINAL_ASSESSMENT_CRITERIA: tuple[Criterion, ...] = (
+    Criterion("deploy_rate_itt", "Deploy rate, failures counted as 0", "benefit", 0.30),
+    Criterion("pass_rate_itt", "Pass rate, failures counted as 0", "benefit", 0.30),
+    Criterion("issues_per_kloc", "Code issues / kLOC", "cost", 0.15),
+    Criterion("security_per_app", "Security issues / app", "cost", 0.15),
+    Criterion("list_cost_per_app", "Cost / app at list price (USD)", "cost", 0.10),
+)
+CRITERIA_PRESETS: dict[str, tuple[Criterion, ...]] = {
+    "default": DEFAULT_CRITERIA,
+    "final_assessment": FINAL_ASSESSMENT_CRITERIA,
+}
 
 
 def criteria_from_config(config: list[dict[str, Any]] | None) -> tuple[Criterion, ...]:

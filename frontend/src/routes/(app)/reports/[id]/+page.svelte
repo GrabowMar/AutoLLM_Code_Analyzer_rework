@@ -8,7 +8,9 @@
 	// Two views (`?view=`): Report, and Notebook (JupyterLite in the browser with the report loaded;
 	// kept mounted once opened so Python keeps running across tab switches). `?compare=<report id>`
 	// sets another completed report of the same type beside this one: deltas under every number.
-	// Study reports with a ranking get a live what-if ranking right after the ranking table.
+	// Study reports with a ranking get a live what-if ranking right after the ranking table; study
+	// reports built from the newest unique runs across experiments open with their sample selection
+	// (rule, counts, group × task matrix, superseded attempts, analysis results that count).
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
@@ -48,6 +50,8 @@
 	import ReportContents from '$lib/components/reports/ReportContents.svelte';
 	import ReportNotebook from '$lib/components/reports/ReportNotebook.svelte';
 	import WhatIfRanking from '$lib/components/reports/WhatIfRanking.svelte';
+	import ReportSelection from '$lib/components/reports/ReportSelection.svelte';
+	import { reportSelection, selectionTableLinks } from '$lib/components/reports/selection';
 	import { EXPORT_FORMATS } from '$lib/components/reports/catalog';
 	import { ACTIVE_STATUSES, keyFigures, reportAccession, titleParts } from '$lib/components/reports/format';
 	import { matchTable } from '$lib/components/reports/compare';
@@ -189,19 +193,20 @@
 		}
 	}
 
-	// Regenerate: the same type, config, title and description, as a new report.
+	// Regenerate: the same type, config, title and description, as a new report (or, from the sample
+	// selection's note, the same report restricted to complete cases).
 	let regenerating = $state(false);
-	async function regenerate() {
+	async function regenerate(patch?: { config: Record<string, unknown>; title: string; message: string }) {
 		if (!report) return;
 		regenerating = true;
 		try {
 			const r = await generateReport({
 				report_type: report.report_type,
-				config: report.config,
-				title: report.title,
+				config: patch ? { ...report.config, ...patch.config } : report.config,
+				title: patch?.title ?? report.title,
 				description: report.description || undefined
 			});
-			toast.success('Generating a new copy of this report');
+			toast.success(patch?.message ?? 'Generating a new copy of this report');
 			await goto(`/reports/${r.report_id}`);
 			loading = true;
 			doc = null;
@@ -224,6 +229,16 @@
 	);
 	const active = $derived(!!report && ACTIVE_STATUSES.includes(report.status));
 	const ranking = $derived(report?.report_type === 'study_report' ? rankingData(report.report_data) : null);
+	const selection = $derived(report?.report_type === 'study_report' ? reportSelection(report.report_data) : null);
+	function completeCases() {
+		if (!report) return;
+		const title = /\(complete cases\)$/.test(report.title) ? report.title : `${report.title} (complete cases)`;
+		void regenerate({ config: { common_tasks_only: true }, title, message: 'Generating the complete-cases version of this report' });
+	}
+	// The server's "Sample selection" tables stay in the Tables section (toolbar, numbering); the section links to them.
+	const selectionTables = $derived(
+		selection && doc ? selectionTableLinks(doc.tables).map((t) => ({ id: anchor(t.index), number: t.index + 1, label: t.label })) : []
+	);
 	/** The what-if panel follows the report's ranking table (or ends the tables when there is none). */
 	const rankingAt = $derived(ranking && doc ? doc.tables.findIndex((t) => /^ranking\b/i.test(t.title)) : -1);
 </script>
@@ -262,7 +277,7 @@
 				<Button variant="outline" size="sm" onclick={load} aria-label="Refresh" title="Refresh">
 					<RefreshCw class="size-3.5" />
 				</Button>
-				<Button variant="outline" size="sm" onclick={regenerate} disabled={regenerating || active} title="Generate a new copy with the same settings">
+				<Button variant="outline" size="sm" onclick={() => regenerate()} disabled={regenerating || active} title="Generate a new copy with the same settings">
 					{#if regenerating}<LoaderCircle class="size-3.5 animate-spin motion-reduce:animate-none" />{:else}<RotateCcw class="size-3.5" />{/if}
 					Regenerate
 				</Button>
@@ -333,7 +348,7 @@
 				{#snippet action()}
 					<div class="flex flex-wrap justify-center gap-2">
 						<Button size="sm" variant="outline" href="/reports/create?type={report?.report_type}">New report of this type</Button>
-						<Button size="sm" onclick={regenerate} disabled={regenerating}><RotateCcw class="size-3.5" />Regenerate</Button>
+						<Button size="sm" onclick={() => regenerate()} disabled={regenerating}><RotateCcw class="size-3.5" />Regenerate</Button>
 					</div>
 				{/snippet}
 			</EmptyState>
@@ -344,6 +359,10 @@
 						<SectionHeading id="rk-heading" size="sm" title="Key figures" />
 						<ReportKeyFigures {figures} previous={previousFigures} previousLabel={otherLabel} />
 					</section>
+				{/if}
+
+				{#if selection}
+					<ReportSelection {selection} tableLinks={selectionTables} onCompleteCases={completeCases} busy={regenerating} />
 				{/if}
 
 				<section class="space-y-3" aria-labelledby="rt-heading">

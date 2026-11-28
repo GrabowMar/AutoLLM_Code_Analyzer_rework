@@ -11,6 +11,7 @@ import GitBranch from "@lucide/svelte/icons/git-branch";
 import Bot from "@lucide/svelte/icons/bot";
 import Bell from "@lucide/svelte/icons/bell";
 import Terminal from "@lucide/svelte/icons/terminal";
+import Users from "@lucide/svelte/icons/users";
 
 export type SettingsGroup = "account" | "preferences" | "connections";
 
@@ -22,6 +23,8 @@ export interface SettingsSection {
   icon: Component;
   /** Extra words the settings search matches. */
   keywords?: string;
+  /** Belongs to the signed-in person's own account: locked while working in someone else's workspace. */
+  personal?: true;
 }
 
 export const SETTINGS_GROUPS: {
@@ -50,6 +53,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "account",
     icon: User,
     keywords: "name display email avatar",
+    personal: true,
   },
   {
     id: "security",
@@ -58,6 +62,17 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "account",
     icon: Lock,
     keywords: "password sign in login",
+    personal: true,
+  },
+  {
+    id: "coauthors",
+    label: "Co-authors",
+    description:
+      "Invite people to work in your workspace. They can see and do everything you can.",
+    group: "account",
+    icon: Users,
+    keywords: "share invite collaborator team access link workspace",
+    personal: true,
   },
   {
     id: "appearance",
@@ -119,6 +134,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "connections",
     icon: Bot,
     keywords: "claude chatgpt cursor vscode assistant model context protocol",
+    personal: true,
   },
   {
     id: "notifications",
@@ -137,6 +153,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "connections",
     icon: Terminal,
     keywords: "api bearer ci scripts rest",
+    personal: true,
   },
 ];
 

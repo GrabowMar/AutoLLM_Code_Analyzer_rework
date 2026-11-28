@@ -37,6 +37,27 @@ PLAN_METRICS: dict[str, str] = {
     "cost_per_app": "Generation cost per app (USD)",
 }
 
+# Whole-cohort (intention-to-treat) outcomes and the comparable cost: the final assessment's ranking criteria
+# (``mcdm.FINAL_ASSESSMENT_CRITERIA``). A study report computes them for a cross-study sample and whenever its
+# ranking names one; they are not plan metrics (a plan cannot declare them).
+FINAL_ASSESSMENT_METRICS: dict[str, str] = {
+    "deploy_rate_itt": (
+        "Share of usable apps that deployed, known output/build/start failures counted as 0 (final run outcomes, as "
+        "the funnel's end-to-end deployment); unknown outcomes are left out and reported"
+    ),
+    "pass_rate_itt": (
+        "Mean functional pass rate over usable apps, known output/build/start failures counted as 0; apps without a "
+        "measured grade and without a known failure are left out and reported"
+    ),
+    "functional_passed_itt": (
+        "Share of usable apps passing every functional check, known output/build/start failures counted as 0"
+    ),
+    "list_cost_per_app": (
+        "Generation cost per app at public list prices (USD): every run's tokens priced, cache-aware, by the model's "
+        "OpenRouter catalog row or its catalog twin (protocol.cost_basis); unknown when the model has no list price"
+    ),
+}
+
 
 def declared_metrics(plan: dict[str, Any]) -> set[str]:
     """Metrics a plan makes confirmatory (primary, secondary, research questions)."""

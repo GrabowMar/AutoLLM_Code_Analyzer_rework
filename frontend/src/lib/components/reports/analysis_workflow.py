@@ -16,9 +16,50 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import ListedColormap
+from matplotlib.colors import to_rgb
+from matplotlib.patches import Patch
 
-WORKFLOW_VERSION = 4
+WORKFLOW_VERSION = 5
 SEVERITIES = ("critical", "high", "medium", "low", "info")
+# Cross-experiment selection cells as drawn: (code, legend label, colour-blind-safe colour, letter).
+SELECTION_CATEGORIES = (
+    ("tested", "Selected, tested", "#0072B2", "T"),
+    ("failed", "Selected, output invalid / build or start failed", "#D55E00", "F"),
+    ("selected", "Selected, outcome not recorded", "#56B4E9", "S"),
+    ("excluded", "Selected, left out: task dropped or truncated", "#999999", "L"),
+    ("attrition", "Attrition: no usable run", "#E69F00", "A"),
+    ("in_flight", "Still running: not in the sample", "#CC79A7", "R"),
+    ("missing", "No attempt", "#EEEEEE", "-"),
+)
+SELECTION_MATRIX_COLUMNS = (
+    "group",
+    "task",
+    "status",
+    "category",
+    "in_sample",
+    "excluded",
+    "outcome",
+    "run_id",
+    "study_id",
+    "study_name",
+    "created_at",
+    "attempts",
+    "superseded_run_ids",
+)
+SELECTION_SUPERSEDED_COLUMNS = (
+    "run_id",
+    "group",
+    "task",
+    "study_id",
+    "study_name",
+    "outcome",
+    "usable",
+    "created_at",
+    "replaced_by",
+    "recorded_attempt",
+    "reason",
+)
 
 
 def _mean(values):
@@ -216,6 +257,95 @@ def model_observations(data):
     return params.merge(means, on="model", how="inner", validate="one_to_one")
 
 
+def selection_in_sample(cell, dropped=frozenset()):
+    """Whether the unit's run is in the analysed sample (payloads without ``in_sample``: not on a dropped task)."""
+    if not cell or cell.get("status") != "selected":
+        return False
+    if isinstance(cell.get("in_sample"), bool):
+        return cell["in_sample"]
+    return cell.get("task") not in dropped
+
+
+def selection_category(cell, dropped=frozenset()):
+    """Drawn category of one selection unit; a unit without a row is a missing attempt.
+
+    A selected run left out of the sample (its task dropped for complete cases, or truncated with truncated
+    runs excluded) is ``excluded``, so the selected categories add up to the analysed sample.
+    """
+    if not cell:
+        return "missing"
+    status = cell.get("status")
+    if status == "selected":
+        if not selection_in_sample(cell, dropped):
+            return "excluded"
+        outcome = cell.get("outcome")
+        if outcome == "tested":
+            return "tested"
+        return "failed" if outcome in {"output_invalid", "build_fail", "start_fail"} else "selected"
+    return status if status in {"attrition", "in_flight"} else "missing"
+
+
+def selection_tables(selection):
+    """Long matrix, wide group x task categories and superseded attempts of a cross-experiment selection.
+
+    Groups and tasks keep the report's order; units naming a group or task the lists lack are appended,
+    and a unit the matrix omits is a missing attempt rather than a dropped row.
+    """
+    matrix = [cell for cell in selection.get("matrix") or [] if isinstance(cell, dict)]
+    groups = list(
+        dict.fromkeys(
+            [g.get("group") for g in selection.get("groups") or [] if isinstance(g, dict)]
+            + [cell.get("group") for cell in matrix],
+        ),
+    )
+    tasks = list(
+        dict.fromkeys(
+            list(selection.get("tasks") or [])
+            + list(selection.get("dropped_tasks") or [])
+            + [cell.get("task") for cell in matrix],
+        ),
+    )
+    units = {(cell.get("group"), cell.get("task")): cell for cell in matrix}
+    dropped = frozenset(selection.get("dropped_tasks") or [])
+    long_rows = []
+    for group in groups:
+        for task in tasks:
+            cell = units.get((group, task)) or {}
+            in_sample = selection_in_sample(cell, dropped)
+            excluded = cell.get("excluded")
+            if excluded is None and cell.get("status") == "selected" and not in_sample:
+                excluded = "dropped_task"
+            long_rows.append(
+                {
+                    "group": group,
+                    "task": task,
+                    "status": cell.get("status") or "missing",
+                    "category": selection_category(cell, dropped),
+                    "in_sample": in_sample,
+                    "excluded": excluded,
+                    "outcome": cell.get("outcome"),
+                    "run_id": cell.get("run_id"),
+                    "study_id": cell.get("study_id"),
+                    "study_name": cell.get("study_name"),
+                    "created_at": cell.get("created_at"),
+                    "attempts": cell.get("attempts") or 0,
+                    "superseded_run_ids": ";".join(cell.get("superseded_run_ids") or []),
+                },
+            )
+    long = pd.DataFrame(long_rows, columns=list(SELECTION_MATRIX_COLUMNS))
+    wide = (
+        long.pivot(index="group", columns="task", values="category")  # noqa: PD010 - duplicate units must fail
+        .reindex(index=groups, columns=tasks)
+        .fillna("missing")
+        if not long.empty
+        else pd.DataFrame()
+    )
+    superseded = pd.DataFrame(
+        [r for r in selection.get("superseded") or [] if isinstance(r, dict)],
+    ).reindex(columns=list(SELECTION_SUPERSEDED_COLUMNS))
+    return long, wide, superseded
+
+
 def task_oracle_evidence(protocol):
     """Describe task-specific control records without treating their presence as proof of correctness."""
     tasks = (protocol.get("requirements") or {}).get("tasks") or []
@@ -273,6 +403,80 @@ def task_oracle_evidence(protocol):
         "records": entries,
         "scope_checks": scope_checks,
     }
+
+
+def selection_methods(selection):
+    """Methods paragraph for a cross-experiment selection; nothing for a single-experiment report."""
+    if not isinstance(selection, dict) or not (selection.get("matrix") or selection.get("groups")):
+        return []
+    counts = selection.get("counts") or {}
+    filters = selection.get("filters") or {}
+    analyses = selection.get("analyses") or {}
+    return [
+        "## Sample selection",
+        "",
+        (selection.get("rule") or "Newest usable run per group and task across the pooled experiments.")
+        + f" Pooled experiments: {len(selection.get('studies') or [])}. "
+        f"Candidate runs: {counts.get('candidates')}; runs in the analysed sample: {counts.get('selected')}; "
+        f"superseded attempts: {counts.get('superseded')}; attrition units: {counts.get('attrition_cells')}; "
+        f"units without an attempt: {counts.get('missing_cells')}; "
+        f"units still running: {counts.get('in_flight_cells')}"
+        + (
+            f"; selected runs left out as truncated (sensitivity analysis): {counts.get('truncated_excluded')}"
+            if counts.get("truncated_excluded")
+            else ""
+        )
+        + (
+            f"; selected runs left out with dropped tasks: {counts.get('dropped_runs')}"
+            if counts.get("dropped_runs")
+            else ""
+        )
+        + ". "
+        f"Model filter: {filters.get('models') or 'all'}; task filter: {filters.get('tasks') or 'all'}; "
+        f"complete cases: {'on' if filters.get('common_tasks_only') else 'off'}"
+        + (f" (dropped tasks: {', '.join(selection['dropped_tasks'])})" if selection.get("dropped_tasks") else "")
+        + ". A group pools one model across experiments and conditions only while its runs share one treatment; "
+        "a newer unusable attempt never replaces a usable run, and unusable or unfinished units are attrition, not "
+        "zeros. Without complete cases, groups can cover different task sets, so group means and rankings then "
+        "compare unequal task sets. "
+        + (analyses.get("rule") or "")
+        + " The coverage figure, selection_matrix.csv and selection_superseded.csv list every unit and every "
+        "attempt left out.",
+        "",
+    ]
+
+
+def final_assessment_methods(data):
+    """Methods paragraph for the whole-cohort rates and the cost at list price; nothing when the report has none."""
+    protocol = data.get("protocol") or {}
+    basis = protocol.get("cost_basis") or {}
+    outcomes = data.get("model_outcomes") or []
+    if not basis and not any("deploy_rate_itt" in r for r in outcomes):
+        return []
+    preset = protocol.get("ranking_preset")
+    criteria = [c.get("key") for c in (data.get("ranking") or {}).get("criteria") or []]
+    return [
+        "## Whole-cohort rates and cost at list price",
+        "",
+        (
+            "Conditional rates (deploy_rate, pass_rate) are over apps with a measured evaluation, so known "
+            "output, build and start failures are left out of them. The whole-cohort rates (deploy_rate_itt, "
+            "pass_rate_itt, functional_passed_itt) are over every usable app with those failures counted as 0; "
+            "deployment uses final run outcomes as the end-to-end deployment does, and runs whose outcome or grade "
+            "is genuinely unknown are left out and reported, never counted as failures."
+        ),
+        "",
+        (
+            f"Cost at list price (list_cost_per_app): {basis.get('source', 'see protocol.json')}. "
+            f"{basis.get('formula', '')} Per-model prices are in cost_basis_per_model.csv "
+            f"({basis.get('unit', 'USD per million tokens')}). " + " ".join(basis.get("notes") or [])
+        )
+        if basis
+        else "",
+        "",
+        f"Ranking criteria: {preset or 'as recorded'} ({', '.join(c for c in criteria if c) or 'none recorded'}).",
+        "",
+    ]
 
 
 def run_report_workflow(report, output_dir="report-output"):
@@ -443,7 +647,7 @@ def run_report_workflow(report, output_dir="report-output"):
                             table(f"{section}_{key}", pd.json_normalize(rows))
         for i, item in enumerate(report.get("tables") or [], 1):
             table(f"display_table_{i:02d}", pd.DataFrame(item.get("rows") or [], columns=item.get("columns")))
-        for key in ("execution", "requirements"):
+        for key in ("execution", "requirements", "cost_basis"):
             section = (data.get("protocol") or {}).get(key) or {}
             if section:
                 write_json(f"{key}.json", section)
@@ -456,6 +660,102 @@ def run_report_workflow(report, output_dir="report-output"):
 
     step("data_tables", export_tables)
 
+    def sample_selection():
+        selection = data.get("selection")
+        if not isinstance(selection, dict) or not (selection.get("matrix") or selection.get("groups")):
+            return "No cross-experiment selection in this report (one experiment or all apps)."
+        write_json("selection.json", selection)
+        long, wide, superseded = selection_tables(selection)
+        table("selection_matrix", long)
+        table("selection_superseded", superseded)
+        for key, name in (("groups", "selection_groups"), ("studies", "selection_studies")):
+            rows = [r for r in selection.get(key) or [] if isinstance(r, dict)]
+            if rows:
+                table(name, pd.json_normalize(rows))
+        analyses = selection.get("analyses") or {}
+        for key, name in (
+            ("by_launch", "selection_analyses_by_launch"),
+            # Analysis rounds by name: what tells rounds apart when they were launched without a launch id.
+            ("by_label", "selection_analyses_by_label"),
+            ("tools_mixed_labels", "selection_tools_mixed_labels"),
+            ("tools_mixed_launches", "selection_tools_mixed_launches"),
+        ):
+            rows = [r for r in analyses.get(key) or [] if isinstance(r, dict)]
+            if rows:
+                table(name, pd.json_normalize(rows))
+        blocking = [r for r in selection.get("dropped_by_group") or [] if isinstance(r, dict)]
+        if blocking:
+            table("selection_dropped_by_group", pd.json_normalize(blocking))
+        if wide.empty:
+            return "The selection has no group or task in scope; tables exported without a coverage figure."
+        table("selection_coverage", wide.reset_index())
+        codes = {code: i for i, (code, *_rest) in enumerate(SELECTION_CATEGORIES)}
+        values = wide.apply(lambda column: column.map(codes)).to_numpy(float)
+        palette = ListedColormap([colour for _code, _label, colour, _letter in SELECTION_CATEGORIES])
+        dropped = set(selection.get("dropped_tasks") or [])
+        fig, ax = plt.subplots(
+            figsize=(max(8, 0.34 * len(wide.columns) + 4), max(3, 0.42 * len(wide) + 2.4)),
+        )
+        ax.imshow(values, cmap=palette, vmin=-0.5, vmax=len(SELECTION_CATEGORIES) - 0.5, aspect="auto")
+        ax.set_xticks(
+            range(len(wide.columns)),
+            [f"{task} (dropped)" if task in dropped else task for task in wide.columns],
+            rotation=60,
+            ha="right",
+            fontsize=7,
+        )
+        ax.set_yticks(range(len(wide)), wide.index, fontsize=8)
+        ax.set_xticks(np.arange(-0.5, len(wide.columns)), minor=True)
+        ax.set_yticks(np.arange(-0.5, len(wide)), minor=True)
+        ax.grid(which="minor", color="white", linewidth=1)
+        ax.tick_params(which="minor", length=0)
+        units = {(r["group"], r["task"]): r for r in long.to_dict("records")}
+        if wide.size <= 900:
+            letters = {code: letter for code, _label, _colour, letter in SELECTION_CATEGORIES}
+            for i, group in enumerate(wide.index):
+                for j, task in enumerate(wide.columns):
+                    code = wide.iloc[i, j]
+                    colour = to_rgb(palette(codes[code]))
+                    luminance = float(np.dot(colour, [0.2126, 0.7152, 0.0722]))
+                    older = "*" if units.get((group, task), {}).get("superseded_run_ids") else ""
+                    ax.text(
+                        j,
+                        i,
+                        letters[code] + older,
+                        ha="center",
+                        va="center",
+                        fontsize=6,
+                        color="white" if luminance < 0.5 else "black",
+                    )
+        counts = long["category"].value_counts()
+        handles = [
+            Patch(facecolor=colour, edgecolor="#666666", label=f"{letter}  {label} ({int(counts.get(code, 0))})")
+            for code, label, colour, letter in SELECTION_CATEGORIES
+        ]
+        ax.legend(
+            handles=handles,
+            fontsize=7,
+            title="* older attempts superseded",
+            title_fontsize=7,
+            loc="upper left",
+            bbox_to_anchor=(1.01, 1),
+        )
+        studies = len(selection.get("studies") or [])
+        ax.set_title(
+            f"Sample coverage: newest usable run per group and task ({studies} experiments pooled)"
+            + ("\nComplete cases: dropped tasks are labelled" if dropped else "")
+            + (
+                f"\n{int(counts.get('excluded', 0))} selected run(s) left out (L): not in the analysed sample"
+                if counts.get("excluded", 0)
+                else ""
+            ),
+            fontsize=10,
+        )
+        figure("selection_coverage", fig)
+        return None
+
+    step("sample_selection", sample_selection)
+
     def funnel():
         rows = (data.get("funnel") or {}).get("by_model") or []
         if not rows:
@@ -465,6 +765,8 @@ def run_report_workflow(report, output_dir="report-output"):
         metrics = [("generation_rate", "Generated / usable outcomes")]
         if any(r.get("end_to_end_deploy_rate") is not None for r in rows):
             metrics.append(("end_to_end_deploy_rate", "Observed final deployment / usable outcomes"))
+        if any(r.get("deploy_rate_itt") is not None for r in rows):
+            metrics.append(("deploy_rate_itt", "Deployment, failures counted as 0 / usable outcomes"))
         metrics.extend(
             [("deploy_rate", "Conditional deployment / evaluated"), ("functional_rate", "All checks pass / graded")],
         )
@@ -521,11 +823,17 @@ def run_report_workflow(report, output_dir="report-output"):
         outcomes = _frame(data.get("model_outcomes"))
         if outcomes.empty or "model" not in outcomes:
             return "No group outcomes were recorded."
+        # Next to the whole-cohort rates and the cost at list price, the conditional rates and the billed cost
+        # say what they are; reports without them keep their labels.
+        final = any(k in outcomes for k in ("deploy_rate_itt", "pass_rate_itt", "list_cost_per_app"))
         metrics = {
-            "pass_rate": ("Functional pass rate", False),
+            "pass_rate": ("Functional pass rate | measured evaluation" if final else "Functional pass rate", False),
+            "pass_rate_itt": ("Pass rate, failures counted as 0", False),
             "deploy_rate": ("Deployment | measured evaluation", False),
+            "deploy_rate_itt": ("Deployment, failures counted as 0", False),
             "issues_per_kloc": ("Inverse issue density", True),
-            "cost_per_app": ("Inverse cost", True),
+            "cost_per_app": ("Inverse billed cost" if final else "Inverse cost", True),
+            "list_cost_per_app": ("Inverse cost at list price", True),
         }
         normalized = pd.DataFrame(index=outcomes["model"])
         outcomes = outcomes.set_index("model")
@@ -1005,6 +1313,11 @@ def run_report_workflow(report, output_dir="report-output"):
                 "pass_rate": "functional pass fraction / graded apps",
                 "functional_passed": "all-checks-pass rate / graded apps",
                 "end_to_end_deploy_rate": "observed final deployment / usable apps",
+                "deploy_rate_itt": "deployment, failures counted as 0 / usable apps",
+                "pass_rate_itt": "functional pass fraction, failures counted as 0",
+                "functional_passed_itt": "all-checks-pass rate, failures counted as 0 / usable apps",
+                "cost_per_app": "billed cost per app (USD)",
+                "list_cost_per_app": "cost per app at list price (USD)",
             }.get(metric, metric)
             ax.set_xlabel(f"Mean paired change in {metric_label}: {orientation}")
             kind = "Declared" if declared else "Exploratory"
@@ -1276,13 +1589,16 @@ def run_report_workflow(report, output_dir="report-output"):
             "Plotted source-size and complexity summaries cover non-missing measurements of valid generated "
             "outputs, matching code_metrics.json. The app export's collected_loc, collected_loc_backend and "
             "collected_loc_frontend columns also retain collected trees from invalid outputs: a recorded empty "
-            "tree contributes zero there, while an uncollected tree remains missing. Cost summaries are also "
-            "conditional on generated apps, matching the saved ranking criteria. "
+            "tree contributes zero there, while an uncollected tree remains missing. Billed cost summaries "
+            "(cost_per_app) are also conditional on generated apps; the cost at list price, where recorded, covers "
+            "every usable run (failed runs spent tokens too). "
             "Issue summaries cover measured analysis results. "
             "Code issue density is deduplicated model-code issues per thousand model-scope source lines. "
             f"The saved scope setting is `{(protocol.get('settings') or {}).get('code_scope', 'see protocol.json')}`. "
             "Dependency advisories, runtime findings and test-code issues are separated in the raw report tables.",
             "",
+            *selection_methods(data.get("selection")),
+            *final_assessment_methods(data),
             "## Statistical status and uncertainty",
             "",
             "Evaluation selection: "
@@ -1454,10 +1770,19 @@ def run_report_workflow(report, output_dir="report-output"):
             {
                 "check": "cost_interpretation",
                 "status": "warning"
-                if any(r.get("cost_per_app") == 0 for r in data.get("model_outcomes") or [])
+                if any(
+                    r.get("cost_per_app") == 0 and r.get("list_cost_per_app") is None
+                    for r in data.get("model_outcomes") or []
+                )
                 else "info",
                 "detail": "Recorded zero costs may reflect subscription or accounting policy, not free generation. "
-                "Catalog/list prices are not necessarily realized marginal costs; inspect pricing provenance.",
+                "Catalog/list prices are not necessarily realized marginal costs; inspect pricing provenance."
+                + (
+                    " The comparable cost at list price (list_cost_per_app) prices every run alike; its basis is in "
+                    "cost_basis.json and cost_basis_per_model.csv."
+                    if protocol.get("cost_basis")
+                    else ""
+                ),
             },
             {
                 "check": "supplemental_feature_validation",
@@ -1499,6 +1824,29 @@ def run_report_workflow(report, output_dir="report-output"):
                 ),
             },
         ]
+        selection = data.get("selection")
+        if isinstance(selection, dict) and (selection.get("matrix") or selection.get("groups")):
+            selection_counts = selection.get("counts") or {}
+            groups = [g for g in selection.get("groups") or [] if isinstance(g, dict)]
+            task_counts = sorted({g.get("tasks_selected") for g in groups if g.get("tasks_selected") is not None})
+            unequal = len(task_counts) > 1 and not (selection.get("filters") or {}).get("common_tasks_only")
+            records.append(
+                {
+                    "check": "sample_selection",
+                    "status": "warning" if unequal else "recorded",
+                    "detail": f"Newest usable run per group and task across {len(selection.get('studies') or [])} "
+                    f"experiments; selected={selection_counts.get('selected')}, "
+                    f"superseded={selection_counts.get('superseded')}, "
+                    f"attrition_cells={selection_counts.get('attrition_cells')}, "
+                    f"missing_cells={selection_counts.get('missing_cells')}. "
+                    + (
+                        f"Groups cover different numbers of tasks ({task_counts[0]}-{task_counts[-1]}); "
+                        "means and rankings compare unequal task sets unless complete cases are used."
+                        if unequal
+                        else "See selection_matrix.csv and selection_superseded.csv."
+                    ),
+                },
+            )
         for warning in data.get("validity") or []:
             records.append(
                 {
